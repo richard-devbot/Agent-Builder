@@ -1,0 +1,218 @@
+---
+title: "API Contract Extraction from Legacy"
+slug: "api-contract-extraction"
+description: "Reverse-engineer API contracts from legacy code, traffic logs, or running systems to produce an OpenAPI spec for the new system."
+type: template
+phase: design
+category: api-design
+projectType: ["custom-app"]
+stack: []
+tags: ["migration", "api", "openapi", "reverse-engineering"]
+difficulty: intermediate
+estimatedTime: "1 day"
+author: "Platform Engineering"
+featured: false
+createdAt: 2026-04-26
+updatedAt: 2026-04-26
+inputs:
+  - name: legacy_input
+    description: "What you have access to (controller code, traffic logs, browser network tab, WSDL, Swagger if any)"
+    required: true
+  - name: legacy_framework
+    description: "Source framework (e.g., 'ASP.NET Web Forms with .ashx handlers', 'WCF SOAP', 'WebAPI 2.x')"
+    required: true
+output:
+  format: code
+relatedAssets:
+  - "openapi-spec-generator"
+  - "legacy-system-audit"
+---
+
+# API Contract Extraction from Legacy
+
+When migrating from a legacy app, the "API" might be ill-defined: WebForms with code-behind, .ashx handlers, SOAP services, or a tangle of AJAX endpoints reverse-engineered from JavaScript. This template extracts a clean OpenAPI 3.1 spec from whatever you've got.
+
+## When to use
+
+- Migrating from ASP.NET WebForms / WCF / older WebAPI to modern REST
+- Replacing a legacy SOAP service with REST
+- The new frontend (Angular SPA) needs a documented API contract before backend work starts
+- API documentation doesn't exist or is wildly out of date
+
+## Prompt
+
+````text
+You are a senior API designer who specializes in extracting clean contracts
+from messy legacy systems. Given the legacy artifacts below, produce a
+modern OpenAPI 3.1 specification.
+
+## Input
+
+**Legacy artifacts:**
+{{legacy_input}}
+
+**Legacy framework:** {{legacy_framework}}
+
+## Process
+
+### Step 1: Identify endpoints
+
+Parse the input to identify all API-like endpoints. Look for:
+
+**For ASP.NET WebForms (`.aspx`, `.ashx`):**
+- `.aspx` pages that respond to `__doPostBack` with JSON / XML
+- `.ashx` handlers (HTTP handlers)
+- WebMethods marked with `[WebMethod]` in code-behind
+- `Page_Load` handlers that return data based on Request.QueryString
+
+**For WCF (.svc):**
+- `[ServiceContract]` interfaces
+- `[OperationContract]` methods
+- WSDL-described operations
+- WebHttp endpoints with `[WebGet]` / `[WebInvoke]`
+
+**For ASP.NET Web API:**
+- Controller classes inheriting `ApiController`
+- Action methods with HTTP verb attributes
+- Routing tables in `WebApiConfig.cs`
+
+**For ASP.NET MVC:**
+- Action methods returning `JsonResult` or `Json()`
+- Routes returning data (vs. views)
+
+**For traffic logs / browser network tab:**
+- HTTP method + URL + body + response
+- Headers (auth, content-type)
+- Status codes per scenario
+
+For each endpoint, capture:
+- HTTP method
+- URL pattern (with route parameters)
+- Auth requirement
+- Request body schema (if any)
+- Query parameters
+- Response shape (success and error)
+- Status codes returned
+- Notes on observed quirks
+
+### Step 2: Normalize naming
+
+Legacy URLs are often a mess. Convert to RESTful conventions:
+
+| Legacy URL | RESTful equivalent |
+|------------|---------------------|
+| `/api/customer.ashx?action=get&id=42` | `GET /api/customers/42` |
+| `/api/orders.aspx/SaveOrder` (POST) | `POST /api/orders` |
+| `/services/customers.svc/GetByEmail?email=x` | `GET /api/customers?email=x` |
+| `/api/order/cancel/42` | `POST /api/orders/42/cancel` |
+
+But: don't normalize if the new app must maintain URL parity (e.g., external consumers).
+Document both: legacy URL and proposed new URL.
+
+### Step 3: Infer types
+
+Legacy responses are often loosely typed. From observed responses, infer:
+
+- **String shapes:** length limits, formats (email, URL, phone), enums
+- **Number types:** integer vs decimal, precision, range
+- **Date formats:** "MM/dd/yyyy", ISO 8601, Unix timestamps, "/Date(0000)/" (.NET-style)
+- **Booleans:** `true`/`false`, `1`/`0`, `"Y"`/`"N"`
+- **Nullable fields:** observed nulls vs. observed always-present
+- **Arrays:** when does an array vs single object appear?
+- **Optional vs. required:** observe which fields appear in all responses
+
+Flag inferences clearly:
+- ✅ **Confirmed** (consistent across all observed cases)
+- ⚠️ **Inferred** (from one or two examples)
+- ❓ **Unknown** (need more samples or stakeholder input)
+
+### Step 4: Identify error conventions
+
+Legacy error handling is usually inconsistent. Document:
+
+- **Status codes:** does legacy return 200 with `{ "error": "..." }`, or proper 4xx/5xx?
+- **Error format:** is it `{error: "..."}`, `{ErrorCode, ErrorMessage}`, plain text?
+- **Auth failures:** 401 vs. 403 vs. redirect to login HTML
+- **Validation errors:** field-level or single message?
+- **Server errors:** stack trace exposed? generic 500?
+
+For the new API, recommend a single consistent error format (use the
+OpenAPI Spec Generator's recommended Error schema).
+
+But: if external consumers depend on legacy error format, generate the new
+spec to match — DON'T silently change.
+
+### Step 5: Produce OpenAPI spec
+
+Generate a complete OpenAPI 3.1 YAML spec following the conventions in
+the OpenAPI Spec Generator template. For each endpoint:
+
+- `operationId` in camelCase
+- Tags grouping related endpoints
+- Description noting any legacy quirks ("Legacy returns 200 with error in body; new returns 400")
+- All response codes including ones you observed
+- Examples from real legacy traffic (sanitized of PII)
+
+Include in `info.description`:
+- The migration context
+- What legacy framework this came from
+- Date/version of the legacy system audited
+- Known coverage gaps
+
+### Step 6: Migration notes per endpoint
+
+After the spec, generate a migration notes section for each endpoint:
+
+```markdown
+## Migration notes
+
+### POST /api/orders (was: /api/orders.aspx/SaveOrder)
+
+**Behavior parity requirements:**
+- Order numbering: legacy generates ORD-000001; new must match format
+- Validation: legacy rejects orders with negative totals via 200 + error in body. 
+  New should return 400; document for clients.
+- Side effects: legacy fires SaveOrder trigger that emails accounting; replicate or move to new system.
+
+**Known consumers:**
+- Internal: Accounting service (subscribes to OrderSaved event)
+- External: Mobile app v3.x (must keep working)
+
+**Suggested rollout:**
+- Behind feature flag; route mobile app explicitly via new app gateway
+```
+
+### Step 7: Output structure
+
+Produce these artifacts:
+
+1. **`api/legacy-extracted.openapi.yaml`** — the OpenAPI spec
+2. **`api/migration-notes.md`** — per-endpoint migration notes
+3. **`api/coverage-gaps.md`** — endpoints we couldn't fully reverse-engineer; what's needed to fill gaps
+4. **`api/parity-test-cases.md`** — sample inputs/outputs to use for behavior parity tests
+
+### Quality checklist
+
+- [ ] All observed legacy endpoints documented in OpenAPI
+- [ ] Confidence level marked for each inferred field
+- [ ] Migration notes flag every behavior change
+- [ ] No PII in examples (use sanitized values)
+- [ ] All error responses captured (not just happy paths)
+- [ ] Auth requirements documented per endpoint
+````
+
+## Tips
+
+- **Run real legacy traffic through a proxy** (Fiddler, mitmproxy, browser dev tools) and capture for several days. You'll discover endpoints you didn't know about.
+- **Search legacy code for `.ashx` references** in JavaScript and HTML — these are easy to miss.
+- **For SOAP / WCF, use the WSDL** — it's more reliable than reverse-engineering from code.
+- **Test both happy and error paths** in the legacy system. Error responses are often different from what code suggests.
+- **Pair with the OpenAPI Spec Generator** template — feed this output as input there if you need a polished final spec.
+
+## Common mistakes to avoid
+
+- Documenting the API you wish existed instead of what's there
+- Skipping endpoints that "look weird" — they're usually the ones with hidden consumers
+- Not documenting status codes used (200-with-error-in-body is common in old WebForms)
+- Renaming endpoints without checking external consumers
+- Treating WSDL as gospel (WSDL describes the contract; reality may differ if the service has bugs)

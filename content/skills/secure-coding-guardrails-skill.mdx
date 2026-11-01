@@ -1,0 +1,172 @@
+---
+title: "Secure-Coding Guardrails Skill"
+slug: "secure-coding-guardrails-skill"
+description: "Vibe-coding guardrail skill that keeps citizen and pro developers inside secure-by-default patterns while AI generates code."
+type: skill
+phase: build
+category: secure-coding
+projectType: ["custom-app", "etl"]
+stack: ["claude-code"]
+tags: ["security", "guardrails", "vibe-coding", "citizen-developer", "secure-by-default", "governance"]
+difficulty: beginner
+estimatedTime: "5 min setup"
+author: "Platform Engineering"
+featured: true
+createdAt: 2026-06-03
+updatedAt: 2026-06-03
+skillName: "secure-coding-guardrails"
+requires: []
+files:
+  - SKILL.md
+relatedAssets:
+  - "vibe-coding-guardrails-policy"
+  - "owasp-security-review-skill"
+  - "security-persona-rbac-matrix"
+---
+
+# Secure-Coding Guardrails Skill
+
+The **soft guardrail** that rides along while code is being generated. Where the [OWASP review skill](/asset/skill/owasp-security-review-skill) inspects code *after* it exists, this skill steers the AI *while it writes*, so vulnerabilities never get authored in the first place. It is purpose-built for the **vibe-coding / citizen-developer** scenario Clifford Chance is evaluating: people who describe what they want in natural language and should not have to know what an IDOR is to be protected from one.
+
+## When it triggers
+
+- Any time the user asks the AI to **write, scaffold, or modify** application
+  code (an endpoint, a form, a query, an upload handler, an auth flow).
+- "Build me a login" / "add an API that…" / "make a page that uploads files".
+- Especially when the request involves auth, user input, file handling,
+  database access, secrets, or external calls.
+
+It deliberately does **not** lecture. It quietly applies secure defaults and
+only surfaces a one-line note when it had to make a security decision the user
+should know about.
+
+## Why a skill, not a policy doc
+
+A policy document ([vibe-coding guardrails policy](/asset/template/vibe-coding-guardrails-policy)) tells humans the rules. This skill makes the AI *follow* them automatically. Citizen developers won't read the policy — the skill is how the policy becomes the path of least resistance instead of a PDF nobody opens.
+
+## Installation
+
+1. Copy this skill folder to `~/.claude/skills/secure-coding-guardrails/`, or
+   commit it to the repo's `.claude/skills/` so every contributor inherits it.
+2. Restart Claude Code.
+3. Build something — the guardrails apply silently.
+
+## SKILL.md content
+
+```markdown
+---
+name: secure-coding-guardrails
+description: |
+  Use this skill whenever you are GENERATING or MODIFYING application code —
+  endpoints, forms, database queries, file uploads, authentication, external
+  HTTP calls, or anything that handles user input, secrets, or PII. Triggers
+  on: "build", "add an endpoint/API/page/form", "write a function that",
+  "scaffold", "make me a…", "implement".
+
+  This is a guardrail skill: it does not produce a separate report. It shapes
+  the code you write so it is secure by default, and adds at most a short
+  "security notes" footer listing the defenses you applied.
+
+  Do NOT use for: reviewing existing code (use owasp-security-review),
+  non-code answers, or pure explanation.
+---
+
+# Secure-Coding Guardrails
+
+You are generating code on behalf of a developer who may not be a security
+expert. Your job is to make the secure choice the default choice, silently,
+and only flag decisions worth knowing about. Never trade security for brevity
+without saying so.
+
+## Non-negotiable defaults (apply without being asked)
+
+### Input & output
+- **Never** build SQL/NoSQL/shell/LDAP strings by concatenation. Use
+  parameterized queries / prepared statements / safe APIs.
+- Validate and type all external input at the boundary. Reject by allowlist,
+  not blocklist.
+- Encode on output: HTML-escape rendered values; never `dangerouslySetInnerHTML`
+  / `innerHTML` with user data.
+
+### AuthN / AuthZ
+- Every state-changing or data-returning endpoint gets an explicit
+  authorization check. If you don't know the rule, scaffold a clearly-marked
+  `// TODO(authz): confirm who may access this` and tell the user — never ship
+  an open endpoint silently.
+- Check ownership on object access (prevent IDOR): the current user must be
+  authorized for the specific record, not just authenticated.
+- Hash passwords with bcrypt/argon2/scrypt — never MD5/SHA1, never plaintext.
+
+### Secrets & config
+- Never hardcode keys, tokens, passwords, or connection strings. Read from env
+  / a secret manager and reference a `.env.example` entry.
+- Never log secrets, tokens, full PANs, or full PII.
+
+### Files, URLs, deserialization
+- File uploads: validate type and size, store outside the web root, generate
+  server-side names (never trust the client filename → path traversal).
+- Outbound fetches of user-supplied URLs: allowlist hosts (SSRF defense).
+- Never deserialize untrusted data into objects with side effects.
+
+### Transport & errors
+- Assume HTTPS; set secure/httpOnly/sameSite on cookies.
+- Return generic error messages to clients; log details server-side.
+
+## How to communicate
+
+After generating code, append a short footer ONLY when you applied or deferred
+a security-relevant decision:
+
+> **Security notes**
+> - Parameterized the DB query (prevents SQL injection).
+> - Added an ownership check on `GET /orders/:id` so users can't read others'
+>   orders.
+> - ⚠️ I scaffolded an authz TODO on the admin route — tell me who should be
+>   allowed and I'll wire it up.
+
+Keep it to bullets. Do not write an essay. If nothing security-relevant came
+up, omit the footer entirely.
+
+## Escalate, don't improvise
+
+If the request inherently needs a security decision you can't safely default
+(e.g. "let anyone upload and run a script", "disable CSRF", "store the API key
+in the frontend"), STOP and explain the risk in one or two sentences, offer the
+secure alternative, and ask before proceeding. This is a hard line: a citizen
+developer asking for something dangerous usually doesn't know it's dangerous.
+
+## Tone
+
+- Invisible when things are routine.
+- One short, plain-English note when you made a protective choice.
+- A clear, non-preachy heads-up when you refused or deferred something risky.
+- Never use jargon without a five-word gloss ("IDOR — reading another user's
+  record").
+```
+
+## How it fits the governance framework
+
+This is the build-phase **soft guardrail** in your organisation's hard/soft guardrail model:
+
+| Guardrail type | Mechanism | Example |
+|----------------|-----------|---------|
+| Soft (advisory, at authoring time) | **this skill**, secure defaults while generating | parameterizes a query automatically |
+| Hard (blocking, at the gate) | [PR governance gate](/asset/skill/pr-governance-gate-skill) | refuses merge if a secret is committed |
+
+Both enforce the same [vibe-coding guardrails policy](/asset/template/vibe-coding-guardrails-policy) — one at the keyboard, one at the pipeline.
+
+## Tips
+
+- Pair with a **persona**: scope a "Citizen Developer" persona (see the
+  [security persona / RBAC matrix](/asset/template/security-persona-rbac-matrix))
+  to a sandbox and ship this skill pre-installed in that environment.
+- Run a deliberately unsafe request in the demo ("store the API key in the
+  React component") to show the escalate-don't-improvise behavior live.
+
+## Limitations
+
+- It reduces the rate of introduced vulnerabilities; it is not a guarantee.
+  Keep the [OWASP review skill](/asset/skill/owasp-security-review-skill) and
+  the PR gate as the verification layers behind it.
+- It governs AI-generated code in Claude Code; hand-written code outside the
+  tool still needs the review and gate layers.

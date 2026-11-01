@@ -1,0 +1,616 @@
+---
+title: "COBOL to Java/.NET Translation Checklist"
+slug: "cobol-to-java-translation-checklist"
+description: "Pattern-by-pattern translation guide for COBOL constructs to modern Java or .NET equivalents — including the patterns that don't translate."
+type: template
+phase: build
+category: backend-development
+projectType: ["custom-app"]
+stack: ["cobol", "java", "dotnet"]
+tags: ["migration", "cobol", "java", "dotnet", "translation"]
+difficulty: advanced
+estimatedTime: "reference document"
+author: "Platform Engineering"
+featured: false
+createdAt: 2026-04-26
+updatedAt: 2026-04-26
+inputs:
+  - name: cobol_construct
+    description: "Specific COBOL pattern, statement, or section to translate"
+    required: true
+  - name: target_language
+    description: "Target language (Java 17+ / Java 21 / .NET 8 / Spring Boot)"
+    required: true
+  - name: surrounding_context
+    description: "What else is in this program (helps decide between literal vs idiomatic translation)"
+    required: false
+output:
+  format: code
+relatedAssets:
+  - "cobol-modernization-playbook"
+  - "cobol-business-rule-extraction"
+---
+
+# COBOL to Java/.NET Translation Checklist
+
+A reference for translating COBOL constructs to idiomatic Java or .NET. Used either as a lookup (translating a specific pattern) or as input to AI-assisted rewriting.
+
+This template is **prescriptive about what to translate** and **explicit about what NOT to translate** — some COBOL patterns should be replaced entirely rather than ported.
+
+## When to use
+
+- During the rewrite phase of a COBOL migration
+- When the team has questions about specific construct translations
+- As input for code review of AI-translated COBOL
+- As training material for engineers new to COBOL who need to read it
+
+## Prompt
+
+````text
+You translate COBOL constructs to idiomatic Java or .NET. You explain what
+the COBOL is doing, give the modern equivalent, and flag patterns that
+should be replaced entirely rather than ported.
+
+## Input
+
+**COBOL construct:**
+```cobol
+{{cobol_construct}}
+```
+
+**Target language:** {{target_language}}
+**Context:** {{surrounding_context}}
+
+## Output
+
+For each construct, provide:
+
+### 1. What it does
+1-2 sentences in plain language.
+
+### 2. Modern equivalent
+The idiomatic translation in target language. Don't translate literally —
+translate the intent.
+
+### 3. Notes
+Anything the developer needs to know:
+- Behavior differences
+- Edge cases that work differently
+- Patterns to avoid
+
+### 4. Common gotchas
+What goes wrong in this translation that we've seen before.
+
+## Reference: Common COBOL → Java/.NET translations
+
+Use this reference for the translation. If the input pattern matches one
+below, apply that. If not, derive a translation following the same approach.
+
+### Variable declaration
+
+**COBOL:**
+```cobol
+01  WS-CUSTOMER.
+    05  WS-CUST-ID         PIC X(10).
+    05  WS-CUST-NAME       PIC X(50).
+    05  WS-CUST-AGE        PIC 9(3).
+    05  WS-CUST-BALANCE    PIC S9(7)V99 COMP-3.
+```
+
+**Java:**
+```java
+public record Customer(
+    String custId,        // PIC X(10) → fixed-length string handled at boundary
+    String custName,      // PIC X(50)
+    int custAge,          // PIC 9(3) — small enough for int
+    BigDecimal custBalance // PIC S9(7)V99 → must be BigDecimal for precision
+) {}
+```
+
+**Notes:**
+- Use `BigDecimal` for ALL money/percentage/calculation values; `double` will produce rounding errors that match nothing in COBOL
+- Initialize `BigDecimal` from String, not double: `new BigDecimal("123.45")`
+- For fixed-length strings on input/output (file boundary), keep CHAR semantics; in-memory use String.
+
+**.NET / C#:**
+```csharp
+public record Customer(
+    string CustId,
+    string CustName,
+    int CustAge,
+    decimal CustBalance
+);
+```
+
+**Notes:**
+- C# `decimal` is fine for COBOL packed decimals (128-bit, 28-29 significant digits)
+
+---
+
+### IF-THEN-ELSE
+
+**COBOL:**
+```cobol
+IF CUSTOMER-AGE >= 65
+    MOVE "SENIOR" TO DISCOUNT-TYPE
+ELSE
+    IF CUSTOMER-AGE >= 18
+        MOVE "ADULT" TO DISCOUNT-TYPE
+    ELSE
+        MOVE "MINOR" TO DISCOUNT-TYPE
+    END-IF
+END-IF.
+```
+
+**Java:**
+```java
+String discountType =
+    customerAge >= 65 ? "SENIOR" :
+    customerAge >= 18 ? "ADULT" :
+                        "MINOR";
+```
+
+**Better — use enum:**
+```java
+public enum DiscountType { SENIOR, ADULT, MINOR }
+
+DiscountType discountType =
+    customerAge >= 65 ? DiscountType.SENIOR :
+    customerAge >= 18 ? DiscountType.ADULT :
+                        DiscountType.MINOR;
+```
+
+---
+
+### EVALUATE (case statement)
+
+**COBOL:**
+```cobol
+EVALUATE TRUE
+    WHEN CUSTOMER-TYPE = 'A' AND BALANCE > 1000
+        COMPUTE DISCOUNT = BALANCE * 0.05
+    WHEN CUSTOMER-TYPE = 'A'
+        COMPUTE DISCOUNT = BALANCE * 0.02
+    WHEN CUSTOMER-TYPE = 'B'
+        COMPUTE DISCOUNT = BALANCE * 0.03
+    WHEN OTHER
+        MOVE 0 TO DISCOUNT
+END-EVALUATE.
+```
+
+**Java (modern, with switch expression):**
+```java
+BigDecimal discount = switch (customerType) {
+    case "A" -> balance.compareTo(new BigDecimal("1000")) > 0
+        ? balance.multiply(new BigDecimal("0.05"))
+        : balance.multiply(new BigDecimal("0.02"));
+    case "B" -> balance.multiply(new BigDecimal("0.03"));
+    default -> BigDecimal.ZERO;
+};
+```
+
+**Notes:**
+- Don't use `>` operator on BigDecimal; use `compareTo() > 0`
+- Use named constants for percentages, not inline literals
+
+---
+
+### PERFORM ... UNTIL (loop)
+
+**COBOL:**
+```cobol
+PERFORM PROCESS-CUSTOMER UNTIL END-OF-FILE
+```
+
+with PROCESS-CUSTOMER being a paragraph that reads + processes one customer.
+
+**Java:**
+```java
+while (!endOfFile) {
+    processCustomer();
+}
+```
+
+**Better — extract to stream/iterator:**
+```java
+customerStream
+    .takeWhile(c -> c != null)
+    .forEach(this::processCustomer);
+```
+
+---
+
+### PERFORM ... THRU (paragraph chains)
+
+**COBOL:**
+```cobol
+PERFORM 1000-INIT THRU 1000-EXIT
+PERFORM 2000-PROCESS THRU 2000-EXIT
+PERFORM 3000-CLEANUP THRU 3000-EXIT
+```
+
+**Java — refactor:**
+```java
+public void run() {
+    initialize();
+    process();
+    cleanup();
+}
+```
+
+**Notes:**
+- PERFORM THRU is a code smell; modern equivalent is method calls
+- The "exit paragraph" pattern (1000-EXIT) was a structuring trick; not needed in modern code
+- Be careful: in some COBOL programs, PERFORM THRU jumps based on EXIT
+  paragraph location; if so, this isn't a clean refactor — flag it
+
+---
+
+### MOVE statement
+
+**COBOL:**
+```cobol
+MOVE CUSTOMER-NAME TO PRINT-LINE-NAME
+MOVE 100 TO COUNTER
+MOVE SPACES TO REPORT-FIELD
+MOVE ZEROES TO TOTAL
+MOVE LOW-VALUES TO RECORD-AREA
+```
+
+**Java:**
+```java
+printLineName = customerName;
+counter = 100;
+reportField = "";  // SPACES → empty string typically
+total = 0;
+recordArea = new byte[recordArea.length];  // LOW-VALUES → zero bytes
+```
+
+**Notes:**
+- COBOL MOVE has implicit type conversion; Java needs explicit conversion
+- MOVE with LOW-VALUES (X'00') / HIGH-VALUES (X'FF') usually doesn't have a clean equivalent — these are mainframe sentinels; replace with proper null/Optional in modern code
+- MOVE CORRESPONDING (matching field names) → use a mapper library
+
+---
+
+### COMPUTE (arithmetic)
+
+**COBOL:**
+```cobol
+COMPUTE TOTAL = SUBTOTAL + (SUBTOTAL * TAX-RATE)
+COMPUTE AVG = TOTAL / COUNT
+COMPUTE INTEREST ROUNDED = PRINCIPAL * RATE * TIME
+```
+
+**Java:**
+```java
+BigDecimal total = subtotal.add(subtotal.multiply(taxRate));
+
+BigDecimal avg = total.divide(
+    new BigDecimal(count),
+    2,                       // scale (decimal places)
+    RoundingMode.HALF_UP     // explicit rounding
+);
+
+BigDecimal interest = principal
+    .multiply(rate)
+    .multiply(time)
+    .setScale(2, RoundingMode.HALF_UP);
+```
+
+**Critical notes:**
+- `BigDecimal.divide()` REQUIRES explicit scale and rounding for non-terminating decimals; otherwise throws `ArithmeticException`
+- COBOL ROUNDED clause typically uses half-away-from-zero; Java equivalent is `RoundingMode.HALF_UP` (most common, slight difference)
+- Match COBOL's rounding mode EXACTLY or you'll have penny differences in financial calculations
+
+---
+
+### Decimal precision (the most important COBOL → Java translation issue)
+
+**COBOL:**
+```cobol
+01  AMOUNT     PIC S9(9)V99 COMP-3.   * 11 digits, 2 decimals
+```
+
+**Java — DO:**
+```java
+private BigDecimal amount;  // unbounded decimal
+```
+
+**Java — DO NOT:**
+```java
+private double amount;      // FLOATING POINT WILL PRODUCE WRONG NUMBERS
+private float amount;       // SAME
+```
+
+**Why:**
+- COBOL packed decimal is exact; double/float aren't
+- 0.1 + 0.2 in double = 0.30000000000000004
+- Financial migrations using double produce penny-off errors that DESTROY trust
+
+**Always BigDecimal for:**
+- Money
+- Percentages
+- Tax / interest rates
+- Quantities that can have fractions (weight, distance)
+- Anything COBOL stored as PIC 9(n)V9(d) or COMP-3
+
+---
+
+### File I/O
+
+**COBOL:**
+```cobol
+OPEN INPUT CUSTOMER-FILE
+PERFORM UNTIL END-OF-FILE
+    READ CUSTOMER-FILE
+        AT END SET END-OF-FILE TO TRUE
+        NOT AT END PERFORM PROCESS-RECORD
+    END-READ
+END-PERFORM
+CLOSE CUSTOMER-FILE
+```
+
+**Java (modern, fixed-width record):**
+```java
+try (BufferedReader reader = Files.newBufferedReader(customerFilePath)) {
+    String line;
+    while ((line = reader.readLine()) != null) {
+        Customer customer = parseFixedWidth(line);
+        processRecord(customer);
+    }
+}
+```
+
+**Better — Spring Batch for large volumes:**
+```java
+@Bean
+public FlatFileItemReader<Customer> customerReader() {
+    return new FlatFileItemReaderBuilder<Customer>()
+        .name("customerReader")
+        .resource(new FileSystemResource(customerFilePath))
+        .fixedLength()
+        .columns(
+            new Range(1, 10),    // CUST-ID
+            new Range(11, 60),   // CUST-NAME
+            ...
+        )
+        .names("custId", "custName", ...)
+        .targetType(Customer.class)
+        .build();
+}
+```
+
+---
+
+### Database access (DB2 → modern)
+
+**COBOL with embedded DB2:**
+```cobol
+EXEC SQL
+    SELECT CUST_NAME, BALANCE
+    INTO :WS-CUST-NAME, :WS-BALANCE
+    FROM CUSTOMER
+    WHERE CUST_ID = :WS-CUST-ID
+END-EXEC.
+```
+
+**Java (Spring Data JDBC):**
+```java
+@Repository
+interface CustomerRepository extends CrudRepository<Customer, String> {
+    Optional<Customer> findByCustId(String custId);
+}
+
+// Usage:
+Customer customer = customerRepository.findByCustId(custId)
+    .orElseThrow(() -> new CustomerNotFoundException(custId));
+```
+
+**Notes:**
+- COBOL/DB2 host variables (`:WS-VAR`) translate to method parameters
+- COBOL handled NULL via INDICATOR variables; Java uses Optional or null
+- Cursor processing in DB2 (FETCH loop) → JdbcTemplate.query with RowMapper, or JPA Streamable
+
+---
+
+### Error handling
+
+**COBOL:**
+```cobol
+READ CUSTOMER-FILE
+    AT END
+        MOVE "EOF" TO STATUS-MSG
+        PERFORM END-PROCESSING
+    INVALID KEY
+        MOVE "BAD KEY" TO STATUS-MSG
+        PERFORM ERROR-EXIT
+    NOT AT END
+        ADD 1 TO RECORD-COUNT
+END-READ.
+```
+
+**Java:**
+```java
+try {
+    Customer customer = customerService.read(custId);
+    recordCount++;
+    processCustomer(customer);
+} catch (CustomerNotFoundException e) {
+    log.warn("Customer not found: {}", custId);
+    handleNotFound(custId);
+} catch (IOException e) {
+    log.error("Read error for {}", custId, e);
+    throw new MigrationException("Cannot read customer", e);
+}
+```
+
+**Notes:**
+- COBOL has return codes via FILE STATUS / SQLCODE; Java uses exceptions
+- Don't catch generic Exception; catch specific types
+- Don't swallow exceptions silently (common COBOL anti-pattern: `IF SQLCODE NOT = 0` and continue)
+
+---
+
+### REDEFINES (reusing same memory for different layouts)
+
+**COBOL:**
+```cobol
+01  PAYMENT-RECORD.
+    05  PAYMENT-TYPE       PIC X(1).
+    05  PAYMENT-DETAIL     PIC X(50).
+    05  CHECK-DETAIL REDEFINES PAYMENT-DETAIL.
+        10  CHECK-NUMBER   PIC 9(10).
+        10  ACCOUNT-NUMBER PIC X(20).
+        10  FILLER         PIC X(20).
+    05  CARD-DETAIL REDEFINES PAYMENT-DETAIL.
+        10  CARD-NUMBER    PIC X(16).
+        10  EXPIRY-DATE    PIC X(7).
+        10  CVV            PIC X(3).
+        10  FILLER         PIC X(24).
+```
+
+**Java — modeled as discriminated union:**
+```java
+public sealed interface PaymentDetail
+    permits CheckDetail, CardDetail {}
+
+public record CheckDetail(
+    long checkNumber,
+    String accountNumber
+) implements PaymentDetail {}
+
+public record CardDetail(
+    String cardNumber,
+    String expiryDate,
+    String cvv
+) implements PaymentDetail {}
+
+public record Payment(
+    PaymentType type,    // discriminator
+    PaymentDetail detail
+) {}
+```
+
+**.NET — same pattern:**
+```csharp
+public abstract record PaymentDetail;
+public record CheckDetail(long CheckNumber, string AccountNumber) : PaymentDetail;
+public record CardDetail(string CardNumber, string ExpiryDate, string Cvv) : PaymentDetail;
+```
+
+**Notes:**
+- Don't try to keep the byte-overlap structure; use discriminated union
+- The discriminator field in COBOL becomes the union tag
+- Modern code is type-safe; COBOL REDEFINES is not
+
+---
+
+### OCCURS DEPENDING ON (variable arrays)
+
+**COBOL:**
+```cobol
+01  ORDER-RECORD.
+    05  ORDER-ID           PIC X(10).
+    05  LINE-COUNT         PIC 9(3).
+    05  ORDER-LINES OCCURS 1 TO 100 TIMES DEPENDING ON LINE-COUNT.
+        10  PRODUCT-ID     PIC X(10).
+        10  QUANTITY       PIC 9(5).
+        10  PRICE          PIC S9(7)V99 COMP-3.
+```
+
+**Java:**
+```java
+public record Order(
+    String orderId,
+    List<OrderLine> lines  // variable size, no need for explicit count
+) {}
+
+public record OrderLine(
+    String productId,
+    int quantity,
+    BigDecimal price
+) {}
+```
+
+**Notes:**
+- The LINE-COUNT field becomes implicit (`lines.size()`)
+- Java/Kotlin handle variable collections naturally; no special syntax needed
+- For wire format (file/record I/O), preserve the count field at boundaries
+
+---
+
+### Patterns NOT to translate (replace instead)
+
+Some COBOL patterns should be replaced entirely:
+
+#### `GO TO` statements
+**Rule:** Don't translate. Refactor to method calls or structured control flow.
+
+#### Cursors and FOR loops with file reads inside
+**Rule:** Use streaming/batch frameworks (Spring Batch, BlockingQueue producers/consumers).
+
+#### Embedded SQL with concatenated strings
+**Rule:** Never reproduce. Use parameterized queries, JPA, or query builders.
+
+#### CICS commands (EXEC CICS LINK, etc.)
+**Rule:** Replace with REST API calls, message queue sends, or direct method calls — depending on what the LINK was doing semantically.
+
+#### Status flag checking after every I/O operation
+**Rule:** Replace with try/catch. Don't simulate FILE STATUS in Java.
+
+#### Working-storage as global state
+**Rule:** Don't translate as static fields. Use proper dependency injection and method parameters.
+
+#### COMPUTE with side effects on multiple variables
+**Rule:** Split into individual assignments; modern code doesn't have multi-target arithmetic in idiomatic form.
+
+#### Sequential file processing optimized for tape
+**Rule:** Modern targets aren't I/O-bound the same way. Reconsider the algorithm.
+
+---
+
+### Idiomatic notes per target
+
+**For Java:**
+- Use records for value objects
+- Use sealed types for discriminated unions
+- Use Streams and Optional for null-safe collection processing
+- Use BigDecimal for financial values (always)
+- Use proper exception hierarchies
+- Spring Batch for batch jobs; Spring Data for DB access
+
+**For .NET / C#:**
+- Use records for value objects
+- Use pattern matching (`switch` expressions) for branching
+- Use Nullable reference types (`string?`) for null safety
+- Use `decimal` for financial values
+- Use Entity Framework Core for DB access (or Dapper for simpler scenarios)
+
+## Style
+
+- Always show what the COBOL is doing first
+- Provide both literal and idiomatic Java/.NET when they differ
+- Flag patterns that should be replaced rather than translated
+- Use BigDecimal religiously for COBOL packed decimals
+- Honest about edge cases (rounding, sign handling, EBCDIC)
+````
+
+## Tips
+
+- **Use BigDecimal religiously.** Every financial migration that uses `double` produces wrong numbers. This is the single most important translation rule.
+- **Don't preserve GO TOs.** Refactor to structured control flow or you'll keep COBOL's 1970s control flow forever.
+- **Test rounding behavior at boundaries.** 0.005 rounding differently in COBOL vs Java produces penny errors that show up in audits.
+- **For batch jobs, use Spring Batch.** Don't reimplement what's solved.
+- **Pair with the Business Rule Extraction template.** Translation handles the how; rule extraction handles the what.
+
+## Common mistakes to avoid
+
+- Using `double` for money (will produce wrong sums)
+- Translating COBOL paragraph names as Java method names literally (1000-INIT-PARA → init1000Para is awful; use `initialize()`)
+- Preserving COBOL's status-flag-check pattern in Java (use exceptions)
+- Translating EVALUATE TRUE as if-else chain (use switch expression with proper enums)
+- Keeping COBOL's working-storage as static fields (causes subtle bugs)
+- Not setting explicit RoundingMode on BigDecimal.divide (throws ArithmeticException)
+- Treating COBOL files as a sequence of bytes in Java (use proper readers)
+- Forgetting the implicit decimal point in COBOL packed decimals

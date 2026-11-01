@@ -1,0 +1,300 @@
+---
+title: "Performance Profiler Skill"
+slug: "performance-profiler-skill"
+description: "Claude Code skill that diagnoses performance issues — slow queries, slow renders, memory leaks — with measurement-first methodology."
+type: skill
+phase: test
+category: performance
+projectType: ["custom-app"]
+stack: ["claude-code"]
+tags: ["performance", "optimization", "profiling"]
+difficulty: advanced
+estimatedTime: "5 min setup"
+author: "Platform Engineering"
+featured: false
+createdAt: 2026-04-26
+updatedAt: 2026-04-26
+skillName: "performance-profiler"
+requires: []
+files:
+  - SKILL.md
+relatedAssets:
+  - "code-reviewer-skill"
+  - "postgres-schema-designer"
+---
+
+# Performance Profiler Skill
+
+Activates when a developer says something is slow. Resists the urge to suggest random optimizations — instead, walks through measurement, hypothesis, fix, verify. The methodology Donald Knuth meant when he said "premature optimization is the root of all evil."
+
+## When it triggers
+
+- "This is slow"
+- "Page load is taking forever"
+- "Why is this query so slow?"
+- "Profile this function"
+- "Memory usage keeps growing"
+- "Performance regression after [change]"
+- "How can I speed up X?"
+
+## Why a skill
+
+Most performance advice is wrong for the specific problem. "Add an index!" "Memoize it!" "Use a CDN!" — without measurement, these are guesses. This skill enforces measurement-first methodology and matches the right diagnostic tool to the right symptom.
+
+## Installation
+
+1. Copy this skill folder to `~/.claude/skills/performance-profiler/`
+2. Restart Claude Code
+3. Try: paste a slow query and say "this is slow"
+
+## SKILL.md content
+
+```markdown
+---
+name: performance-profiler
+description: |
+  Use this skill when the user reports something is slow, hangs, uses too
+  much memory, or has degraded performance. Triggers on: "this is slow",
+  "page is laggy", "query takes forever", "memory leak", "profile this",
+  "performance regression", "how do I speed up X", "optimize this".
+
+  Enforces measurement-first: don't suggest fixes until we know what's slow.
+
+  Do NOT use for: writing fast code from scratch (code-quality concern), or
+  general "is this efficient" questions about code that runs fine.
+---
+
+# Performance Profiler
+
+Performance fixes without measurement are guesses. You measure first, hypothesize, fix, verify. You refuse to suggest optimizations without data.
+
+## The framework: Measure, Hypothesize, Fix, Verify
+
+### Step 1: Measure (always first)
+
+When the user says something is slow, before suggesting anything, ask:
+- **What's slow?** Be specific — page X, endpoint Y, function Z, query Q
+- **How slow?** Specific number — "3 seconds" not "feels slow"
+- **Compared to what?** Baseline (production, last week, similar feature)
+- **Reproducibility?** Always slow, or only sometimes?
+- **At what scale?** 10 rows or 10M? Single user or 1000 concurrent?
+
+If they don't have measurements, give them the right tool to measure:
+
+| Symptom | Measurement tool |
+|---------|------------------|
+| Frontend perception (slow page) | Chrome DevTools Performance tab + Lighthouse |
+| API endpoint latency | Browser Network tab, curl + `time`, server logs |
+| Database query | EXPLAIN ANALYZE (Postgres), EXPLAIN (MySQL), `.explain('executionStats')` (MongoDB) |
+| Backend function | Profilers: Node `--prof`, Python `cProfile`, Java JFR |
+| Memory leak | Chrome DevTools Memory tab, heap snapshots |
+| React rerenders | React DevTools Profiler |
+| Bundle size | `next build` output, webpack-bundle-analyzer |
+| Network waterfall | Browser Network tab, `curl -w` for breakdown |
+
+DON'T suggest a fix before measurement exists.
+
+### Step 2: Hypothesize from data
+
+Once measurement data is available, look for the actual bottleneck:
+
+#### Read the data carefully
+
+For a slow query, EXPLAIN ANALYZE shows:
+- Sequential scans on big tables (missing index? wrong index?)
+- Nested loops with high row counts (bad join order?)
+- Sort operations exceeding work_mem
+- High planning time (parameter sniffing? prepared statements issue?)
+
+For a slow API call:
+- Time to first byte (server-side processing) vs body transfer (network)
+- Total time vs sum of subcalls (concurrent vs sequential opportunity)
+
+For slow page load:
+- LCP (largest contentful paint) — blocked by render-blocking resources?
+- TTI (time to interactive) — main thread blocked by JS?
+- CLS (cumulative layout shift) — fonts/images shifting layout?
+
+For memory growth:
+- Detached DOM nodes (event listeners holding refs)
+- Closures retaining unexpected scope
+- Unbounded caches / arrays / maps
+
+#### Distinguish symptoms from causes
+
+A slow page may have many symptoms:
+- High LCP — probably a slow API or large image
+- High TTI — too much JS to parse/execute
+- High CLS — layout shifts from missing dimensions
+
+Pick ONE bottleneck — the biggest contributor — and fix it before moving on.
+
+### Step 3: Fix (the right thing)
+
+Match the fix to the diagnosed cause. Common patterns:
+
+#### Database
+
+| Symptom | Fix |
+|---------|-----|
+| Sequential scan on large table | Add index on filter column(s) |
+| Index exists but not used | Check stats: `ANALYZE table`. Rewrite query. |
+| Multiple queries that could be one | JOIN or batched query |
+| N+1 queries | Eager loading (`include` / `with` / `JOIN`) |
+| Slow aggregation | Materialized view or summary table |
+| Slow ORDER BY | Index supporting the sort |
+
+#### API endpoint
+
+| Symptom | Fix |
+|---------|-----|
+| Long server-side processing | Profile to find the hot function |
+| Multiple sequential API calls | `Promise.all`, batched endpoint |
+| Large response body | Pagination, field selection, compression |
+| Slow third-party API | Cache responses, parallel calls, timeout + fallback |
+| Cold start | Keep-warm pings, smaller bundle, faster runtime |
+
+#### Frontend
+
+| Symptom | Fix |
+|---------|-----|
+| Large bundle | Code split, tree shake, dynamic imports |
+| Slow render | React.memo, useMemo for expensive computations |
+| Janky scroll | Virtualization (react-window), throttle scroll handlers |
+| Layout shift | Set explicit width/height on images, use font-display |
+| Re-render storm | Profile with React DevTools, find the cause |
+
+#### Memory
+
+| Symptom | Fix |
+|---------|-----|
+| Detached DOM | Remove event listeners on unmount |
+| Closure retention | Restructure to release references |
+| Unbounded cache | LRU with max size, TTL eviction |
+| Heap growing | Heap snapshots at intervals, find the growing type |
+
+### Step 4: Verify
+
+After applying the fix, RE-MEASURE. Don't trust intuition that it's faster.
+
+Same tool, same workload, same conditions. The number must move:
+- Query: from 800ms to 12ms (with EXPLAIN ANALYZE confirming index use)
+- Page load: LCP from 4.2s to 1.1s
+- Memory: heap stable at 50MB instead of growing 5MB/min
+
+If it didn't help, the hypothesis was wrong. Go back to step 2.
+
+If it helped a little but not enough, repeat the process for the next
+biggest bottleneck.
+
+## Common anti-patterns to call out
+
+### "Just add an index"
+
+Indexes have costs (write performance, storage, lock during creation).
+Adding the wrong index doesn't help and adds debt. Only add the index that
+EXPLAIN ANALYZE shows would be used.
+
+### "Use a faster framework"
+
+The framework is rarely the bottleneck. Profile to find the real cost.
+
+### "Add caching"
+
+Caching adds correctness risk (stale data, invalidation bugs). Use it only
+when:
+- The underlying operation is genuinely expensive
+- The data tolerates being slightly stale
+- Cache hit rate will be high enough to matter
+- Invalidation strategy is clear
+
+### "Make it async"
+
+Async doesn't make slow things fast — it just unblocks the caller. If the
+slow thing must complete before the user sees a result, async doesn't help
+the user.
+
+### "Optimize the hot loop"
+
+Often the hot loop is fine; the work it's calling INTO is slow. Profile
+inside the loop.
+
+### "Rewrite in [faster language]"
+
+Almost always premature. If Python/JS/Ruby is too slow, the bottleneck is
+usually I/O (which the language doesn't fix) or algorithmic (which a faster
+language won't fix).
+
+## Special domains
+
+### React performance
+
+Common real causes (in order of frequency):
+1. Re-renders triggered by parent (use React DevTools Profiler)
+2. Unmemoized callbacks/objects passed to memoized children
+3. Expensive computations in render (move to useMemo)
+4. Too many DOM nodes (virtualize)
+5. Synchronous state updates triggering layout thrash
+
+Don't suggest `React.memo` on every component. It can make things SLOWER if
+props change frequently.
+
+### Backend Node.js
+
+Common real causes:
+1. Event loop blocked by sync work (especially crypto, JSON.parse on huge payloads)
+2. Database round-trips (N+1, sequential when parallel was possible)
+3. Memory pressure causing GC pauses
+4. Unbounded data in memory (entire result set loaded vs streamed)
+
+Use `clinic.js` or Node's built-in `--prof`.
+
+### Postgres
+
+Don't reach for `pg_stat_statements` if you can EXPLAIN ANALYZE the specific
+slow query. EXPLAIN tells you the plan; ANALYZE tells you reality.
+
+Common patterns:
+- "Seq Scan on big_table (rows=1000000)" → index needed
+- "Hash Join" with high row count → fine usually, the right algorithm
+- "Sort: external merge" → exceeded work_mem; either bigger work_mem or
+  index supporting the sort
+- High planning time → consider preparing the query, or generic plans
+
+### MongoDB
+
+`.explain('executionStats')` shows:
+- `totalDocsExamined` vs `nReturned` — high ratio = bad index match
+- `executionTimeMillis` — actual time
+- Stage breakdown — IXSCAN good, COLLSCAN bad
+
+## What you don't do
+
+- **Don't suggest fixes before measurements.** It's malpractice.
+- **Don't run `EXPLAIN ANALYZE` on production unmonitored.** It actually
+  executes the query.
+- **Don't suggest premature parallelization.** A sequential 50ms call ≠
+  worth parallelizing.
+- **Don't claim a fix without re-measuring.** The user trusts you to know
+  if it actually worked.
+```
+
+## Pairing with other skills
+
+- **Code Reviewer** flags potential perf issues in PR review; this skill diagnoses them rigorously when reported in production
+- **Database Migration** can add indexes safely once this skill identifies the right one
+- **Test Generator** can add performance regression tests after a fix lands
+
+## Tips
+
+- Set up performance budgets in CI so regressions are caught early
+- Real User Monitoring (RUM) catches what synthetic tests miss
+- Keep a "known slow" list — perf issues you've decided not to fix yet, with reasoning
+- Re-measure quarterly even when nothing changed; indices fragment, data grows, regressions creep in
+
+## Limitations
+
+- This skill diagnoses; it doesn't deploy production profilers automatically
+- For distributed systems, you'll need APM tools (Datadog, New Relic) — the skill works with their output but doesn't replace them
+- Memory leak diagnosis is iterative and may require multiple sessions of heap snapshot analysis
+- Some perf issues only appear at scale (e.g., lock contention) and won't reproduce locally

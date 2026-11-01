@@ -1,0 +1,249 @@
+---
+title: "Vitest Unit Test Generator"
+slug: "vitest-unit-test-generator"
+description: "Generate comprehensive Vitest unit tests for functions, classes, hooks, or React components with proper mocking and coverage."
+type: template
+phase: test
+category: unit-testing
+projectType: ["custom-app"]
+stack: ["typescript", "react"]
+tags: ["unit-testing", "vitest", "coverage"]
+difficulty: beginner
+estimatedTime: "15 min"
+author: "Platform Engineering"
+featured: true
+createdAt: 2026-04-26
+updatedAt: 2026-04-26
+inputs:
+  - name: code_to_test
+    description: "The function, class, hook, or component to generate tests for"
+    required: true
+  - name: dependencies_to_mock
+    description: "External dependencies that should be mocked (APIs, DB, etc.)"
+    required: false
+output:
+  format: code
+relatedAssets:
+  - "playwright-e2e-generator"
+  - "code-review-comprehensive"
+---
+
+# Vitest Unit Test Generator
+
+Generate thorough unit tests with Vitest covering happy paths, error paths, edge cases, and boundary conditions. Tests are focused, fast, and reveal what the code is supposed to do — not just confirm what it currently does.
+
+## When to use
+
+- Adding tests to existing code (TDD-after)
+- Setting test coverage standards on a new project
+- Need fast, isolated tests for pure logic (vs. slower integration tests)
+- Refactoring code and want safety net first
+
+## Prompt
+
+````text
+You are a senior engineer who writes meticulous unit tests. Generate
+comprehensive Vitest tests for the code below.
+
+## Input
+
+**Code to test:**
+```
+{{code_to_test}}
+```
+
+**Dependencies to mock:** {{dependencies_to_mock}}
+
+## Test categories to cover
+
+For each function/method/component, include tests for:
+
+### 1. Happy path
+- Standard inputs produce expected outputs
+- Multiple representative inputs (not just one)
+
+### 2. Edge cases
+- Empty inputs (empty string, empty array, null, undefined)
+- Boundary values (0, -1, max int, min int)
+- Special characters in strings (unicode, emoji, quotes, newlines)
+- Very large inputs (performance/memory edge)
+- Single-element vs multi-element collections
+
+### 3. Error paths
+- Invalid input types
+- Missing required fields
+- Constraint violations
+- Async failures (rejected promises, network errors, timeouts)
+
+### 4. State transitions (for stateful code)
+- Initial state
+- After each method call
+- Idempotency (calling twice produces same result)
+
+### 5. Side effects
+- Functions called on dependencies (use `vi.fn()` and `expect(fn).toHaveBeenCalledWith(...)`)
+- DOM mutations
+- Storage writes
+- Event emissions
+
+### 6. Async behavior
+- Awaited values are correct
+- Errors propagate
+- Concurrent calls don't interfere
+- Loading states reach all expected values
+
+## Test structure
+
+Use AAA pattern (Arrange, Act, Assert) clearly:
+
+```typescript
+test('does the thing', () => {
+  // Arrange
+  const input = ...;
+  const mock = vi.fn();
+
+  // Act
+  const result = subject.doThing(input, mock);
+
+  // Assert
+  expect(result).toBe(...);
+  expect(mock).toHaveBeenCalledWith(...);
+});
+```
+
+## Mocking patterns
+
+### Function mocks
+```typescript
+const mockFn = vi.fn().mockResolvedValue({ data: 'test' });
+```
+
+### Module mocks
+```typescript
+vi.mock('@/lib/api', () => ({
+  fetchUser: vi.fn().mockResolvedValue({ id: '1', name: 'Test' })
+}));
+```
+
+### Time/Date mocks
+```typescript
+beforeAll(() => {
+  vi.useFakeTimers();
+  vi.setSystemTime(new Date('2024-01-01'));
+});
+afterAll(() => vi.useRealTimers());
+```
+
+### React component testing
+```typescript
+import { render, screen } from '@testing-library/react';
+import { userEvent } from '@testing-library/user-event';
+```
+
+### Hook testing
+```typescript
+import { renderHook, act } from '@testing-library/react';
+```
+
+## Standards
+
+- Test names describe behavior: "returns null when user not found" not "test1"
+- Use `describe` blocks to group tests by method or scenario
+- One assertion per concept (multiple `expect()` per test is fine if testing one behavior)
+- No conditional logic inside tests — if/else inside a test means it should be two tests
+- Mock at the boundary, test the unit
+- No real network, no real DB, no real filesystem (use mocks)
+- Snapshot tests sparingly — they can become noise
+- Use `test.each()` for parameterized tests across many inputs
+
+## Coverage targets
+
+- Aim for 80%+ branch coverage on business logic
+- 100% coverage on critical paths (auth, payments, data integrity)
+- Don't chase 100% blindly — getter/setter and trivial code aren't worth it
+- Coverage on tests doesn't matter; behavior coverage does
+
+## Output
+
+For each test file:
+1. Full file path (e.g., `src/lib/calculator.test.ts`)
+2. Complete code in fenced code block
+
+After the file(s):
+- **"## What's covered"** — bullet list of behaviors tested
+- **"## What's NOT covered"** — bullet list of behaviors that need integration/E2E tests
+- **"## Coverage estimate"** — rough percentage and confidence level
+- **"## Setup needed"** — vitest config additions if any
+
+## Test naming convention
+
+Use one of these formats:
+- "should [expected behavior] when [condition]"
+- "[verb] [object] [condition]" e.g., "returns null when user not found"
+- "given [state], when [action], then [outcome]"
+
+Pick ONE format and use it consistently across the file.
+````
+
+## Example output snippet
+
+```typescript
+// src/lib/discount.test.ts
+import { describe, test, expect, vi, beforeEach } from 'vitest';
+import { calculateDiscount } from './discount';
+
+describe('calculateDiscount', () => {
+  describe('happy path', () => {
+    test('applies 10% discount for orders over $100', () => {
+      const result = calculateDiscount({ subtotal: 150, customerTier: 'standard' });
+      expect(result.discount).toBe(15);
+      expect(result.total).toBe(135);
+    });
+
+    test.each([
+      { subtotal: 100, expected: 0 },
+      { subtotal: 100.01, expected: 10.001 },
+      { subtotal: 1000, expected: 100 },
+    ])('with subtotal $subtotal, discount is $expected', ({ subtotal, expected }) => {
+      const result = calculateDiscount({ subtotal, customerTier: 'standard' });
+      expect(result.discount).toBeCloseTo(expected, 2);
+    });
+  });
+
+  describe('edge cases', () => {
+    test('returns 0 discount for $0 order', () => {
+      const result = calculateDiscount({ subtotal: 0, customerTier: 'standard' });
+      expect(result.discount).toBe(0);
+    });
+
+    test('throws on negative subtotal', () => {
+      expect(() => calculateDiscount({ subtotal: -1, customerTier: 'standard' }))
+        .toThrow('Subtotal cannot be negative');
+    });
+  });
+
+  describe('customer tier handling', () => {
+    test('VIP tier gets additional 5% on top', () => {
+      const result = calculateDiscount({ subtotal: 200, customerTier: 'vip' });
+      expect(result.discount).toBe(30); // 10% + 5%
+    });
+  });
+});
+```
+
+## Tips
+
+- Write the test name FIRST. If you can't name what behavior you're testing, the test isn't focused enough.
+- Mock only what's necessary. Over-mocking makes tests pass but doesn't catch real bugs.
+- Use `test.skip()` or `test.todo()` to track tests you mean to write
+- Run tests in watch mode (`pnpm vitest`) while developing — feedback is instant
+- Pair with **E2E test generator** for full coverage strategy: unit for logic, E2E for flows
+
+## Common mistakes to avoid
+
+- Testing implementation details instead of behavior (test the API, not the internals)
+- Brittle mocks that break on refactor
+- One huge test that covers 5 things ("the test of everything")
+- Skipping error paths because they're "obvious"
+- Asserting on internal state instead of observable behavior
+- Snapshot-only tests that nobody reads when they fail

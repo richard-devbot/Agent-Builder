@@ -1,0 +1,368 @@
+---
+title: "ASP.NET to Angular + .NET Web Modernization Playbook"
+slug: "aspnet-to-angular-dotnet-modernization-playbook"
+description: "Modernize a legacy ASP.NET WebForms or MVC web app to an Angular SPA + modern .NET, using the strangler fig pattern for incremental migration."
+type: playbook
+phase: build
+category: architecture
+projectType: ["custom-app"]
+stack: ["dotnet", "angular", "typescript"]
+tags: ["migration", "modernization", "aspnet", "angular", "strangler-fig"]
+difficulty: advanced
+estimatedTime: "2-4 quarters"
+totalEstimatedTime: "2-4 quarters for a non-trivial app"
+author: "Platform Engineering"
+featured: true
+createdAt: 2026-04-26
+updatedAt: 2026-04-27
+intakeFields:
+  - name: legacy_app_description
+    label: "Legacy app description"
+    type: textarea
+    required: true
+    placeholder: "Customer portal built on ASP.NET WebForms 4.5 + SQL Server, ~50 pages, 15 user roles"
+  - name: legacy_scale
+    label: "Scale (users, traffic, data)"
+    type: text
+    required: true
+    placeholder: "5000 daily users, 50K req/day peak, 200GB DB"
+  - name: complexity_hotspots
+    label: "Known complexity hotspots"
+    type: textarea
+    required: false
+    placeholder: "Order processing in stored procs, custom auth, Salesforce integration"
+  - name: target_angular_version
+    label: "Target Angular version"
+    type: text
+    required: true
+    placeholder: "Angular 17"
+  - name: target_dotnet_version
+    label: "Target .NET version"
+    type: text
+    required: true
+    placeholder: ".NET 8"
+  - name: hosting
+    label: "Target hosting"
+    type: text
+    required: true
+    placeholder: "Azure App Service"
+  - name: timeline
+    label: "Timeline pressure"
+    type: text
+    required: false
+    placeholder: "Hardware EOL Q3 2025, must complete by then"
+steps:
+  - number: 1
+    title: "Audit the Legacy App"
+    description: "Reverse-engineer the existing app — tech stack, business logic locations, integrations, and risks — before deciding how to migrate."
+    whatYoureDoing: "Generate a comprehensive audit document covering tech stack, architecture, business logic locations, integration points, auth model, and known issues. The audit is the foundation for every later decision."
+    primaryAsset: "legacy-system-audit"
+    alternativeAssets:
+      - slug: "cobol-functional-spec"
+        when: "You're auditing COBOL or mainframe code rather than ASP.NET"
+    relevantSkills:
+      - "legacy-code-analyzer-skill"
+      - "migration-planner-skill"
+    relevantMcpConfigs:
+      - "filesystem-mcp"
+      - "postgres-mcp"
+      - "confluence-mcp"
+    estimatedTime: "2-3 weeks"
+    definitionOfDone:
+      - "Audit document at /docs/migration/audit.md"
+      - "Tech stack inventory complete (all components, versions, EOL status)"
+      - "Business logic locations mapped (stored procs, code-behind, triggers — all explicit)"
+      - "Integration map documented (every external system, internal system, scheduled job)"
+      - "Auth model documented end-to-end"
+      - "Top 10 risks identified"
+      - "Strategic recommendation made (strangler fig vs big-bang vs lift-shift)"
+    commonPitfalls:
+      - "Auditing only the code — you miss the stored procedures, triggers, SQL Agent jobs, BizTalk orchestrations"
+      - "Trusting docs — they're stale. Code is truth."
+      - "Skipping operator interviews — the team that runs the app at 3am knows things developers don't"
+      - "Underestimating integration coupling — every API call has hidden dependencies until you migrate"
+
+  - number: 2
+    title: "Define the Target Architecture"
+    description: "Decide what you're building toward — Angular structure, .NET API structure, data layer, hosting, observability — and document it as ADRs."
+    whatYoureDoing: "Document the target architecture in detail and capture every key decision as an ADR so future contributors know why the choices were made."
+    primaryAsset: "coexistence-architecture-adr"
+    alternativeAssets:
+      - slug: "adr-generator"
+        when: "You want to write individual decision records one at a time rather than a single coexistence document"
+    relevantSkills:
+      - "migration-planner-skill"
+    relevantMcpConfigs:
+      - "filesystem-mcp"
+    estimatedTime: "1-2 weeks"
+    definitionOfDone:
+      - "Target architecture diagram in /docs/architecture/"
+      - "Frontend architecture decided (Angular version, state management, design system)"
+      - "Backend architecture decided (.NET version, ORM, API style)"
+      - "Data layer decided (SQL Server stays / migrates to Postgres / per-service)"
+      - "Auth approach decided (IdP-fronted; if rolling own, document rationale)"
+      - "Hosting decided (App Service / AKS / etc.)"
+      - "Observability strategy chosen (App Insights / Datadog / etc.)"
+      - "5-10 ADRs covering key decisions, all dated and marked accepted"
+    commonPitfalls:
+      - "Microservices fever — splitting too fine when a modular monolith would work; modularize first, microservice later"
+      - "Custom auth — don't roll your own. Use Azure AD / Auth0 / IdentityServer"
+      - "Skipping ADRs — future engineers won't know why decisions were made and will relitigate them"
+
+  - number: 3
+    title: "Plan the Strangler Fig Sequence"
+    description: "Slice the migration into independently shippable chunks and decide the order. Slice 1 should be foundational, not the most valuable feature."
+    whatYoureDoing: "Identify each migration slice as a complete user-facing capability (not a layer), define its rollback path, and sequence them so slice 1 builds the coexistence infrastructure rather than chasing user value first."
+    primaryAsset: "strangler-fig-migration-plan"
+    alternativeAssets:
+      - slug: "migration-risk-register"
+        when: "You want a separate risk-tracking artifact alongside the slice plan"
+    relevantSkills:
+      - "migration-planner-skill"
+    relevantMcpConfigs:
+      - "filesystem-mcp"
+    estimatedTime: "1 week"
+    definitionOfDone:
+      - "Slice list at /docs/migration/slices.md"
+      - "Each slice is independently shippable and independently rollback-able"
+      - "Sequence has rationale (why slice 1 is first)"
+      - "Slice 1 has a detailed plan"
+      - "Decommissioning criteria documented per slice"
+      - "Risk register created and reviewed by the team"
+    commonPitfalls:
+      - "Slicing by layer — \"migrate the database\" is wrong. Migrate by capability (sign-in, orders, etc.) end-to-end"
+      - "Starting with the most valuable feature — slice 1 should be foundational, not impressive"
+      - "Slices too big — if it's more than 4 weeks of work, split it"
+      - "Slices too small — if it's less than 1 week, fold it into another slice"
+
+  - number: 4
+    title: "Lock Down Current Behavior"
+    description: "Capture the legacy system's behavior as a parity test suite before changing anything. The new system has to match the legacy — including its quirks."
+    whatYoureDoing: "Build a behavior parity test framework, run it against the legacy system in record mode to capture golden responses, then commit the goldens. The new system must match these as it ships."
+    primaryAsset: "behavior-parity-test-suite"
+    alternativeAssets:
+      - slug: "playwright-e2e-generator"
+        when: "Slice 1 is UI-driven and you want browser-level parity tests rather than API-level"
+    relevantSkills:
+      - "test-generator-skill"
+    relevantMcpConfigs:
+      - "filesystem-mcp"
+    estimatedTime: "2 weeks"
+    definitionOfDone:
+      - "Parity test framework at /tests/parity/ with record + verify modes"
+      - "30-50 test cases covering slice 1 capabilities"
+      - "Golden responses captured from legacy and committed to git"
+      - "Tests run in CI on every PR"
+      - "Quirks (legacy bugs users depend on) explicitly documented as expected behavior"
+    commonPitfalls:
+      - "Skipping parity tests — \"it's a rewrite, we'll fix bugs along the way\". Users will notice every change"
+      - "Pixel-perfect screenshot diffs — too brittle. Prefer behavioral assertions"
+      - "Treating quirks as bugs to fix during migration — fix them AFTER, with explicit user comms"
+      - "Not committing golden files to git — they're the migration contract"
+
+  - number: 5
+    title: "Build the Coexistence Layer"
+    description: "Stand up the routing, auth, and observability infrastructure that lets old and new run side-by-side. Every later slice depends on this."
+    whatYoureDoing: "Set up the routing layer (App Gateway / Front Door / etc.), an authentication shim so users signed into legacy stay signed into new, shared session handling, and centralized observability across both systems."
+    primaryAsset: "coexistence-architecture-adr"
+    alternativeAssets:
+      - slug: "auth-migration-strategy"
+        when: "The auth shim is the hardest part of coexistence in your case"
+      - slug: "feature-flag-rollout-migration"
+        when: "You want to use feature flags for the routing decisions, not gateway rules"
+    relevantSkills:
+      - "compatibility-layer-generator-skill"
+      - "migration-planner-skill"
+    relevantMcpConfigs:
+      - "azure-devops-mcp"
+      - "filesystem-mcp"
+    estimatedTime: "2-3 weeks"
+    definitionOfDone:
+      - "Routing layer deployed (Azure App Gateway / Front Door / NGINX / etc.)"
+      - "Feature flag system in place (routes can flip at runtime)"
+      - "Auth shim works: a user signed into legacy can call new APIs"
+      - "Session continuity works: bouncing between old and new doesn't drop session"
+      - "Centralized observability: logs / traces / metrics from both systems land in one place"
+      - "\"Hello world\" slice deployed through the new system to prove the pipes work"
+    commonPitfalls:
+      - "Skipping the hello-world slice — proves the infrastructure works before you bet a real feature on it"
+      - "Auth shim too simple — must handle session refresh, MFA, logout across both systems"
+      - "No observability — debugging coexistence issues without distributed tracing is painful"
+      - "Routing layer at the wrong level — DNS-based routing seems simple but breaks session affinity"
+
+  - number: 6
+    title: "Migrate Vertical Slice 1"
+    description: "Ship one complete user-facing capability through the new stack, end-to-end, behind a feature flag. The first slice is your proof point."
+    whatYoureDoing: "Take the first slice (typically sign-in or a simple read-only screen) and build the entire vertical: Angular component → .NET API endpoint → DB query (or call to legacy via the coexistence layer). Ship behind a feature flag and canary it to production."
+    primaryAsset: "feature-flag-rollout-migration"
+    alternativeAssets:
+      - slug: "auth-setup-oauth-jwt"
+        when: "Slice 1 is the auth flow itself"
+      - slug: "openapi-spec-generator"
+        when: "You want to lock the API contract before implementation"
+      - slug: "react-form-builder"
+        when: "Slice 1 is a form-heavy screen — adapt the React patterns to Angular reactive forms"
+      - slug: "sql-server-schema-translator"
+        when: "Slice 1 needs data movement from SQL Server to a different engine"
+    relevantSkills:
+      - "spec-driven-builder"
+      - "compatibility-layer-generator-skill"
+      - "test-generator-skill"
+    relevantMcpConfigs:
+      - "azure-devops-mcp"
+      - "github-mcp"
+      - "filesystem-mcp"
+      - "postgres-mcp"
+    estimatedTime: "4-6 weeks"
+    definitionOfDone:
+      - "Slice 1 implemented end-to-end (Angular + .NET + DB)"
+      - "Parity tests pass: new behavior matches legacy"
+      - "Unit and integration tests cover the new code"
+      - "Feature flag wires up routing"
+      - "Internal team validates on staging for 1 week"
+      - "Canary rollout: 1% → 5% → 25% → 50% → 100% with stop conditions"
+      - "Monitoring shows no error-rate increase, latency within 50% of legacy"
+      - "Rollback procedure tested in staging"
+    commonPitfalls:
+      - "Big-bang deploy — defeats the strangler fig purpose. Always canary"
+      - "No stop conditions — the team keeps ramping the % even when errors increase"
+      - "No rollback drill — the first time you flip the flag back is the worst time to discover it doesn't work"
+      - "Hidden coupling to legacy — slice 1 ends up needing 10 legacy adapters; reconsider scope"
+
+  - number: 7
+    title: "Migrate Slice 2 (Apply Lessons from Slice 1)"
+    description: "Take the next slice. Most infrastructure is built. The team knows the patterns. Slice 2 should ship faster than slice 1."
+    whatYoureDoing: "Run the same slice playbook as Phase 6 with the team's hard-won learnings baked in. Hold a retrospective between slices to capture what to keep and what to fix."
+    primaryAsset: "feature-flag-rollout-migration"
+    alternativeAssets:
+      - slug: "behavior-parity-test-suite"
+        when: "Slice 2 covers different capabilities and needs its own parity tests recorded"
+    relevantSkills:
+      - "spec-driven-builder"
+      - "test-generator-skill"
+      - "code-reviewer-skill"
+    relevantMcpConfigs:
+      - "azure-devops-mcp"
+      - "github-mcp"
+      - "filesystem-mcp"
+    estimatedTime: "3-5 weeks (faster than slice 1)"
+    definitionOfDone:
+      - "Slice 2 ships through the same flow as slice 1, ramped to 100%"
+      - "Slice 1 retrospective items addressed for slice 2"
+      - "Playbook templates updated if patterns emerged"
+      - "Rollback procedure re-tested in staging"
+    commonPitfalls:
+      - "Ignoring slice 1 lessons — every slice is a learning opportunity"
+      - "Skipping the retrospective — between slices, retro to capture lessons"
+      - "Scope creep — \"while we're rewriting it, let's also...\" (no)"
+
+  - number: 8
+    title: "Continue Migrating Remaining Slices"
+    description: "Repeat the slice migration pattern for everything else. By the end of this phase, all user-facing capabilities should run on the new system."
+    whatYoureDoing: "Migrate every remaining slice using the established pattern. Each one gets faster. Document edge cases (the report run quarterly, the integration with the partner system nobody mentioned). Address them, keep going."
+    primaryAsset: "feature-flag-rollout-migration"
+    alternativeAssets:
+      - slug: "stored-procedure-to-service"
+        when: "A slice involves moving SQL business logic to .NET application code"
+      - slug: "data-migration-plan"
+        when: "A slice requires per-feature data movement"
+      - slug: "auth-migration-strategy"
+        when: "Completing the auth migration started in Phase 5"
+    relevantSkills:
+      - "spec-driven-builder"
+      - "migration-planner-skill"
+      - "test-generator-skill"
+      - "code-reviewer-skill"
+    relevantMcpConfigs:
+      - "azure-devops-mcp"
+      - "github-mcp"
+      - "filesystem-mcp"
+      - "postgres-mcp"
+    estimatedTime: "1-3 quarters depending on app size"
+    definitionOfDone:
+      - "All user-facing slices migrated"
+      - "All slices ramped to 100% on the new system"
+      - "Legacy serves only background / admin (or nothing at all)"
+      - "Stakeholder sign-off captured per slice"
+      - "Decommissioning criteria documented for each legacy component"
+    commonPitfalls:
+      - "The long tail — last 10% of capabilities take 50% of the time. Budget for it"
+      - "Burnout — migrations are grueling. Rotate engineers, celebrate slice completions"
+      - "Scope creep across slices — the temptation to \"fix\" things in legacy that are about to be deleted is huge"
+      - "Stalling — at some point the team gets bored of migration; push through to decommission"
+
+  - number: 9
+    title: "Cutover and Decommission"
+    description: "Turn off the legacy system. By this point traffic should already be zero — this phase is the formal teardown plus the post-migration write-up."
+    whatYoureDoing: "Execute the formal cutover runbook: remove DNS routes, decommission legacy infrastructure, archive code, run a post-migration retrospective, document lessons for the next migration. Celebrate."
+    primaryAsset: "migration-cutover-runbook"
+    alternativeAssets:
+      - slug: "migration-rollback-plan"
+        when: "You want a fallback documented before pulling the plug, just in case"
+    relevantSkills:
+      - "migration-planner-skill"
+      - "documentation-skill"
+    relevantMcpConfigs:
+      - "azure-devops-mcp"
+      - "filesystem-mcp"
+      - "confluence-mcp"
+    estimatedTime: "2-3 weeks"
+    definitionOfDone:
+      - "Legacy traffic = 0% for 30 consecutive days"
+      - "No critical alerts from legacy in that window"
+      - "All scheduled jobs migrated"
+      - "All integrations updated to point at the new system"
+      - "DNS / proxy routes to legacy removed"
+      - "Legacy infrastructure decommissioned (compute, DB, etc.)"
+      - "Legacy code archived (don't delete; archive)"
+      - "Post-migration retrospective completed"
+      - "Lessons documented for future migrations"
+      - "Team celebration"
+    commonPitfalls:
+      - "Decommissioning too fast — keep legacy in cold standby for 30+ days post-cutover"
+      - "Forgetting integrations — the partner still calling legacy; the report tool still pointing at the legacy DB"
+      - "No retrospective — the next migration won't benefit from this one's lessons"
+      - "No celebration — the team did hard work; recognize it"
+wrapUp:
+  deliverables:
+    - "A modern Angular SPA frontend"
+    - "A modern .NET API backend"
+    - "A clean data layer (SQL Server modernized to Azure SQL or migrated to Postgres)"
+    - "Modern auth (IdP-fronted)"
+    - "Comprehensive parity tests as living documentation"
+    - "Decommissioned legacy infrastructure"
+    - "An audit document, slice plan, ADRs, and rollback runbook in /docs/migration/"
+  nextSteps:
+    - title: "Run a post-migration performance audit"
+      description: "Now that the new stack is live, profile it under real traffic and address any regressions vs the legacy baseline."
+    - title: "Archive the playbook for the next migration"
+      description: "Save the slice plan, parity tests, and rollback runbook somewhere the next team can find them. Migration knowledge compounds."
+    - title: "Plan a v2 of the modernized app"
+      description: "The first iteration matched legacy behavior. The second iteration improves on it."
+relatedAssets:
+  - "vbnet-winforms-to-spa-migration-playbook"
+  - "database-migration-playbook"
+  - "legacy-system-audit"
+  - "strangler-fig-migration-plan"
+---
+
+# ASP.NET to Angular + .NET Web Modernization Playbook
+
+A multi-quarter playbook for migrating a legacy ASP.NET web application (WebForms or MVC) to a modern Angular SPA + .NET API architecture using the strangler fig pattern. Click through the 9 phases — each one points you at the right templates, skills, and MCP configs to use in your IDE, with a clear definition-of-done before you move on.
+
+## When to use this playbook
+
+- You have an ASP.NET WebForms, MVC 4-5, or older .NET web app
+- The app must keep running while you migrate (you can't stop business)
+- You want to end up with: Angular SPA frontend + modern .NET REST APIs + clean data layer
+- Migration timeline is multiple quarters (anything &lt;3 months should question scope)
+
+## Don't compress this
+
+The teams that succeed at modernization spend the time. The teams that fail try to compress the schedule by skipping phases — usually the audit, the parity tests, or the coexistence infrastructure. Each skipped phase becomes incidents and delays later.
+
+If leadership pushes for faster, the conversation isn't "skip phases" — it's "scope down to a smaller migration." Migrate fewer slices. Defer non-critical capabilities. But don't skip the foundation.
+
+## Independent of the Custom Web App playbook
+
+This playbook is for **modernizing existing systems**. If you're starting from scratch, use the [Custom Web App Playbook](/playbook/custom-web-app) instead. The two playbooks share some templates (ADRs, OpenAPI, code review) but the sequence and emphasis are completely different.

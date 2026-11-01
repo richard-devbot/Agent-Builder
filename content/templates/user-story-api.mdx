@@ -1,0 +1,152 @@
+---
+title: "User Story Generator — API / Backend"
+slug: "user-story-api"
+description: "Generate a backend-focused user story with endpoint, schema, error, and security details."
+type: template
+phase: discover
+category: user-stories
+projectType: ["custom-app"]
+stack: ["api", "rest", "graphql"]
+tags: ["agile", "scrum", "api", "backend", "requirements"]
+difficulty: beginner
+estimatedTime: "10 min"
+author: "Platform Engineering"
+createdAt: 2026-04-26
+updatedAt: 2026-04-26
+inputs:
+  - name: requirements
+    description: "The requirement, ticket, or feature brief to convert"
+    required: true
+  - name: existing_endpoints
+    description: "List of existing endpoints this should fit alongside (optional)"
+    required: false
+output:
+  format: json
+relatedAssets:
+  - "user-story-from-prd"
+  - "user-story-ui"
+  - "user-story-gherkin"
+  - "rest-api-scaffolder-nodejs"
+---
+
+# User Story Generator — API / Backend
+
+Generate a backend-focused user story tuned for API or service work. The output is a structured JSON document with endpoint specs, request/response schemas, error codes, and security considerations baked in — ready to feed into Jira, an OpenAPI generator, or your scaffolder.
+
+## When to use
+
+- A new endpoint, integration, or backend capability is being scoped
+- You want consistent API stories across the team (verb, status codes, auth)
+- The story needs to feed into the API scaffolder template downstream
+
+## Prompt
+
+```text
+You are an expert Agile Product Owner and Business Analyst specializing in API
+and backend development. Create a detailed user story focused on API
+functionality based on the following requirements.
+
+## Requirements
+
+{{requirements}}
+
+## Existing endpoints to fit alongside (if any)
+
+{{existing_endpoints}}
+
+## Template Type
+
+API Story (Backend / API Functionality)
+
+## Output requirements
+
+Return ONLY a valid JSON object with exactly this structure — no markdown
+fences, no commentary, no leading or trailing text:
+
+{
+  "title": "Clear and concise title of the user story",
+  "description": "User story in the format: As a <system or developer>, I want to <API capability> so that <business value>",
+  "acceptance_criteria": [
+    "List of acceptance criteria as separate strings"
+  ],
+  "velocity_points": "Estimated story points as a string (1-13)",
+  "priority": "High | Medium | Low",
+  "template_type": "API Story",
+  "endpoint": {
+    "method": "GET | POST | PUT | PATCH | DELETE",
+    "path": "/resource[/:id]",
+    "auth": "none | bearer | session | api-key"
+  },
+  "request_schema": "Brief description or JSON-shape of the request body / query params",
+  "response_schema": "Brief description or JSON-shape of the success response",
+  "status_codes": [
+    "200 OK — ...",
+    "400 Bad Request — ...",
+    "401 Unauthorized — ...",
+    "404 Not Found — ...",
+    "500 Internal Server Error — ..."
+  ],
+  "validation_rules": [
+    "Per-field validation rules"
+  ],
+  "performance": "Latency / throughput target if relevant",
+  "security": "Auth, rate-limit, PII, audit-log notes"
+}
+
+## Style guide
+
+- Focus on the contract, not the implementation.
+- Make every acceptance criterion independently testable.
+- Velocity points: 1-13 (Fibonacci). Be honest — it's better to split a 13 in two.
+- Status codes: include only the ones the endpoint actually returns.
+- Security: flag sensitive data, auth requirements, and audit needs explicitly.
+
+## Hard rules
+
+1. Output is a single JSON object — no surrounding text, no markdown fences.
+2. Use double quotes for all strings.
+3. acceptance_criteria and status_codes must be arrays of strings.
+4. priority must be exactly one of: "High", "Medium", "Low".
+5. velocity_points must be a string ("1" through "13").
+6. No trailing commas. All brackets balanced.
+```
+
+## Example output
+
+```json
+{
+  "title": "Endpoint to refund a paid order",
+  "description": "As a backend service, I want a POST /orders/:id/refunds endpoint so that the support tooling can issue refunds against captured payments.",
+  "acceptance_criteria": [
+    "POST /orders/:id/refunds returns 201 with the created refund record",
+    "Refunds for unpaid orders return 409 Conflict with a machine-readable code",
+    "Idempotency-Key header is honored — repeat calls return the original refund"
+  ],
+  "velocity_points": "5",
+  "priority": "High",
+  "template_type": "API Story",
+  "endpoint": { "method": "POST", "path": "/orders/:id/refunds", "auth": "bearer" },
+  "request_schema": "{ amount_cents: int, reason: string, idempotency_key: string }",
+  "response_schema": "{ id, order_id, amount_cents, status, created_at }",
+  "status_codes": [
+    "201 Created — refund accepted",
+    "400 Bad Request — invalid amount or missing idempotency key",
+    "401 Unauthorized — missing or invalid bearer",
+    "404 Not Found — unknown order id",
+    "409 Conflict — order is not refundable"
+  ],
+  "validation_rules": [
+    "amount_cents > 0 and ≤ remaining refundable balance",
+    "reason ≤ 280 chars",
+    "idempotency_key is a UUID v4"
+  ],
+  "performance": "p95 < 400ms; 50 RPS sustained",
+  "security": "Requires `refunds:write` scope; PII-free request body; emit audit log on success"
+}
+```
+
+## Tips
+
+- Pair with the **REST API Scaffolder** template — the JSON drops in cleanly as input.
+- If your endpoint touches money, PII, or auth, flag it under `security` so reviewers don't miss it.
+- For a UI counterpart story, run the **User Story Generator — UI** with the same requirements.

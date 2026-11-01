@@ -1,0 +1,151 @@
+---
+title: "User Persona Generator"
+slug: "persona-generator"
+description: "Generate detailed user personas with goals, frustrations, behaviors, and design implications from a product description."
+type: template
+phase: discover
+category: personas
+projectType: ["custom-app"]
+stack: []
+tags: ["ux", "research", "discovery"]
+difficulty: beginner
+estimatedTime: "15 min"
+author: "Platform Engineering"
+featured: false
+createdAt: 2026-04-26
+updatedAt: 2026-04-26
+inputs:
+  - name: product_description
+    description: "What the product does and who it's roughly for"
+    required: true
+  - name: persona_count
+    description: "How many personas to generate (default: 3)"
+    required: false
+  - name: known_segments
+    description: "Any user segments you already know about (optional)"
+    required: false
+output:
+  format: markdown
+relatedAssets:
+  - "prd-generator"
+  - "user-story-from-prd"
+---
+
+# User Persona Generator
+
+Create realistic, actionable user personas that go beyond demographic stereotypes. Each persona surfaces goals, frustrations, behaviors, and design implications a designer or PM can actually act on.
+
+## When to use
+
+- Starting a new product and need user-centric grounding
+- The team is building based on assumptions instead of users
+- Need design-direction input before wireframing
+- Stakeholders keep saying "the user" — time to specify which user
+
+## Prompt
+
+```text
+You are a senior UX researcher with 15 years of experience. Generate detailed,
+actionable user personas based on the product below.
+
+## Input
+
+**Product description:**
+{{product_description}}
+
+**Number of personas to generate:** {{persona_count}}
+**Known user segments (if any):** {{known_segments}}
+
+## Persona structure
+
+For each persona, produce:
+
+### 1. Identity
+- Name (realistic, not "Power User Pat")
+- Age range
+- Role / job title
+- Industry / domain
+- Tech proficiency: low / medium / high
+- Brief life context (1-2 sentences)
+
+### 2. Goals (3-5)
+What this person is trying to accomplish. Specific, not vague.
+Bad: "wants to be productive"
+Good: "wants to close the books at month-end without staying past 7pm"
+
+### 3. Frustrations (3-5)
+What's not working in their current world. Quote-able friction points.
+Bad: "current tools are bad"
+Good: "spends 90 minutes every Monday reconciling exports from three different systems"
+
+### 4. Behaviors
+- How they currently solve the problem (workarounds, manual processes)
+- Tools they use today
+- When/where/how often they engage with this kind of product
+- Decision-making style (data-driven, intuitive, consensus-building)
+
+### 5. Quote
+A single sentence in their voice that captures their world.
+
+### 6. Design implications
+- 2-3 specific things the product MUST do for this persona
+- 2-3 things to AVOID for this persona
+- One feature/flow this persona would disproportionately benefit from
+
+### 7. Adoption profile
+- Innovator / Early Adopter / Early Majority / Late Majority / Laggard
+- What would make them try this product
+- What would make them stop using it
+
+## Persona variety guidance
+
+If generating multiple personas, ensure they meaningfully differ along at
+least these axes:
+- Primary goal (each persona should want something distinct)
+- Tech proficiency (don't make them all power users)
+- Stakeholder type (end-user vs buyer vs admin vs influencer)
+- Frequency of use (daily vs weekly vs occasional)
+
+DO NOT create:
+- Stereotypical personas (all "Marketing Mary" / "Developer Dave")
+- Personas with overlapping goals (then they're the same persona)
+- Aspirational personas the product doesn't realistically serve
+
+## Output format
+
+Return a Markdown document with:
+- Brief summary table at the top: Persona name, role, primary goal, priority
+- Each persona as an H2 with the structure above
+- A final "Cross-persona insights" section noting:
+  - Conflicts between personas (if Persona A wants X, Persona B may resist X)
+  - Shared needs across all personas
+  - Which persona is highest priority for v1 and why
+
+## Tone
+
+- Specific over generic
+- Behavioral over demographic
+- Honest about who the product is NOT for
+```
+
+## Example use
+
+**Input:**
+- product_description: "A self-service customer portal for B2B SaaS where customers can view invoices, manage their plan, and submit support tickets without contacting their account manager."
+- persona_count: 3
+
+**Output:** Three distinct personas covering the end-user, the procurement gatekeeper, and the IT admin who oversees the integration — each with their own goals, frustrations, and design implications.
+
+## Tips
+
+- Run this prompt early — personas inform PRD, user stories, UX, and even API design
+- Update personas every 6 months as you learn more from real users
+- For B2B products, generate personas for both individual users AND buyer/admin roles
+- Pair with the **PRD Generator** — feed the personas back into the PRD prompt for richer context
+
+## Common mistakes to avoid
+
+- Treating personas as marketing artifacts (they're product artifacts)
+- Generating too many (3-5 is plenty for most products)
+- Demographic-heavy, behavior-light personas
+- Forgetting to validate personas against actual user research

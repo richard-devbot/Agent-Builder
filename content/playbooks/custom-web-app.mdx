@@ -1,0 +1,278 @@
+---
+title: "Custom Web App Playbook"
+slug: "custom-web-app"
+description: "A guided 9-step journey for building a Next.js + Postgres web application — from one-line idea to deployed app — with the right prompts, skills, and definition-of-done at each phase."
+type: playbook
+phase: build
+category: frontend-development
+projectType: ["custom-app"]
+stack: ["nextjs", "typescript", "postgres", "vercel"]
+tags: ["full-stack", "playbook", "spec-driven", "guided"]
+difficulty: intermediate
+estimatedTime: "1-2 days"
+totalEstimatedTime: "1-2 days for a small CRUD app"
+author: "Platform Engineering"
+featured: true
+createdAt: 2026-04-26
+updatedAt: 2026-04-27
+intakeFields:
+  - name: oneLiner
+    label: "What are you building?"
+    type: textarea
+    required: true
+    placeholder: "e.g. A self-service customer portal for enterprise customers to manage their subscriptions and view invoices without contacting support."
+    helpText: "1-3 sentences. The clearer your one-liner, the better the prompts you'll write in your IDE."
+  - name: stack
+    label: "Tech stack"
+    type: stack-selector
+    required: true
+    helpText: "Choose your frontend, backend, and database. We'll surface stack-specific templates and substitute these values into prompts where it helps."
+    options:
+      frontend:
+        - "Next.js (App Router)"
+        - "Next.js (Pages Router)"
+        - "React (Vite)"
+        - "Remix"
+        - "SvelteKit"
+      backend:
+        - "Node.js / Express"
+        - "Node.js / Fastify"
+        - "Next.js Route Handlers"
+        - "Python / FastAPI"
+        - "Go / Chi"
+      database:
+        - "Postgres"
+        - "MySQL"
+        - "SQLite"
+        - "MongoDB"
+        - "Supabase"
+steps:
+  - number: 1
+    title: "Capture the Problem & Write a PRD"
+    description: "Turn your one-liner into a structured Product Requirements Document."
+    whatYoureDoing: "Lock the scope and goals before any code gets written. Every downstream artifact — stories, ADRs, schema, API — derives from the PRD."
+    primaryAsset: "prd-generator"
+    alternativeAssets: []
+    relevantSkills: []
+    relevantMcpConfigs: []
+    estimatedTime: "20 min"
+    definitionOfDone:
+      - "PRD has all 11 sections (overview through open questions)"
+      - "Goals are measurable — numbers, not adjectives"
+      - "Out-of-scope list explicitly names what you're NOT building"
+      - "PRD lives in your repo at /docs/PRD.md and reads coherently to someone outside the team"
+    commonPitfalls:
+      - "Writing aspirational goals instead of measurable ones"
+      - "Skipping the out-of-scope section — it's the cheapest scope-creep prevention you'll ever do"
+
+  - number: 2
+    title: "Break the PRD into User Stories"
+    description: "Turn the PRD into INVEST-compliant user stories with acceptance criteria."
+    whatYoureDoing: "Decompose the PRD into ticketable, testable stories. Acceptance criteria become test cases later."
+    primaryAsset: "user-story-from-prd"
+    alternativeAssets:
+      - slug: "user-story-elaboration-detailed"
+        when: "You want a heavyweight markdown elaboration with Background, Technical Notes, and Definition of Done — ready to paste into Jira"
+      - slug: "user-story-gherkin"
+        when: "Your team writes BDD tests and wants stories whose ACs are full Given/When/Then"
+      - slug: "user-story-api"
+        when: "The work is purely backend — endpoint contracts, schemas, status codes"
+      - slug: "user-story-ui"
+        when: "The work is purely frontend — components, interaction flow, accessibility"
+      - slug: "user-story-enterprise"
+        when: "The work is regulated — needs compliance, security, and audit notes baked in"
+    relevantSkills: []
+    relevantMcpConfigs: []
+    estimatedTime: "15 min"
+    definitionOfDone:
+      - "Every must-have requirement has at least one story"
+      - "Each story has Given/When/Then acceptance criteria"
+      - "Stories are sized so any one fits in a single PR"
+      - "Stories are grouped by epic"
+    commonPitfalls:
+      - "Stories that span multiple PRs — split them"
+      - "Acceptance criteria written as 'works correctly' instead of observable user behavior"
+
+  - number: 3
+    title: "Create Jira Tickets for the Stories"
+    description: "Push your stories into Jira and link them to an epic."
+    whatYoureDoing: "Get traceability set up before development starts. Doing tickets in bulk now beats creating them one-at-a-time over the next two weeks."
+    primaryAsset: "jira-ticket-manager"
+    alternativeAssets:
+      - slug: "jira-push-bulk"
+        when: "You have a folder of elaborated stories + test cases and want to bulk-push them as Story + sub-task hierarchies"
+    relevantSkills: []
+    relevantMcpConfigs:
+      - "jira-mcp"
+    estimatedTime: "10 min"
+    definitionOfDone:
+      - "Epic created with PRD link in description"
+      - "Every story is its own ticket linked to the epic"
+      - "Tickets have acceptance criteria copied into the description"
+      - "Initial estimates set (rough is fine — you'll refine)"
+    commonPitfalls:
+      - "Skipping the epic — it's free traceability"
+      - "Hardcoding labels that drift from the team's convention — check what the team already uses"
+
+  - number: 4
+    title: "Make Key Architecture Decisions"
+    description: "Document database, hosting, and auth choices as Architecture Decision Records."
+    whatYoureDoing: "Capture the why behind each major choice so future contributors don't relitigate decided-on tradeoffs."
+    primaryAsset: "adr-generator"
+    alternativeAssets: []
+    relevantSkills: []
+    relevantMcpConfigs: []
+    estimatedTime: "30 min"
+    definitionOfDone:
+      - "ADR for database choice, with alternatives considered"
+      - "ADR for hosting / deployment platform"
+      - "ADR for authentication approach"
+      - "Each ADR has a 'Status: accepted' header and a date"
+      - "ADRs committed to /docs/adr/ in your repo"
+    commonPitfalls:
+      - "Documenting only the chosen option — the alternatives section is the load-bearing part"
+      - "Skipping the date — without it, you can't tell stale ADRs from current ones"
+
+  - number: 5
+    title: "Design the Database Schema"
+    description: "Generate the schema and initial migrations from your domain model."
+    whatYoureDoing: "Lock the data shape before APIs and UI start consuming it. Schema changes later cost 10x what they cost now."
+    primaryAsset: "postgres-schema-designer"
+    alternativeAssets: []
+    relevantSkills: []
+    relevantMcpConfigs: []
+    estimatedTime: "45 min"
+    definitionOfDone:
+      - "Schema covers every entity mentioned in the PRD"
+      - "Foreign keys are explicit and indexed"
+      - "Migration file numbered and named (e.g. 0001_init.sql)"
+      - "Seed script for local development in your repo"
+    commonPitfalls:
+      - "Forgetting to index foreign keys — every join gets slow"
+      - "Using FLOAT for money instead of NUMERIC / DECIMAL"
+      - "TEXT everywhere — use the right CHAR / VARCHAR / ENUM constraints up front"
+
+  - number: 6
+    title: "Scaffold the API"
+    description: "Generate REST endpoints, validation, and the OpenAPI spec for each resource."
+    whatYoureDoing: "Get every endpoint scaffolded in one consistent pass — same naming, same auth wiring, same error shape — so they don't drift."
+    primaryAsset: "rest-api-scaffolder-nodejs"
+    alternativeAssets: []
+    relevantSkills: []
+    relevantMcpConfigs: []
+    estimatedTime: "1 hour"
+    definitionOfDone:
+      - "Routes file, controller, service, and schema for each resource"
+      - "OpenAPI spec generated and reviewed"
+      - "Validation runs on every request body"
+      - "Error responses follow a consistent shape"
+    commonPitfalls:
+      - "Hand-rolling each endpoint — they'll diverge by week 3"
+      - "Skipping the OpenAPI spec — it's the contract your frontend reads"
+
+  - number: 7
+    title: "Build the Frontend Pages"
+    description: "Scaffold each page with proper server / client component boundaries."
+    whatYoureDoing: "Get the server / client split right at scaffold time — retrofitting later means hunting down 'use client' directives that broke performance."
+    primaryAsset: "nextjs-page-scaffolder"
+    alternativeAssets:
+      - slug: "shadcn-component-builder"
+        when: "You're building a single component, not a whole page"
+    relevantSkills: []
+    relevantMcpConfigs: []
+    estimatedTime: "2 hours"
+    definitionOfDone:
+      - "Each PRD user journey has at least one page"
+      - "Loading and error states present on every dynamic page"
+      - "Client components are leaf-level only (no client-around-server)"
+      - "Auth checks run server-side"
+    commonPitfalls:
+      - "'use client' at the page level — kills RSC benefits for the entire subtree"
+      - "Skipping loading.tsx — your TTFB looks worse than it is"
+
+  - number: 8
+    title: "Self-Review Your Code"
+    description: "Run a comprehensive code review over the diff before opening PRs."
+    whatYoureDoing: "Catch the 80% of issues a teammate would catch — before you ask for their time."
+    primaryAsset: "code-review-comprehensive"
+    alternativeAssets: []
+    relevantSkills: []
+    relevantMcpConfigs: []
+    estimatedTime: "20 min"
+    definitionOfDone:
+      - "Diff reviewed for security, performance, accessibility, tests"
+      - "All blocking issues fixed before pushing"
+      - "Non-blocking suggestions noted in PR description"
+      - "PR description references the Jira tickets"
+    commonPitfalls:
+      - "Reviewing your own code immediately after writing it — wait an hour, you'll see things"
+      - "Skipping the security pass when 'it's an internal feature' — internal features leak"
+
+  - number: 9
+    title: "Containerize & Ship"
+    description: "Generate a production Dockerfile and deploy to your hosting target."
+    whatYoureDoing: "Turn 'works on my machine' into a reproducible image you can roll back in one command."
+    primaryAsset: "dockerfile-production"
+    alternativeAssets:
+      - slug: "github-actions-ci"
+        when: "You also need a CI pipeline that builds the image and runs tests on PRs"
+    relevantSkills: []
+    relevantMcpConfigs: []
+    estimatedTime: "30 min"
+    definitionOfDone:
+      - "Multi-stage Dockerfile, non-root user, pinned base image"
+      - "Image builds clean with no warnings"
+      - "App boots in container locally"
+      - "Deployed to staging and smoke-tested"
+      - "Production deploy gated on staging green"
+    commonPitfalls:
+      - "Running as root in the container — easy security gain by switching to a non-root user"
+      - "`COPY . .` instead of explicit paths — bloats the image and leaks secrets"
+wrapUp:
+  deliverables:
+    - "A PRD in /docs/PRD.md"
+    - "User stories in Jira (or /docs/stories.md), each linked to an epic"
+    - "ADRs for database, hosting, and auth choices in /docs/adr/"
+    - "Database schema and initial migration in /db/"
+    - "REST API with OpenAPI spec for every resource"
+    - "Frontend pages with loading, error, and auth states"
+    - "A self-reviewed PR with all blocking comments resolved"
+    - "Production Dockerfile that builds clean"
+    - "App deployed to staging, smoke-tested, and gated to production"
+  nextSteps:
+    - title: "Set up monitoring and alerting"
+      description: "Wire logs, metrics, and alerts before your first user finds the bug for you."
+    - title: "Schedule your first user feedback session"
+      description: "Five real users tell you more than ten team standups."
+    - title: "Plan the next iteration"
+      description: "Pick the next 3 stories from the backlog and run the playbook again — most steps go faster the second time."
+---
+
+# Custom Web App Playbook
+
+A guide for building a Next.js + Postgres web application — from a one-line idea to a deployed app — with the right prompts, skills, and MCP configs surfaced at each phase. **The site walks you through the sequence; you do the actual building in your IDE.**
+
+## How it works
+
+1. **Tell the playbook what you're building** on the intake page (a one-liner + your stack).
+2. **Walk through 9 steps**, each pointing you at the prompts, skills, and MCP configs that fit that phase.
+3. **Copy the prompts** into your IDE (Claude Code, Cursor, etc.) and do the work there.
+4. **Mark each step complete** when you've satisfied its definition-of-done — your progress is saved locally so you can pick up where you left off.
+
+## Who this is for
+
+- A solo developer or small team building a new web app
+- Anyone wanting a consistent, spec-driven flow across the organisation
+- Engineers who want to move fast without skipping the discovery and design phases
+
+## What this playbook does NOT do
+
+- It does not run prompts or generate code — that happens in your IDE.
+- It does not store your PRDs, stories, code, or any other content you produce. Those live in your repo, where they belong.
+- It does not replace judgment — every step's "definition of done" is for you to verify in your own work.
+
+## When NOT to use this playbook
+
+- You're modifying an existing app — this is for greenfield.
+- You're building an ETL pipeline (use the ETL playbook — coming soon).
+- You're prototyping for under a day — skip steps 3, 4, and 8.

@@ -1,0 +1,281 @@
+---
+title: "Feature Flag Rollout Strategy for Migrations"
+slug: "feature-flag-rollout-migration"
+description: "Use feature flags to safely route traffic between legacy and new systems during migration with controlled rollout and instant rollback."
+type: template
+phase: deploy
+category: ci-cd
+projectType: ["custom-app"]
+stack: []
+tags: ["migration", "feature-flags", "rollout", "canary"]
+difficulty: intermediate
+estimatedTime: "0.5 day"
+author: "Platform Engineering"
+featured: false
+createdAt: 2026-04-26
+updatedAt: 2026-04-26
+inputs:
+  - name: capability_being_migrated
+    description: "What capability/slice is being routed via feature flag"
+    required: true
+  - name: user_segments
+    description: "How users are segmented (tenant, role, region, individual user IDs)"
+    required: true
+  - name: flag_provider
+    description: "Feature flag tool (Azure App Configuration, LaunchDarkly, Unleash, in-house)"
+    required: false
+output:
+  format: markdown
+relatedAssets:
+  - "strangler-fig-migration-plan"
+  - "behavior-parity-test-suite"
+---
+
+# Feature Flag Rollout Strategy for Migrations
+
+The migration strategy says "incremental." Feature flags are how you actually do that incremental work in production: route 1% of traffic to the new system, then 5%, then 25%, then 100% — with instant rollback at any step.
+
+## When to use
+
+- For each migration slice that ships
+- When new system is ready functionally but needs production validation
+- When the cost of regression is high (revenue, compliance, reputation)
+
+## Prompt
+
+````text
+You are a senior platform engineer planning a feature-flag-driven rollout
+of a migration slice. Generate the rollout strategy.
+
+## Input
+
+**Capability:** {{capability_being_migrated}}
+**User segments:** {{user_segments}}
+**Flag provider:** {{flag_provider}}
+
+## Output
+
+### 1. Flag design
+
+Design the feature flag(s) for this rollout:
+
+```yaml
+flag_name: "use_new_orders_service"
+description: "Routes order operations to new .NET API instead of legacy"
+type: percentage_rollout | targeting_rules | both
+default: false  # off for safety
+sticky_to_user: true  # same user gets same routing decision
+```
+
+**Flag types:**
+
+- **Boolean (kill switch):** simplest. Either everyone or no one.
+- **Percentage rollout:** N% of users go to new. Use sticky hash so same user gets same answer.
+- **Targeting rules:** specific tenants, roles, or user IDs go to new.
+- **Multivariate:** for A/B testing different new implementations (rare for migrations).
+
+**For migrations, recommend:** percentage rollout + targeting rules combined.
+- Specific internal users (you, your team, key beta tenants) on new at 100%
+- Everyone else at 0%, gradually increasing
+
+### 2. Stickiness
+
+Critical: same user must consistently get the same routing.
+
+Why: if a user lands on legacy, their session/state is on legacy. If next request goes to new, they may see different data, lose their work, or trigger "your session expired" errors.
+
+How:
+- Hash user ID + flag name + bucket boundary
+- Same user always lands in the same percentile
+- Increment the percentage by changing the boundary, NOT by re-randomizing
+
+### 3. Rollout schedule
+
+Concrete schedule for this slice:
+
+| Day | Action | % new | Stop conditions |
+|-----|--------|-------|-----------------|
+| 0 | Deploy with flag off | 0% | Build green, smoke test passes |
+| 0 | Internal team only | 0% (specific user IDs) | Internal team validates 1 week |
+| 7 | Internal beta tenant | + 1 tenant flag | No alarms for 3 days |
+| 10 | 1% canary | 1% | &lt;0.1% error rate increase, no parity failures |
+| 13 | 5% canary | 5% | Same |
+| 17 | 25% | 25% | Same |
+| 21 | 50% | 50% | Same |
+| 25 | 100% | 100% | Same |
+| 30 | Decommission legacy code path | n/a | No errors for 7 days |
+
+Each step has explicit stop conditions. If conditions fail, hold or roll back.
+
+### 4. Stop conditions (must define explicitly)
+
+What stops the rollout?
+
+**Hard stops (immediate rollback):**
+- Error rate increase > 0.5%
+- p95 latency increase > 50%
+- Behavior parity test failures
+- Critical bug reported by a user
+- Auth failures spike
+- Data integrity check fails (counts, sums)
+
+**Soft stops (pause and investigate):**
+- Error rate increase 0.1-0.5%
+- Latency degradation 20-50%
+- Increased support tickets
+- Unexpected user behavior changes
+
+For each stop condition, define:
+- What metric/signal triggers it
+- Who sees the alert
+- What's the response time SLA
+- Manual or automatic rollback
+
+### 5. Rollback procedure
+
+When a stop condition fires:
+
+1. **Flip the flag** (instant — that's the point of feature flags)
+2. **Verify rollback worked** (traffic going back to legacy)
+3. **Investigate** (logs, traces, metrics from the affected window)
+4. **Document** (what failed, what you learned)
+5. **Adjust the rollout plan** (was the issue specific to a tenant? scale? data shape?)
+
+Critical: every engineer involved must know how to flip the flag.
+Practice it BEFORE you need it (rollback drills).
+
+### 6. Observability requirements
+
+Before starting rollout, ensure these are in place:
+
+- **Traffic split metric:** dashboard showing % of requests going to new vs legacy
+- **Error rate per cohort:** legacy users vs new users
+- **Latency per cohort:** percentiles for both
+- **Business metrics:** orders, revenue, conversion — track per cohort
+- **Parity test pass rate** (if running continuously)
+- **Alerts on any of the stop conditions**
+
+Don't start the rollout without these. Without observability, you can't know if it's working.
+
+### 7. Cohort comparison
+
+For analyzing rollout health:
+
+| Metric | Legacy | New | Difference | Acceptable? |
+|--------|--------|-----|------------|-------------|
+| Error rate | 0.05% | 0.04% | -0.01% | ✓ Better |
+| p50 latency | 120ms | 95ms | -25ms | ✓ Better |
+| p95 latency | 800ms | 850ms | +50ms | ✓ Within tolerance |
+| p99 latency | 2.0s | 3.5s | +1.5s | ⚠ Investigate |
+
+When investigating a regression, look at:
+- Is the difference consistent across the day or only during peak?
+- Is it concentrated in specific endpoints?
+- Is it concentrated in specific user segments?
+
+### 8. Communication plan
+
+Inform stakeholders proactively:
+
+- **Pre-rollout:** announce timing, expected user impact, who to contact for issues
+- **At each rollout step:** brief update (% complete, any issues)
+- **At completion:** announce, summarize learnings
+- **If rolled back:** announce why, expected next attempt
+
+Channels:
+- Email for tenants
+- Slack for internal teams
+- Status page for end users
+- Direct outreach to highest-value tenants before they hit new system
+
+### 9. Per-tenant rollout (if multi-tenant)
+
+For multi-tenant SaaS:
+
+Phase 1: Shadow (no users see new)
+- Mirror traffic to new system
+- Compare responses
+- Build confidence
+
+Phase 2: Internal tenants only
+- Internal usage on new system
+- Catch issues with our own data first
+
+Phase 3: Friendly tenants
+- 1-3 tenants who agreed to be early
+- High-touch support
+- Daily check-ins
+
+Phase 4: Cohort by tier
+- Free tier first (lower risk if issues)
+- Then paid tiers
+- Then enterprise (highest risk if issues)
+
+Phase 5: Long-tail and edge cases
+- Tenants with unusual data shapes
+- Tenants with custom integrations
+
+### 10. Decommission of legacy path
+
+The flag isn't done until you remove it. After 100% rollout:
+
+- 7 days of clean operation on new
+- Confirm no calls to legacy code path (logging)
+- Remove the flag check from app code
+- Remove the legacy code path
+- Decommission legacy infrastructure
+
+Flags that hang around after rollout become technical debt and will trigger
+during the next refactor.
+
+### 11. Cost of doing this wrong
+
+Bad flag implementation patterns:
+
+- **No stickiness:** users bounce between systems mid-session
+- **Too granular:** flag check in 100 places — refactoring nightmare
+- **Too coarse:** one flag for the whole migration — can't roll back specific slices
+- **No observability:** you flip the flag and hope
+- **No stop conditions:** you keep increasing % even as errors increase
+- **Skipping stages:** 0% → 100% in one step
+- **Leaving flags after rollout:** technical debt forever
+
+### 12. Specific recommendations for {{flag_provider}}
+
+[Generate provider-specific implementation notes based on the input]
+
+For example, if Azure App Configuration:
+- Use feature management with targeting filters
+- SDK auto-refreshes flag values
+- Combine with Application Insights for cohort analysis
+
+If LaunchDarkly:
+- Use semantic flags with description
+- Set up custom roles for who can flip
+- Use experiments feature for cohort analysis
+
+## Style
+
+- Concrete schedules, not vague phases
+- Specific metrics with thresholds
+- Honest about what could go wrong
+````
+
+## Tips
+
+- **The first canary is internal team.** Always. You see issues before customers do.
+- **Stickiness is non-negotiable.** Bouncing users between systems is a worse experience than just being on the old one.
+- **Have a rollback drill** — schedule a deliberate "test the rollback" before you need it.
+- **Don't combine flag rollout with other changes.** Flip the flag, watch, then decide. Mixed deploys make root cause analysis impossible.
+- **Stop conditions are not negotiable.** If your boss says "ship it anyway," that's how migrations turn into incidents.
+
+## Common mistakes to avoid
+
+- No stickiness (users bounce)
+- No stop conditions defined
+- No rollback drill
+- Skipping percentage steps
+- Flag check in too many places (architectural debt)
+- Forgetting to decommission flag after rollout
+- Combining flag rollout with unrelated deploys
+- Insufficient observability to know if rollout is healthy

@@ -1,0 +1,201 @@
+---
+title: "NestJS Module Scaffolder"
+slug: "nestjs-module-scaffolder"
+description: "Scaffold a NestJS module with controller, service, DTOs, validation, OpenAPI, and tests following enterprise patterns."
+type: template
+phase: build
+category: api-development
+projectType: ["custom-app"]
+stack: ["typescript", "nodejs"]
+tags: ["nestjs", "boilerplate", "rest", "enterprise"]
+difficulty: intermediate
+estimatedTime: "30 min"
+author: "Platform Engineering"
+featured: false
+createdAt: 2026-04-26
+updatedAt: 2026-04-26
+inputs:
+  - name: resource_name
+    description: "Resource name in singular form (e.g., 'product')"
+    required: true
+  - name: fields
+    description: "Fields with types"
+    required: true
+  - name: auth_required
+    description: "Should endpoints require auth? (yes/no)"
+    required: true
+output:
+  format: code
+relatedAssets:
+  - "rest-api-scaffolder-nodejs"
+  - "openapi-spec-generator"
+---
+
+# NestJS Module Scaffolder
+
+Generate a complete NestJS feature module with controller, service, DTOs, repository, OpenAPI annotations, and tests. Follows the recommended NestJS patterns: dependency injection, module isolation, decorators-driven validation, and comprehensive Swagger docs.
+
+## When to use
+
+- Building enterprise APIs with strong typing and DI
+- Need built-in patterns for guards, interceptors, pipes
+- Already using NestJS and adding a new feature module
+- Migrating from Express to a more structured framework
+
+## Prompt
+
+````text
+You are a senior NestJS engineer. Generate a complete feature module for the
+resource below following NestJS best practices.
+
+## Input
+
+**Resource name (singular):** {{resource_name}}
+**Fields:**
+```
+{{fields}}
+```
+**Auth required:** {{auth_required}}
+
+## Module structure
+
+Use the standard NestJS feature module pattern:
+
+```
+src/
+└── modules/
+    └── {{resource_name}}/
+        ├── {{resource_name}}.module.ts
+        ├── {{resource_name}}.controller.ts
+        ├── {{resource_name}}.controller.spec.ts
+        ├── {{resource_name}}.service.ts
+        ├── {{resource_name}}.service.spec.ts
+        ├── {{resource_name}}.repository.ts
+        ├── entities/
+        │   └── {{resource_name}}.entity.ts
+        └── dto/
+            ├── create-{{resource_name}}.dto.ts
+            ├── update-{{resource_name}}.dto.ts
+            ├── query-{{resource_name}}.dto.ts
+            └── {{resource_name}}-response.dto.ts
+```
+
+## Files to generate
+
+### 1. `entities/{{resource_name}}.entity.ts`
+TypeORM entity with:
+- `@Entity('{{resource_name}}s')` decorator
+- UUID primary key with `@PrimaryGeneratedColumn('uuid')`
+- All fields decorated with `@Column()` + appropriate options
+- `@CreateDateColumn()` and `@UpdateDateColumn()` for timestamps
+- Soft delete with `@DeleteDateColumn()` if domain implies deletion is rare
+
+### 2. `dto/create-{{resource_name}}.dto.ts`
+Class with:
+- `class-validator` decorators (`@IsString()`, `@IsEmail()`, `@MinLength()`, etc.)
+- `@ApiProperty()` decorators for Swagger
+- Required fields enforced via validators
+
+### 3. `dto/update-{{resource_name}}.dto.ts`
+Use `PartialType(CreateDto)` from `@nestjs/mapped-types` so all fields are optional.
+
+### 4. `dto/query-{{resource_name}}.dto.ts`
+Pagination + filters:
+- `page` (default 1, min 1)
+- `pageSize` (default 20, max 100)
+- `sortBy` and `sortOrder`
+- Domain-specific filters as optional fields
+- All decorated with `@Type()` from `class-transformer` for query string coercion
+
+### 5. `dto/{{resource_name}}-response.dto.ts`
+Output shape for the API:
+- All entity fields
+- `@ApiProperty()` decorators with examples
+- Use `@Expose()` if implementing field-level visibility
+
+### 6. `{{resource_name}}.repository.ts`
+Custom repository extending TypeORM's `Repository`:
+- `findById(id)`, `findManyPaginated(filters, pagination)`, `softDeleteById(id)`
+- Inject via `@InjectRepository()`
+- Domain-specific query methods (no service code here)
+
+### 7. `{{resource_name}}.service.ts`
+Service class with `@Injectable()`:
+- Constructor injects the repository
+- Methods return entities or DTOs (your choice — be consistent)
+- Throws domain exceptions: `NotFoundException`, `ConflictException` from `@nestjs/common`
+- No HTTP concerns (no `@Body()`, no res/req)
+
+### 8. `{{resource_name}}.controller.ts`
+- `@Controller('{{resource_name}}s')`
+- `@ApiTags('{{Resource}}s')` for Swagger grouping
+- One method per endpoint:
+  - `@Get()` — list
+  - `@Get(':id')` — get one
+  - `@Post()` — create (use `@HttpCode(201)`)
+  - `@Patch(':id')` — partial update
+  - `@Delete(':id')` — delete (use `@HttpCode(204)`)
+- Each method:
+  - Has `@ApiOperation()` and `@ApiResponse()` decorators
+  - Uses DTOs in the signature for validation
+  - Uses `@UseGuards(JwtAuthGuard)` if auth_required is yes
+  - Uses `ParseUUIDPipe` on `:id` params
+  - Returns the response DTO type
+
+### 9. `{{resource_name}}.module.ts`
+- Imports `TypeOrmModule.forFeature([{{Resource}}])`
+- Declares the controller
+- Provides the service AND the repository
+- Exports the service so other modules can consume it
+
+### 10. Test files (`*.spec.ts`)
+Two test files:
+- `service.spec.ts`: Unit tests with mocked repository, covers happy paths and error paths
+- `controller.spec.ts`: Tests with mocked service, focuses on HTTP layer behavior
+
+## Standards
+
+- TypeScript strict mode
+- All public methods on services have explicit return types
+- No `any` — use `unknown` and narrow
+- Validation pipe registered globally in `main.ts` with `whitelist: true, forbidNonWhitelisted: true, transform: true`
+- All endpoints return JSON; never strings or HTML
+- Error responses follow the standard NestJS exception format
+
+## Conventions
+
+- Plural in URLs (`/products`), singular in code (`Product`, `productService`)
+- Controllers thin, services thicker, repositories thinnest
+- No business logic in controllers
+- No HTTP concerns in services
+- DTOs validate at the boundary; entities never leave the service layer
+
+## Output format
+
+For each file:
+1. Full file path
+2. Complete code in fenced code block with `ts`
+
+After the files:
+- **"## Wiring"** — how to import the module in `app.module.ts`
+- **"## Migration"** — TypeORM migration to create the table
+- **"## Swagger preview"** — example of what the OpenAPI doc will look like
+- **"## Critical tests"** — what edge cases to verify
+````
+
+## Tips
+
+- Use `@nestjs/swagger` decorators heavily — they generate OpenAPI for free
+- For complex auth patterns, create a custom decorator like `@CurrentUser()` to inject user from request
+- Consider CQRS pattern for write-heavy domains — NestJS has built-in `@nestjs/cqrs`
+- Pair with the **OpenAPI Spec Generator** if you want spec-first design then implement to match
+- Use the same Pipes/Guards globally rather than per-controller — register in `main.ts`
+
+## Common mistakes to avoid
+
+- Putting business logic in controllers instead of services
+- Forgetting to register the validation pipe globally (DTOs won't validate)
+- Using `Object` or `any` in DTO field types (Swagger output will be useless)
+- Returning entities directly (leaks DB internals; transform to response DTOs)
+- Not using `forwardRef()` for circular module dependencies
+- Skipping integration tests in favor of only unit tests

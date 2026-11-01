@@ -1,0 +1,128 @@
+---
+title: "STRIDE Threat Model"
+slug: "threat-model-stride"
+description: "Generate a STRIDE threat model from an architecture or feature description: assets, trust boundaries, threats, and mitigations."
+type: template
+phase: design
+category: architecture
+projectType: ["custom-app", "etl"]
+stack: []
+tags: ["security", "threat-modeling", "stride", "secure-design", "architecture"]
+difficulty: advanced
+estimatedTime: "30 min"
+author: "Platform Engineering"
+featured: false
+createdAt: 2026-06-03
+updatedAt: 2026-06-03
+inputs:
+  - name: system_description
+    description: "Architecture, feature, or data-flow description (components, actors, data stores, external services)"
+    required: true
+  - name: data_sensitivity
+    description: "What sensitive data flows through (PII, PHI, credentials, financial) and any compliance regime"
+    required: false
+  - name: assumptions
+    description: "Existing controls and trust assumptions (auth model, network boundaries, hosting)"
+    required: false
+output:
+  format: markdown
+relatedAssets:
+  - "owasp-top10-audit"
+  - "security-persona-rbac-matrix"
+  - "owasp-security-review-skill"
+---
+
+# STRIDE Threat Model
+
+Shift security **left** into the design phase. Feed a system or feature description and get a structured STRIDE threat model — assets, trust boundaries, per-element threats, and prioritized mitigations — before a line of code is written. This is the "security embedded in design" step of your organisation's AI-enabled SDLC.
+
+## When to use
+
+- Designing a new service, integration, or a sensitive feature (auth, payments, file handling).
+- Reviewing a modernization target's target-state architecture before build.
+- Producing a threat model artifact for a security/compliance review.
+
+## Prompt
+
+````text
+You are a security architect facilitating a STRIDE threat-modeling session.
+Produce a structured, prioritized threat model from the description below.
+Be concrete and specific to THIS system — no generic checklists.
+
+## System description
+{{system_description}}
+
+## Data sensitivity & compliance
+{{data_sensitivity}}
+
+## Existing controls & assumptions
+{{assumptions}}
+
+## Method
+
+### 1. Decompose the system
+List:
+- **Assets** worth protecting (data, credentials, availability, integrity of records).
+- **Actors / entry points** (users, admins, services, jobs, public endpoints).
+- **Data stores** and **data flows** between components.
+- **Trust boundaries** — every point where data crosses from less-trusted to
+  more-trusted (internet→app, app→DB, service→service, tenant→tenant).
+
+### 2. Enumerate threats with STRIDE
+For each element and each crossing of a trust boundary, ask which STRIDE
+categories apply:
+- **S — Spoofing:** can an attacker impersonate a user/service? (authn)
+- **T — Tampering:** can data in transit/at rest be modified? (integrity)
+- **R — Repudiation:** can an action be denied due to missing audit trail?
+- **I — Information Disclosure:** can confidential data leak? (confidentiality)
+- **D — Denial of Service:** can availability be degraded?
+- **E — Elevation of Privilege:** can a user gain rights they shouldn't have? (authz)
+
+### 3. Rate and prioritize
+For each threat estimate **Likelihood** (Low/Med/High) and **Impact**
+(Low/Med/High); derive a **Risk** rating. Prioritize High×High first.
+
+### 4. Mitigate
+For each non-Low risk, give a concrete mitigation mapped to a control (e.g.
+"mutual TLS", "row-level authz check", "signed audit log", "rate limit + WAF
+rule", "field-level encryption"). Note residual risk after mitigation.
+
+## Output (Markdown)
+
+### Overview
+2-3 sentences: the system, its crown-jewel assets, and the top risk.
+
+### Architecture & trust boundaries
+A short description (and a simple text/Mermaid data-flow sketch if helpful)
+marking each trust boundary.
+
+### Threat register (table)
+| ID | Element / boundary | STRIDE | Threat | Likelihood | Impact | Risk | Mitigation | Residual |
+|----|--------------------|--------|--------|-----------|--------|------|------------|----------|
+
+### Prioritized mitigation plan
+Ordered list of the mitigations to implement, highest risk first, each tagged
+as a design requirement the build phase must satisfy.
+
+### Open questions / assumptions to validate
+Things a human owner must confirm (data classification, regulatory scope,
+existing network controls).
+
+## Rules
+- Tie every threat to a specific element or boundary of THIS system.
+- Don't list a threat without a mitigation, and don't list a mitigation without
+  the control that implements it.
+- Call out where an assumption, if wrong, would change the risk rating.
+````
+
+## Tips
+
+- Provide a real data-flow description (components + who talks to whom + what data). The model is only as good as the boundaries you describe.
+- Turn the **prioritized mitigation plan** into design requirements and acceptance criteria so the build phase is provably traceable to the threat model.
+- Re-run when the architecture changes materially — a threat model is a living artifact, not a one-time gate.
+
+## Reading the output
+
+- High×High threats are design blockers — resolve in architecture, not in a later patch.
+- The "open questions" section is where human judgment is required; route those to the data owner / compliance, not the AI.
+- Pair with the [OWASP Top 10 audit](/asset/template/owasp-top10-audit) at build time to verify the mitigations were actually implemented.

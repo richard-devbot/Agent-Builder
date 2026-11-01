@@ -1,0 +1,311 @@
+---
+title: "Spec-Driven Builder Skill"
+slug: "spec-driven-builder"
+description: "Tool-neutral skill that walks developers through PRD → stories → schema → API → tests for any new feature, producing real artifacts at each step. The methodology is identical on every supported tool."
+type: skill
+phase: build
+category: frontend-development
+projectType: ["custom-app"]
+stack: ["claude-code", "copilot", "cursor"]
+tags: ["spec-driven", "playbook", "automation", "flagship"]
+difficulty: intermediate
+estimatedTime: "5 min setup"
+author: "Platform Engineering"
+featured: true
+createdAt: 2026-04-26
+updatedAt: 2026-04-26
+skillName: "spec-driven-builder"
+requires: []
+files:
+  - SKILL.md
+  - templates/prd-section.md
+  - templates/story-section.md
+  - templates/adr-section.md
+relatedAssets:
+  - "prd-generator"
+  - "user-story-from-prd"
+  - "rest-api-scaffolder-nodejs"
+---
+
+# Spec-Driven Builder Skill
+
+The flagship skill. Activates when a developer says "I want to build [feature]" and walks the coding agent through the entire SDLC playbook — producing real artifacts in the developer's repo at each step rather than asking the developer to copy prompts from a website.
+
+This is a **methodology**, not a tool integration. The phases, artifacts, and definitions-of-done below are the whole of the skill and are identical everywhere. *How* a tool surfaces the skill (auto-activation by description, an applied rule, an inline prompt, an explicit invocation) is a delivery detail handled by the Kit Builder when it generates your kit — it never changes the flow itself.
+
+## When it triggers
+
+The agent applies this skill when the user's request implies starting a new feature or capability:
+
+- "I need to build [a feature]"
+- "Help me implement [user story]"
+- "Let's build [capability]"
+- "Start a new feature for [domain]"
+- "Build me a [thing] that does [Y]"
+
+## What makes this skill different
+
+Templates are passive — the developer has to know they exist, find them, and use them. This skill is **proactive**: as soon as someone starts a feature, it offers to walk them through the spec-driven flow.
+
+It's the playbook, but living inside their IDE.
+
+## SKILL.md content
+
+```markdown
+---
+name: spec-driven-builder
+description: |
+  Use this skill when the user wants to build a new feature, capability, or
+  application — anything that starts a meaningful chunk of new work. Triggers
+  on phrasings like "build [feature]", "implement [story]", "create a [thing]
+  that does [Y]", "start a new feature for [domain]", or "let's build [X]".
+
+  Also use when the user describes a problem and asks for help implementing a
+  solution — even if they don't say "build" explicitly. If their request would
+  produce 200+ lines of code or touch multiple files, this skill applies.
+
+  Do NOT use for: small bug fixes, single-function changes, formatting, code
+  review, or pure questions about how something works.
+---
+
+# Spec-Driven Builder
+
+You guide developers through a structured build process: spec → design →
+implementation → tests. Each phase produces a real artifact committed to the
+developer's repo. Your job is to keep the developer in the right phase, ask
+the right questions, and never skip ahead.
+
+This flow is the same everywhere. When an `orchestrator` agent is running the
+iterative loop, it routes build-a-feature tasks here and records each phase's
+artifact in `.agent/progress/`.
+
+## Operating principles
+
+1. **Always confirm scope before generating.** A vague request leads to vague
+   output. Ask 1-3 clarifying questions before producing artifacts.
+
+2. **Produce real files, not just text in chat.** Every phase ends with files
+   the developer can git-add.
+
+3. **Don't skip phases unless the developer explicitly opts out.** If they say
+   "skip the PRD, just build it", warn them once that they may regret it,
+   then proceed.
+
+4. **Each phase has a definition of done.** Don't move forward until it's met.
+
+5. **Keep the developer in control.** Show your plan, get confirmation, then
+   execute. Never silently make architectural decisions.
+
+## The 6-phase flow
+
+### Phase 1: Understand the request
+
+When activated, IMMEDIATELY:
+
+1. Restate what you understood in 1-2 sentences
+2. Ask 1-3 clarifying questions covering:
+   - **Users**: Who is this for? (be specific — "customers" is vague)
+   - **Outcome**: What changes for them when this ships?
+   - **Constraints**: What's out of scope? Timeline? Existing systems to integrate?
+
+Example:
+> User: "Build me a customer portal for invoices."
+>
+> You: "I'll help you build a customer self-service invoice portal. Before I
+> generate anything, let me confirm:
+>
+> 1. Who's the primary user — end customer, account manager on their behalf,
+>    or both?
+> 2. What's the success metric — reduce support tickets, faster invoice
+>    download, something else?
+> 3. Any integrations required — existing billing system, SSO, ERP?"
+
+WAIT for answers. Do not proceed without them.
+
+### Phase 2: Generate PRD
+
+Once requirements are clear, produce a PRD:
+
+1. Tell the user: "Generating PRD at `docs/PRD.md`..."
+2. Create `docs/PRD.md` with these sections:
+   - Overview (2-3 sentences)
+   - Problem statement
+   - Goals and non-goals
+   - Target users
+   - Key user journeys
+   - Functional requirements (Must / Should / Nice-to-have)
+   - Success metrics
+   - Out of scope (explicit)
+   - Open questions
+
+Use the structure from the PRD Generator template (templates/prd-section.md).
+
+3. After creating, summarize: "PRD created. Key decisions captured: [3-5
+   bullets]. Open questions to resolve before build: [2-3]. Ready to break
+   this into stories?"
+
+WAIT for confirmation before moving on.
+
+### Phase 3: Generate user stories
+
+1. Tell the user: "Breaking PRD into stories at `docs/stories.md`..."
+2. Read `docs/PRD.md`
+3. Create `docs/stories.md` with stories following INVEST:
+   - "As a [persona], I want [capability], so that [benefit]"
+   - 2-4 Gherkin acceptance criteria per story
+   - Tag with priority (P0/P1/P2) and complexity (XS/S/M/L/XL)
+   - Group by epic if there are 8+ stories
+
+4. Summary: "Generated [N] stories across [M] epics. Highest priority is
+   [story title] — recommend starting there. Continue to architecture?"
+
+WAIT for confirmation.
+
+### Phase 4: Architecture decisions and schema
+
+For non-trivial features, capture key decisions before coding:
+
+1. Tell the user: "Capturing key architecture decisions..."
+2. Identify decisions that need documenting (database choice, auth approach,
+   state management pattern, etc.). For each:
+   - Create `docs/adr/NNN-decision-title.md` (use templates/adr-section.md)
+   - Document context, options, decision, consequences
+
+3. If the feature involves data, design the schema:
+   - For SQL: produce `db/migrations/NNNN_initial_<feature>.sql`
+   - For NoSQL: produce `db/schema/<feature>.md` documenting collections
+   - Include indexes, constraints, foreign keys
+
+4. Summary: "Created [N] ADRs and schema in [path]. Key trade-offs:
+   [bullets]. Continue to API contract?"
+
+WAIT for confirmation.
+
+### Phase 5: API contract first
+
+Before writing API code, generate the contract:
+
+1. Tell the user: "Generating OpenAPI spec at `docs/api/<feature>.yaml`..."
+2. Create OpenAPI 3.1 YAML spec:
+   - All endpoints with operationIds
+   - Full request/response schemas
+   - Auth requirements
+   - Error responses (401, 403, 404, 422, 500)
+   - Examples for happy and error paths
+
+3. Summary: "API contract complete with [N] endpoints. Now ready to scaffold
+   the implementation. Backend, frontend, or both?"
+
+WAIT for direction.
+
+### Phase 6: Scaffold implementation
+
+Based on the user's stack (ask if not yet known) and direction:
+
+**Backend:**
+- Generate the API scaffold matching the OpenAPI spec
+- Use the appropriate scaffolder pattern (Express + TypeScript, FastAPI,
+  NestJS, etc. — match what the project already uses)
+- Include: routes, controllers, services, validation schemas, error
+  handlers, types
+- Co-locate test stubs
+
+**Frontend:**
+- Generate page(s) with proper RSC/client boundaries
+- Forms with react-hook-form + Zod
+- Use the project's existing component library (shadcn/ui, etc.)
+
+**Tests:**
+- Unit tests for services and pure logic
+- Integration tests for API endpoints
+- E2E test for the critical user flow (1-2 tests, not 10)
+
+After each chunk, confirm before continuing: "API scaffold complete at
+[paths]. Want me to continue with the frontend, or pause for review?"
+
+## Anti-patterns to avoid
+
+- **Don't generate everything at once.** Phase boundaries exist for a reason.
+- **Don't skip clarifying questions** even if the developer seems impatient.
+  A 30-second question prevents 30 minutes of regenerated code.
+- **Don't make architectural decisions silently.** ADRs exist so future
+  engineers know why things are the way they are.
+- **Don't generate placeholder/lorem-ipsum content** in the artifacts. If the
+  developer hasn't given you enough context, ask for it.
+- **Don't write tests that just confirm what the code does** — write tests
+  that confirm what the code is supposed to do. Use the user stories.
+- **Don't put business logic in controllers.** Always: controllers (HTTP) →
+  services (logic) → repositories (data).
+
+## Resuming mid-flow
+
+If the developer comes back later and says "let's continue" or asks about
+something the skill already started:
+
+1. Check what artifacts already exist (`docs/PRD.md`, `docs/stories.md`,
+   `docs/adr/`, `db/migrations/`, etc.). If an `.agent/plan.md` exists, read it
+   too — it records which phase you're on.
+2. Identify which phase to resume from
+3. Confirm with developer: "Looks like you have PRD and stories done.
+   Continuing from architecture phase. Sound right?"
+
+## Handling "just build it"
+
+If the developer pushes back: "I don't need a PRD, just build it":
+
+Acknowledge once, then proceed. Don't lecture. Example:
+
+> "Got it. Skipping the spec docs — note that this means we'll have less
+> traceability if requirements change later. I'll generate code based on what
+> you've told me. Quick question to scope it: [single most important
+> clarifying question]?"
+
+Their project, their call. But still ask the one most important question.
+
+## Output style
+
+- Speak in active voice
+- Be specific about what you're doing: "Creating `docs/PRD.md`..." not
+  "Generating documents..."
+- Show file paths, not just "done"
+- Summaries are bulleted, brief, decision-focused
+- Match the developer's energy — if they're terse, be terse. If they want
+  detail, give detail.
+```
+
+## How it changes the developer experience
+
+**Without the skill:**
+1. Developer wants to build something
+2. They visit playbook.example.com
+3. Click into a playbook, fill intake, copy prompts manually
+4. Paste into their coding agent, run, copy output back into project
+5. Repeat for 9 steps
+6. Easy to skip steps, lose context
+
+**With the skill:**
+1. Developer says "I want to build a customer portal"
+2. The coding agent asks 3 clarifying questions
+3. PRD lands in their repo
+4. Stories land in their repo
+5. ADRs, schema, API spec, code, tests — all generated and committed in flow
+6. The playbook *happens* without the developer leaving their IDE
+
+This is the magic — and the strongest argument for why this ships this as a skill, not just a website.
+
+## Tips
+
+- Pair with the Code Reviewer Skill (also in this library) — once the build
+  is done, ask for a review and it auto-loads
+- Pair with the Azure DevOps Tickets Skill — the user stories generated by
+  this skill can be auto-pushed to ADO Boards as work items
+- For teams that have customized conventions (specific folder structure,
+  naming patterns, internal libraries), fork this skill and update the
+  Phase 6 instructions
+
+## Limitations
+
+- Best for new features (greenfield within an app). For touching legacy code,
+  the linear flow may not fit.
+- The skill generates artifacts; it doesn't execute them. Migrations don't
+  run, tests don't auto-execute. Developer is still in the loop.

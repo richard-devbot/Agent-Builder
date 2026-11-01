@@ -1,0 +1,137 @@
+---
+title: "GitHub Actions CI/CD Pipeline"
+slug: "github-actions-ci"
+description: "Generate a GitHub Actions workflow for build, test, lint, and deploy with proper caching and security."
+type: template
+phase: deploy
+category: ci-cd
+projectType: ["custom-app"]
+stack: ["github-actions"]
+tags: ["ci-cd", "automation", "devops"]
+difficulty: intermediate
+estimatedTime: "15 min"
+author: "Platform Engineering"
+featured: false
+createdAt: 2026-04-26
+updatedAt: 2026-04-26
+inputs:
+  - name: project_type
+    description: "Project type (nodejs, python, java, go)"
+    required: true
+  - name: test_runner
+    description: "Test command (e.g., 'pnpm test', 'pytest', 'mvn test')"
+    required: true
+  - name: deploy_target
+    description: "Deploy target (vercel, aws-ecs, gcp-cloud-run, none)"
+    required: false
+output:
+  format: code
+relatedAssets:
+  - "dockerfile-production"
+---
+
+# GitHub Actions CI/CD Pipeline
+
+Generate a production-ready GitHub Actions workflow with proper caching, parallel jobs, security scanning, and an optional deploy step.
+
+## When to use
+
+- Setting up CI for a new repo
+- Replacing a slow or unreliable existing workflow
+- Adding deploy automation to an existing CI pipeline
+
+## Prompt
+
+````text
+You are a senior platform engineer. Generate a GitHub Actions workflow for
+the project below.
+
+## Input
+
+**Project type:** {{project_type}}
+**Test runner:** {{test_runner}}
+**Deploy target:** {{deploy_target}}
+
+## Requirements
+
+### Triggers
+- Pull requests targeting `main`
+- Pushes to `main`
+- Manual `workflow_dispatch` for emergency runs
+
+### Jobs
+
+Run these in parallel where possible:
+
+1. **lint** - Lint the code (eslint/ruff/golangci-lint based on project type)
+2. **typecheck** - Type check (tsc/mypy/etc.) — skip if not applicable
+3. **test** - Run tests with coverage report
+4. **build** - Build the project, upload artifacts
+5. **security** - Dependency audit + secret scan
+6. **deploy** - Only on push to main, depends on all above passing
+
+### Standards
+
+- Pin action versions to commit SHAs (security best practice)
+- Use the project's standard package manager (pnpm/uv/maven/etc.)
+- Cache dependencies aggressively
+- Set timeouts on every job (max 10min for most)
+- Fail fast: if lint fails, don't waste runners on tests
+- Use OIDC for cloud auth (no long-lived secrets)
+- Run on `ubuntu-latest`
+- Concurrency control: cancel previous runs on the same branch
+
+### Security
+
+- `permissions:` block at the top: `contents: read` by default, expand per job
+- Run a dependency vulnerability scan (npm audit / safety / etc.)
+- Run gitleaks or similar for secret scanning
+- Use GitHub's built-in CodeQL where applicable
+
+### Artifacts & outputs
+
+- Test results as JUnit XML, attached to the PR
+- Coverage report uploaded (Codecov or GitHub artifact)
+- Build artifacts retained for 7 days
+- Container images (if applicable) tagged with git SHA
+
+## Output
+
+Provide:
+
+1. **`.github/workflows/ci.yml`** - the full workflow file with comments
+2. **`.github/workflows/deploy.yml`** - separate deploy workflow if applicable
+3. **`.github/dependabot.yml`** - dependabot config for the project type
+4. **README badges** - markdown for build status badges
+5. **Required secrets** - list of GitHub secrets the user needs to set up
+6. **Notes** - 3-5 things the reader should know about choices made
+````
+
+## Example input
+
+```yaml
+project_type: nodejs
+test_runner: "pnpm test --coverage"
+deploy_target: vercel
+```
+
+## Tips
+
+- Use `actions/cache` with the lockfile hash for fastest cache hits
+- Pin action SHAs (not version tags) — supply chain security matters
+- Run security scans on every PR, not just on main — it's where vulnerabilities are introduced
+- For monorepos, use path filters to skip unrelated jobs:
+  ```yaml
+  on:
+    pull_request:
+      paths:
+        - 'apps/web/**'
+        - 'packages/ui/**'
+  ```
+
+## Common pitfalls
+
+- Long-running tests that block deploys → split into a separate scheduled workflow
+- Secrets leaking via debug logs → use `::add-mask::` for any secret you echo
+- Flaky tests in CI → add retry logic, but fix root causes
+- Cache poisoning from PRs → use `pull_request_target` carefully and never run untrusted code with secrets

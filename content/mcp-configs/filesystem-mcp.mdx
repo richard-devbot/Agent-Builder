@@ -1,0 +1,271 @@
+---
+title: "Filesystem MCP"
+slug: "filesystem-mcp"
+description: "Pre-configured filesystem MCP server for Claude Code — safe, scoped read/write access to project files."
+type: mcp-config
+phase: build
+category: frontend-development
+projectType: ["custom-app", "etl"]
+stack: ["claude-code", "mcp"]
+tags: ["filesystem", "context", "foundation"]
+difficulty: beginner
+estimatedTime: "5 min setup"
+author: "Platform Engineering"
+featured: false
+createdAt: 2026-04-26
+updatedAt: 2026-04-26
+serverName: "filesystem"
+configFormat: "claude-code"
+envVars: []
+relatedAssets:
+  - "spec-driven-builder"
+  - "code-reviewer-skill"
+  - "test-generator-skill"
+---
+
+# Filesystem MCP
+
+A foundational MCP server config that gives Claude Code safe, scoped access to read and write project files. This is the foundation that makes most other skills work better — when Claude Code can read your existing code, it generates better-fitting new code.
+
+## What you can do once configured
+
+- "Read my package.json and tell me which test runner is configured"
+- "Look at the existing components in src/components and create a new one matching the pattern"
+- "Check what's in the migrations folder and continue the numbering"
+- "Search the codebase for usages of the old API client"
+- "Create a new file at src/lib/utils/format.ts with these helpers"
+
+## Why this matters
+
+Most skills become dramatically more useful with filesystem access:
+
+- **Spec-Driven Builder Skill** can write PRD/stories/migrations to the right paths
+- **Code Reviewer Skill** can read related files for context (not just the diff)
+- **Test Generator Skill** can match existing test patterns by reading them
+- **Component Library Skill** inspects design system tokens and conventions
+- **Documentation Skill** updates existing docs rather than guessing
+
+Without filesystem access, Claude Code is limited to whatever you paste in chat.
+
+## Setup
+
+### Step 1: Decide which directories to allow
+
+For each project you work on, you need to whitelist the directory. The MCP server **enforces this whitelist** — Claude Code cannot read or write outside it.
+
+Common patterns:
+
+**Per-project** (most secure, recommended)
+```bash
+ALLOWED_DIRS="/Users/you/code/customer-portal,/Users/you/code/agent-builder"
+```
+
+**Code root** (simpler if you have many projects)
+```bash
+ALLOWED_DIRS="/Users/you/code"
+```
+
+**Avoid:**
+- `/Users/you` (your entire home directory — Claude Code shouldn't access SSH keys, browser data, etc.)
+- `/` (root — never)
+
+### Step 2: Add the MCP config to Claude Code
+
+Edit `~/.config/claude-code/mcp.json`:
+
+```json
+{
+  "mcpServers": {
+    "filesystem": {
+      "command": "npx",
+      "args": [
+        "-y",
+        "@modelcontextprotocol/server-filesystem",
+        "/Users/you/code"
+      ]
+    }
+  }
+}
+```
+
+> The allowed directories are passed as positional arguments to the MCP server, not env vars. List multiple directories as separate arguments:
+
+```json
+"args": [
+  "-y",
+  "@modelcontextprotocol/server-filesystem",
+  "/Users/you/code/project-a",
+  "/Users/you/code/project-b"
+]
+```
+
+### Step 3: Restart Claude Code
+
+### Step 4: Verify it works
+
+Ask Claude Code: "Read the package.json in [some allowed project]"
+
+It should return the file contents. If it says "permission denied," check your allowed directories.
+
+## Available tools
+
+### Reading
+- `fs_read_file` - Read a single file's contents
+- `fs_read_multiple_files` - Read several files in one call (efficient for context)
+- `fs_list_directory` - List files and folders in a directory
+- `fs_search_files` - Find files by name pattern
+- `fs_get_file_info` - File metadata (size, modified date)
+
+### Writing
+- `fs_write_file` - Create or overwrite a file
+- `fs_edit_file` - Replace specific content in a file (safer than full overwrite)
+- `fs_create_directory` - Make a new directory
+- `fs_move_file` - Rename or move a file
+
+### Search
+- `fs_search_within_files` - Grep across files (limited by allowed dirs)
+
+## Recommended pairings
+
+This MCP is foundational — pair it with everything:
+
+- **Spec-Driven Builder** writes PRDs, stories, ADRs, migrations to the project
+- **Code Reviewer** reads files referenced in a diff for context
+- **Test Generator** reads existing tests to match conventions
+- **Component Library** inspects existing components and design tokens
+- **Database Migration** reads existing migrations to continue numbering
+- **Documentation** updates existing docs rather than starting from scratch
+
+## Security notes
+
+This MCP gives Claude Code direct file system access. Take this seriously:
+
+### Always do
+
+- **Whitelist specific directories** — never `/` or `/Users/you`
+- **Review what Claude Code writes** before committing
+- **Keep secrets out of allowed paths** — `.env` files, SSH keys, password managers
+- **Use git** — every change should be visible in `git diff` so you can review
+
+### Never do
+
+- Allow access to your home directory wholesale
+- Allow access to `/etc`, `/usr`, system directories
+- Run Claude Code with elevated privileges (sudo)
+- Store unencrypted credentials in allowed paths
+
+### `.env` files specifically
+
+Even if your `.env` is in an allowed directory:
+
+1. Add `.env` to `.gitignore` (you should already)
+2. Be cautious about asking Claude Code to "read all config files"
+3. Consider keeping secrets in a password manager and referencing them via env vars only at runtime
+
+The MCP server can read these files if they're in the allowed path. Treat them as sensitive.
+
+## Common patterns
+
+### Adding a new project to the whitelist
+
+When you start a new project, update mcp.json:
+
+```json
+"args": [
+  "-y",
+  "@modelcontextprotocol/server-filesystem",
+  "/Users/you/code/project-a",
+  "/Users/you/code/project-b",
+  "/Users/you/code/new-project"
+]
+```
+
+Restart Claude Code.
+
+### Read-only mode
+
+If you want Claude Code to read but never write:
+
+```json
+{
+  "mcpServers": {
+    "filesystem-readonly": {
+      "command": "npx",
+      "args": [
+        "-y",
+        "@modelcontextprotocol/server-filesystem",
+        "--read-only",
+        "/Users/you/code"
+      ]
+    }
+  }
+}
+```
+
+Useful when you're learning a codebase and don't want accidental writes.
+
+### Watching for changes
+
+The MCP server doesn't watch files — it reads on demand. If you change a file outside Claude Code, ask Claude Code to re-read it.
+
+## Troubleshooting
+
+**"Permission denied" on a file you can clearly access**
+- The file is outside an allowed directory — add the directory to the whitelist
+- Symlinks across allowed directories: the target must also be in an allowed dir
+
+**"File not found" on a file you just created**
+- MCP server caches stale state in some versions — restart Claude Code
+- Check the path is exactly right (case-sensitive on Linux/Mac)
+
+**MCP server doesn't appear in Claude Code**
+- Verify the JSON in mcp.json is valid (use a linter)
+- Check Claude Code logs for the server's startup messages
+- Try running `npx -y @modelcontextprotocol/server-filesystem /tmp` manually to confirm the package works
+
+**Slow file operations on large projects**
+- `fs_search_within_files` on a node_modules-bloated repo is slow
+- Add `node_modules`, `dist`, `.next`, `.cache` to your gitignore — the MCP respects gitignore patterns in newer versions
+
+## Customization
+
+### Excluding patterns
+
+The MCP server respects `.gitignore` by default. To add additional excludes, create a `.mcpignore` file in the allowed directory:
+
+```
+# .mcpignore
+*.log
+secrets/
+*.pem
+.env*
+```
+
+### Combining with git context
+
+Pair this with git information by also installing the git MCP server:
+
+```json
+"git": {
+  "command": "npx",
+  "args": ["-y", "@modelcontextprotocol/server-git", "--repository", "/Users/you/code/project-a"]
+}
+```
+
+Then Claude Code can do "show me the git log" or "what's in the diff vs main" alongside file operations.
+
+## What this enables
+
+Practically speaking, this MCP is what turns Claude Code from "an AI you paste into" to "an AI that works with your codebase."
+
+Without it:
+- You paste files into chat
+- You manually copy generated output back into your editor
+- Claude Code has no awareness of your project's conventions
+
+With it:
+- Claude Code reads files directly
+- Generated output goes to the right paths
+- Skills that depend on project context (most of them) work properly
+
+This is the closest the MCP ecosystem has to a "must install" config.

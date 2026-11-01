@@ -1,0 +1,489 @@
+---
+title: "COBOL Modernization Playbook"
+slug: "cobol-modernization-playbook"
+description: "Modernize COBOL applications via the four canonical strategies (replatform, refactor, rewrite, replace) — with a deep walkthrough of the rewrite path most projects need."
+type: playbook
+phase: design
+category: architecture
+projectType: ["custom-app"]
+stack: ["cobol", "mainframe", "java", "dotnet"]
+tags: ["migration", "cobol", "mainframe", "modernization"]
+difficulty: advanced
+estimatedTime: "4-8 quarters minimum, often longer"
+totalEstimatedTime: "4-8 quarters minimum — multi-year for non-trivial apps"
+author: "Platform Engineering"
+featured: true
+createdAt: 2026-04-26
+updatedAt: 2026-04-27
+intakeFields:
+  - name: legacy_system_description
+    label: "Legacy system description"
+    type: textarea
+    required: true
+    placeholder: "Insurance policy administration system, COBOL on z/OS, 2.5M LOC, 800 programs, ~400 batch jobs, online via CICS"
+  - name: data_storage
+    label: "Data storage"
+    type: text
+    required: true
+    placeholder: "DB2 z/OS (~2TB), VSAM KSDS (~50 datasets), flat files for batch interchange"
+  - name: code_volume
+    label: "Code volume"
+    type: text
+    required: true
+    placeholder: "Programs: 800. JCL: ~600 jobs. Copybooks: ~300. Approximate LOC: 2.5M."
+  - name: business_criticality
+    label: "Business criticality"
+    type: textarea
+    required: true
+    placeholder: "Tier 1 — handles all policy adjudication, $1B+ annual premium volume, regulated by state insurance departments"
+  - name: target_runtime
+    label: "Preferred target runtime"
+    type: text
+    required: true
+    placeholder: "Java 21 + Spring Boot on Azure / .NET 8 / Both depending on subsystem"
+  - name: timeline_driver
+    label: "What's driving the timeline?"
+    type: text
+    required: false
+    placeholder: "Mainframe contract renewal in 18 months, $4M/year savings target"
+  - name: workforce_situation
+    label: "Mainframe workforce situation"
+    type: textarea
+    required: false
+    placeholder: "5 COBOL developers, 3 retiring in next 2 years; minimal pipeline for replacement"
+steps:
+  - number: 1
+    title: "Audit and Inventory"
+    description: "Inventory programs, copybooks, JCL, data sources, CICS resources, schedulers, integrations, and people. COBOL audits are bigger than typical legacy audits."
+    whatYoureDoing: "Produce a comprehensive mainframe inventory: programs (count, type, LOC), copybooks (with cross-reference), JCL job streams, data sources (DB2 / VSAM / IMS / flat files), CICS resources, scheduler dependencies, external integrations, people (who knows what / retirement timeline), and existing documentation. Use mainframe analysis tools (IBM ADDI, Micro Focus Enterprise Analyzer, etc.) to accelerate."
+    primaryAsset: "legacy-system-audit"
+    alternativeAssets:
+      - slug: "cobol-business-rule-extraction"
+        when: "Pulling rules out of representative programs as part of the audit (rather than waiting for Phase 2)"
+      - slug: "cobol-batch-job-decomposition"
+        when: "JCL inventory needs decomposition into target-runtime equivalents (Spring Batch / Step Functions / Airflow)"
+    relevantSkills:
+      - "legacy-code-analyzer-skill"
+      - "migration-planner-skill"
+    relevantMcpConfigs:
+      - "filesystem-mcp"
+      - "postgres-mcp"
+      - "confluence-mcp"
+    estimatedTime: "6-12 weeks"
+    definitionOfDone:
+      - "Complete program inventory (count, type, LOC, last modified)"
+      - "Copybook hierarchy mapped"
+      - "JCL job-stream inventory"
+      - "Data-source inventory (DB2, VSAM, IMS, flat files)"
+      - "CICS resource inventory"
+      - "External integration inventory"
+      - "Critical-path analysis: which programs / jobs are most critical"
+      - "Workforce assessment: who knows what, retirement timeline"
+      - "Risk register with COBOL-specific risks"
+      - "Strategic recommendation (rewrite vs replatform vs refactor vs replace) confirmed"
+    commonPitfalls:
+      - "Underestimating program count — \"we have 200 programs\" usually turns into 800 once subroutines and utilities are counted"
+      - "Missing copybook hierarchies — copybooks include other copybooks; the dependency graph matters"
+      - "Skipping the workforce audit — if 3 of 5 COBOL developers retire mid-project, the project is in trouble"
+      - "Trusting documentation — it's almost always incomplete and outdated"
+      - "Not running automated analysis tools — manual analysis of millions of lines is impossibly slow"
+
+  - number: 2
+    title: "Business Rule Extraction (the long phase)"
+    description: "Convert each in-scope COBOL program into a structured catalog of business rules, decision tables, calculations, and edge cases — validated by SMEs. This is usually the longest phase."
+    whatYoureDoing: "For every program in scope, extract the business rules using the cobol-business-rule-extraction template. Run iteratively: auto-extract via tooling, then senior engineers refine, then business analysts validate, then SMEs sign off. Each program produces 30-100 rules plus decision tables, calculation formulas, edge cases, and open questions."
+    primaryAsset: "cobol-business-rule-extraction"
+    alternativeAssets:
+      - slug: "cobol-to-java-translation-checklist"
+        when: "Working through translation patterns alongside the rule extraction (helps surface what each idiom is doing)"
+    relevantSkills:
+      - "legacy-code-analyzer-skill"
+      - "migration-planner-skill"
+    relevantMcpConfigs:
+      - "filesystem-mcp"
+      - "confluence-mcp"
+    estimatedTime: "3-6 quarters (yes — this is the longest phase)"
+    definitionOfDone:
+      - "All in-scope programs have extracted rule catalogs"
+      - "Rules validated by business analysts"
+      - "SMEs signed off on critical-path rules"
+      - "Decision tables built for complex branching"
+      - "Calculation formulas with rounding rules documented"
+      - "Edge cases explicit"
+      - "Cross-program rule duplications identified (same rule, different implementations)"
+      - "Open questions tracked and assigned"
+    commonPitfalls:
+      - "Trying to extract rules from all 800 programs in parallel — sequence by criticality; do the most important first"
+      - "Skipping business-analyst validation — unvalidated rules will produce a wrong rewrite"
+      - "Treating extraction as one-shot — iterative refinement is normal; budget for 2-3 passes"
+      - "Letting SMEs disengage — SME availability is your scarcest resource; lock in commitments"
+      - "Auto-extracted rules treated as final — tools miss context; human review is non-negotiable"
+      - "Missing the cross-program patterns — same rule may be implemented 5 different ways across the codebase"
+
+  - number: 3
+    title: "Target Architecture Design"
+    description: "Design the modern target — not just the tech stack, but the architectural approach (monolith vs microservices, sync vs event-driven, batch vs online, cloud vs hybrid)."
+    whatYoureDoing: "Capture the target architecture as a set of ADRs covering monolith vs modular monolith vs microservices, synchronous vs event-driven, database strategy, batch architecture, online architecture, auth, cloud / hybrid choice, and operational model. Document why each decision was made — a COBOL rewrite has more architectural freedom than a .NET migration."
+    primaryAsset: "coexistence-architecture-adr"
+    alternativeAssets:
+      - slug: "adr-generator"
+        when: "You want to author each architectural decision as its own ADR rather than one combined document"
+    relevantSkills:
+      - "migration-planner-skill"
+      - "documentation-skill"
+    relevantMcpConfigs:
+      - "filesystem-mcp"
+    estimatedTime: "8-12 weeks"
+    definitionOfDone:
+      - "Target architecture documented end-to-end"
+      - "Monolith vs microservice decision made with rationale"
+      - "Sync vs async decision per major capability"
+      - "Database strategy decided"
+      - "Batch architecture decided (Spring Batch / Step Functions / Airflow / etc.)"
+      - "Online architecture decided (REST / GraphQL / event-driven)"
+      - "Auth approach decided"
+      - "Cloud / hybrid decision made"
+      - "10-15 ADRs documenting the key decisions"
+      - "Operational model defined (who runs what, with which skills)"
+    commonPitfalls:
+      - "Premature microservices — COBOL monoliths often work because of transaction integrity; splitting too early creates distributed-system pain"
+      - "Ignoring batch — online apps get all the architecture attention; batch gets shoehorned in later"
+      - "Skipping the ops model — modern stack with no one to run it = ops nightmare"
+      - "All-in on bleeding-edge tech — COBOL stack was stable for decades; new stack should also bias toward stability"
+
+  - number: 4
+    title: "Data Migration Design"
+    description: "Plan how data moves from mainframe storage (DB2 z/OS, VSAM, IMS, IDMS, flat files) to a modern relational target. Schema design and ETL strategy."
+    whatYoureDoing: "Inventory each data source, design the relational target schema (using vsam-to-relational-mapping for non-relational sources), choose an ETL strategy (big-bang / dual-write / CDC / trickle), pick tooling (IBM Data Replication / Qlik / AWS DMS / IBM CDC / Connect for IMS), and plan validation + rollback. Watch out for EBCDIC encoding, packed/zoned decimal types, and z/OS-specific column types."
+    primaryAsset: "vsam-to-relational-mapping"
+    alternativeAssets:
+      - slug: "data-migration-plan"
+        when: "DB2 z/OS → cloud RDBMS migration where the schema is already relational"
+      - slug: "sql-server-schema-translator"
+        when: "Adapting the SQL Server translation patterns for DB2 z/OS specifics"
+      - slug: "database-migration-playbook"
+        when: "The data layer is complex enough to follow its own dedicated playbook in parallel"
+    relevantSkills:
+      - "data-validation-skill"
+      - "migration-planner-skill"
+      - "database-migration-skill"
+    relevantMcpConfigs:
+      - "postgres-mcp"
+      - "filesystem-mcp"
+    estimatedTime: "8-12 weeks"
+    definitionOfDone:
+      - "Schema mapping complete for all major datasets"
+      - "ETL strategy chosen (big-bang / dual-write / CDC / trickle)"
+      - "Tooling chosen and validated on sample data"
+      - "Encoding strategy documented (EBCDIC → UTF-8)"
+      - "Sign / decimal conventions handled (packed / zoned decimal)"
+      - "Validation queries written"
+      - "Rollback strategy clear (preserve source until well after cutover)"
+    commonPitfalls:
+      - "Trying to \"improve\" the schema during migration — migrate as-is; clean up later. Two changes at once are two bugs at once"
+      - "Ignoring EBCDIC encoding — surfaces as garbled characters days later"
+      - "Underestimating volume — \"it's only a few terabytes\" is a few terabytes you have to validate"
+      - "Skipping spot-checks — counts and sums match while specific records can still be wrong"
+
+  - number: 5
+    title: "Build the Coexistence Layer"
+    description: "Stand up the bridge between mainframe and the new system — API gateway, data sync, dual auth, distributed observability."
+    whatYoureDoing: "Deploy an API gateway in front of the mainframe (z/OS Connect EE or similar) so new apps call REST APIs that route to mainframe transactions until each capability is migrated. Set up CDC or MQ-based data sync between DB2 z/OS and the cloud DB. Federate auth (Active Directory + RACF). Wire centralized observability that spans both worlds."
+    primaryAsset: "coexistence-architecture-adr"
+    alternativeAssets:
+      - slug: "auth-migration-strategy"
+        when: "Auth federation across AD + RACF is the hardest piece of coexistence"
+      - slug: "feature-flag-rollout-migration"
+        when: "Routing decisions handled by a feature-flag system rather than gateway rules"
+    relevantSkills:
+      - "compatibility-layer-generator-skill"
+      - "migration-planner-skill"
+    relevantMcpConfigs:
+      - "azure-devops-mcp"
+      - "filesystem-mcp"
+    estimatedTime: "8-12 weeks"
+    definitionOfDone:
+      - "API gateway operational, routing to mainframe and new system"
+      - "Data sync running and monitored (lag, error rate, drift detection)"
+      - "Auth federation working — single sign-in covers both"
+      - "Centralized observability across both systems"
+      - "\"Hello world\" capability deployed through the new system end-to-end"
+    commonPitfalls:
+      - "Direct mainframe-to-cloud-DB queries from new app — tempting; produces tight coupling that's hard to break later"
+      - "Sync lag invisible — without monitoring, drift accumulates and surfaces as customer complaints"
+      - "Auth federation half-done — either fully integrate or accept dual logins; partial integration is the worst case"
+
+  - number: 6
+    title: "Migrate the First Capability (Vertical Slice)"
+    description: "Ship one complete capability through the new stack. Read-only or low-stakes, self-contained, bounded data — exercises the coexistence layer end-to-end."
+    whatYoureDoing: "Pick a small capability (read-only, self-contained, bounded data). Use the rule catalog from Phase 2 as the spec. Build the modern implementation, build behavior parity tests from the extracted rules, deploy via feature flag in shadow mode (new runs but doesn't affect users), run shadow for weeks, then canary to a small % of users."
+    primaryAsset: "feature-flag-rollout-migration"
+    alternativeAssets:
+      - slug: "behavior-parity-test-suite"
+        when: "The slice is regulated and parity must be proven; expand the parity-test framework you built in earlier migrations"
+      - slug: "cobol-to-java-translation-checklist"
+        when: "Implementation pattern reference while writing the new code"
+      - slug: "openapi-spec-generator"
+        when: "Slice exposes a public API; lock the contract first"
+    relevantSkills:
+      - "spec-driven-builder"
+      - "test-generator-skill"
+      - "code-reviewer-skill"
+      - "data-validation-skill"
+    relevantMcpConfigs:
+      - "azure-devops-mcp"
+      - "github-mcp"
+      - "filesystem-mcp"
+      - "postgres-mcp"
+    estimatedTime: "4-6 months for the first slice"
+    definitionOfDone:
+      - "Slice 1 implementation complete in the new stack"
+      - "Parity tests pass against extracted rules"
+      - "Shadow mode running, comparing output to mainframe"
+      - "Performance meets targets"
+      - "Internal validation passed"
+      - "Canary rollout to a small user set successful"
+      - "Stop conditions clear; rollback procedure tested"
+    commonPitfalls:
+      - "Big slice 1 — the first slice should be small enough to fail safely"
+      - "Skipping shadow mode — running new in parallel without affecting users catches bugs that tests miss"
+      - "Performance neglect — cloud-native architectures can be slower than COBOL on hot paths if not designed carefully"
+      - "No rollback drill — the first time you flip the flag back is the worst time to discover it doesn't work"
+
+  - number: 7
+    title: "Continue Migrating Slices"
+    description: "Migrate remaining capabilities one by one. Track visible progress: % programs migrated, % transactions on new system, MIPS reduction, cost savings realized."
+    whatYoureDoing: "Slice by slice, capability by capability. Each slice gets faster as the team builds expertise and the platform matures. Common patterns: by tenant, by function (customer service → billing → claims), by data domain, or by interface (internal admin first)."
+    primaryAsset: "feature-flag-rollout-migration"
+    alternativeAssets:
+      - slug: "cobol-to-java-translation-checklist"
+        when: "Working through unfamiliar COBOL idioms in a slice's source programs"
+      - slug: "stored-procedure-to-service"
+        when: "A slice has DB2-resident logic that should move to app code"
+      - slug: "data-migration-plan"
+        when: "A slice requires its own data movement plan beyond the global Phase 4 design"
+    relevantSkills:
+      - "spec-driven-builder"
+      - "migration-planner-skill"
+      - "test-generator-skill"
+      - "code-reviewer-skill"
+    relevantMcpConfigs:
+      - "azure-devops-mcp"
+      - "github-mcp"
+      - "filesystem-mcp"
+      - "postgres-mcp"
+    estimatedTime: "1-3 years (the dominant phase)"
+    definitionOfDone:
+      - "All capabilities have a modern equivalent"
+      - "Mainframe traffic significantly reduced (target: &lt;10% of original)"
+      - "All scheduled batch migrated"
+      - "All integrations updated"
+      - "All tenants / customers migrated"
+    commonPitfalls:
+      - "Long-tail capabilities (last 10%) — they take 50% of the time. Budget accordingly"
+      - "Burnout — multi-year projects need rotation. Don't burn out the team that started"
+      - "Scope creep — \"while we're rewriting it, let's also...\" → no"
+      - "Stalling on rare-but-critical edge cases — edge cases that fire once a year will be discovered the year after the project completes"
+
+  - number: 8
+    title: "Decommission the Mainframe"
+    description: "Turn off the mainframe. Sequence: read-only mainframe → selective shutdowns of CICS regions and batch → data archive → hardware decommission → license cancellation."
+    whatYoureDoing: "Mainframes don't turn off easily. Block writes (all writes go to new), then turn off CICS regions and batch jobs one at a time (each shutdown surfaces forgotten consumers). Archive historical data to cheap, queryable storage for compliance. Decommission hardware with the vendor. Cancel every IBM, vendor, scheduler, and monitoring license explicitly — they keep billing until you do."
+    primaryAsset: "migration-cutover-runbook"
+    alternativeAssets:
+      - slug: "migration-rollback-plan"
+        when: "Pre-flight check — make sure rollback is documented and rehearsed before the first shutdown"
+    relevantSkills:
+      - "migration-planner-skill"
+      - "documentation-skill"
+    relevantMcpConfigs:
+      - "azure-devops-mcp"
+      - "confluence-mcp"
+      - "filesystem-mcp"
+    estimatedTime: "4-12 months"
+    definitionOfDone:
+      - "Mainframe write traffic = 0% for 30+ consecutive days"
+      - "All scheduled batch decommissioned"
+      - "All CICS regions stopped"
+      - "All data archived to long-term storage"
+      - "All integrations confirmed off mainframe"
+      - "Mainframe hardware decommissioned"
+      - "All vendor licenses cancelled"
+      - "Final cost reduction verified"
+    commonPitfalls:
+      - "Decommissioning too fast — read access for 6-12 months catches forgotten consumers"
+      - "No data archive — compliance requires keeping data; archive cheaply but accessibly"
+      - "Forgetting license costs — they keep billing until cancelled"
+      - "No celebration — this is a multi-year project that succeeded. Recognize it"
+
+  - number: 9
+    title: "Workforce Transition"
+    description: "Capture institutional knowledge before it retires; retrain transferable engineers; transition operations; lead the culture change. Failed modernizations often fail here."
+    whatYoureDoing: "Run knowledge capture from retiring engineers (recorded interviews, paired programming with new-stack engineers, written documentation). Invest in retraining for COBOL developers willing to transition. Train mainframe ops teams on the cloud stack or plan for departures. Lead the shift in cadence (deployments per day vs per quarter) and observability practices."
+    primaryAsset: "documentation-skill"
+    alternativeAssets:
+      - slug: "migration-planner-skill"
+        when: "You want one workspace where the workforce-transition plan and the technical migration plan stay aligned"
+    relevantSkills:
+      - "documentation-skill"
+      - "migration-planner-skill"
+    relevantMcpConfigs:
+      - "confluence-mcp"
+      - "filesystem-mcp"
+    estimatedTime: "Throughout the program, intensifying in the last 6-12 months"
+    definitionOfDone:
+      - "Knowledge capture from retiring engineers complete"
+      - "Retraining program for transferable engineers complete"
+      - "Operations team trained on the new stack"
+      - "HR plans for non-transferable roles documented and executed"
+      - "Culture transition managed (deployment cadence, observability practices)"
+    commonPitfalls:
+      - "Treating the COBOL team as obstacles — they have decades of valuable knowledge. Bring them along"
+      - "No retraining budget — leaders assume engineers can pick up new skills off-hours; they often can't or won't"
+      - "Ignoring operations — mainframe ops and cloud ops are different jobs. Plan for it"
+      - "No leadership change — same leadership pattern that ran mainframe for 20 years won't optimize the cloud-native target"
+
+  - number: 10
+    title: "Post-Migration Validation and Optimization"
+    description: "Verify the modernization actually delivered (cost, performance, reliability, agility, compliance), then optimize the parts that were rushed."
+    whatYoureDoing: "Validate outcomes against the original business case: are cost savings actually realized net of cloud spend and services? Do hot paths perform acceptably? Is reliability matching mainframe? Is the team shipping faster? Then optimize: rationalize cloud spend (30%+ savings opportunity is typical), refactor rushed code, address tech debt, establish new norms (CI/CD cadence, observability, testing standards)."
+    primaryAsset: "performance-profiler-skill"
+    alternativeAssets:
+      - slug: "documentation-skill"
+        when: "Driving the post-migration retrospective and the optimization roadmap"
+      - slug: "code-reviewer-skill"
+        when: "Auditing migration-era code for the rushed-but-shipped parts that need cleanup"
+      - slug: "regression-bed-master"
+        when: "Standing up a permanent regression bed for the modernized system"
+    relevantSkills:
+      - "performance-profiler-skill"
+      - "documentation-skill"
+      - "code-reviewer-skill"
+    relevantMcpConfigs:
+      - "azure-devops-mcp"
+      - "github-mcp"
+      - "postgres-mcp"
+    estimatedTime: "6-12 months post-cutover"
+    definitionOfDone:
+      - "Cost outcomes verified vs the original business case"
+      - "Performance targets met"
+      - "Reliability targets met"
+      - "Agility metrics established (deployment frequency, lead time, MTTR)"
+      - "Compliance review complete"
+      - "Optimization roadmap for the next 12 months"
+      - "Migration retrospective documented"
+    commonPitfalls:
+      - "Skipping the validation — project ends with cutover; nobody verifies the business case actually realized"
+      - "No optimization phase — code shipped during migration is rushed; permanent if not refactored"
+      - "No retrospective — lessons not captured = repeated mistakes on the next migration"
+wrapUp:
+  deliverables:
+    - "Mainframe decommissioned (hardware + licenses)"
+    - "Modern stack running every core business capability"
+    - "Cost savings realized vs the mainframe baseline"
+    - "Validated business-rule catalogs at /docs/migration/rules/ (the most durable artifact)"
+    - "Workforce transitioned to new skills (or transitioned out, with knowledge captured)"
+    - "Documentation that survives turnover"
+    - "Audit, ADRs, parity tests, and cutover runbook in /docs/migration/"
+  nextSteps:
+    - title: "Run a 12-month optimization sprint"
+      description: "Most modernization code shipped quickly. Allocate a quarter to refactor the rushed parts and rationalize cloud spend."
+    - title: "Establish a regression bed for the new system"
+      description: "The behavior-parity tests you built were for the migration. Refactor them into a permanent regression suite."
+    - title: "Document the playbook updates for the next mainframe modernization"
+      description: "What surprised you? What would you do differently? Capture it while it's fresh — your firm will do this again."
+relatedAssets:
+  - "aspnet-to-angular-dotnet-modernization-playbook"
+  - "vbnet-winforms-to-spa-migration-playbook"
+  - "database-migration-playbook"
+  - "legacy-system-audit"
+  - "cobol-business-rule-extraction"
+---
+
+# COBOL Modernization Playbook
+
+A 10-phase playbook for modernizing a COBOL application off the mainframe. Unlike .NET migrations (where the team usually knows the legacy stack), COBOL modernizations require specialized knowledge, careful strategy selection, and longer timelines.
+
+This playbook walks through **strategy selection first** (the four canonical strategies below), then deep-dives the **rewrite path** that most modernization projects take.
+
+## When to use this playbook
+
+- You have COBOL applications running on mainframe (z/OS, AS/400, Tandem)
+- Drivers include cost reduction, workforce risk, agility, or compliance
+- You're considering modernization but haven't committed to an approach
+- The project is multi-year (typical) — anything &lt;12 months should question scope
+
+## When NOT to use this playbook
+
+- Mainframe is operationally fine and not under threat — modernization for its own sake rarely pays off
+- The COBOL is small (&lt;50K LOC, &lt;50 programs) — may be simpler to handle as a custom-app migration
+- You've already committed to a specific path (replatform, etc.) — see the targeted resources for that approach
+
+## The four strategies (decide first)
+
+Before writing a line of code, determine which of the four canonical strategies fits. This decision drives everything else; the 10 phases that follow assume you've chosen **rewrite** (the most common modernization path).
+
+### Strategy 1 — Replatform (lift-and-shift)
+
+Move COBOL execution from mainframe to commodity hardware (x86 Linux in cloud) using a runtime like Micro Focus Enterprise Server, IBM Wazi, AWS Mainframe Modernization, Heirloom, or Asysco AMT. The COBOL stays. The mainframe goes.
+
+**Right when:** cost reduction is primary, code is well-understood and stable, no significant agility needs, low risk appetite. **Wrong when:** you want to rewrite eventually, the application needs significant changes, or vendor lock-in to the replatform tooling is unacceptable. Typical: $5-15M one-time, 30-60% MIPS savings, 2-4 year payback.
+
+### Strategy 2 — Refactor (automated translation)
+
+Use tools (AWS Blu Age, Asysco AMT, Modern Systems / Astadia) to automatically translate COBOL to Java or C#. Output is functional but not idiomatic.
+
+**Right when:** need to get off mainframe AND off COBOL, can't spend years in rewrite, accept "ugly modern code" you'll improve. **Wrong when:** code quality matters from day 1, application needs restructuring, team can't accept tool-generated code in production. Typical: $500K-$2M tooling, $5-15M services.
+
+### Strategy 3 — Rewrite (reverse-engineer + re-implement)
+
+Understand the rules, design from scratch, implement modern. Use COBOL as the behavior reference. **The rest of this playbook focuses here.**
+
+**Right when:** architecture itself is part of the problem, want cloud-native patterns, have leadership support and multi-year appetite, sufficient SME availability. **Wrong when:** insufficient business-rule knowledge, tight timeline, no SME access, regulatory burden requiring parity proof (rewrite makes parity HARDER). Typical: $15-50M+, 3-7 years, industry failure rate 50-70%.
+
+### Strategy 4 — Replace (commercial off-the-shelf)
+
+Buy software that does what your COBOL does (Guidewire, Temenos, SAP, Epic). Migrate data in. Retire COBOL.
+
+**Right when:** mature COTS exists in your industry, customizations aren't truly differentiated, willingness to change processes to fit the COTS. **Wrong when:** heavy customizations are competitively differentiated, COTS doesn't fit the model, customizing recreates the maintenance burden. Typical: $500K-$10M/year license, $5-30M implementation.
+
+### Decision matrix
+
+| Driver | Replatform | Refactor | Rewrite | Replace |
+|--------|-----------|----------|---------|---------|
+| Cost reduction primary | ✅ Best | ⚠️ Maybe | ❌ Wrong tool | ⚠️ Maybe |
+| Workforce risk (no COBOL skills) | ⚠️ Defers | ✅ Good | ✅ Good | ✅ Good |
+| Need agility / new features | ❌ No help | ⚠️ Some | ✅ Best | ✅ If COTS fits |
+| Tight timeline (&lt;2 years) | ✅ Good | ✅ Good | ❌ Won't make it | ⚠️ Depends |
+| Behavior parity required (regulatory) | ✅ Best | ✅ Good | ❌ Hard | ⚠️ Depends |
+| Custom logic is differentiator | ⚠️ N/A | ⚠️ N/A | ✅ Preserves | ❌ Loses |
+| Strong leadership / governance | Any | Any | ✅ Required | ✅ Required |
+
+For your specific situation, document why one strategy fits and others don't.
+
+## Critical success factors (rewrite path)
+
+1. **Strong leadership sponsorship** — multi-year projects need political air cover.
+2. **Clear strategy decision upfront** — don't drift between strategies; pick one and commit.
+3. **Adequate budget** — underfunded COBOL modernizations fail predictably.
+4. **Senior engineers who can read COBOL** — the scarcest resource. Hire / retain / train.
+5. **Business stakeholder availability** — rule extraction needs SME time; without it the project stalls.
+6. **Realistic timeline expectations** — set them at the start, not when you're 6 months over.
+7. **Automation tooling** — manual analysis of millions of lines is impossibly slow. Invest in tools.
+8. **Risk-aware culture** — mainframe ops culture is risk-averse for good reasons. Bring some of that to the modern stack rather than discarding it.
+
+## When to engage specialists
+
+Even with this playbook, COBOL modernization usually requires specialist expertise. Engage when:
+
+- **Initial strategy decision** — independent perspective on which fits.
+- **Tooling selection** — replatform vendors, refactoring tools, CDC tools all have nuances.
+- **Architectural decisions** — cloud-native architecture for regulated industries has specific patterns.
+- **Workforce transition** — HR and change management for this kind of shift is its own discipline.
+- **Compliance / audit** — regulators evaluating modernization need specialized framing.
+
+This playbook gives you the structure; specialist consultants give you the expertise. They're complementary.
+
+## Independent of the other playbooks
+
+This playbook is for **mainframe modernization**. If you're modernizing a Windows web app, see [ASP.NET Modernization](/playbook/aspnet-to-angular-dotnet-modernization-playbook). For desktop-to-web, see [VB.NET WinForms Migration](/playbook/vbnet-winforms-to-spa-migration-playbook). For pure DB-engine moves, see [Database Migration](/playbook/database-migration-playbook). If you're starting fresh, see [Custom Web App](/playbook/custom-web-app).

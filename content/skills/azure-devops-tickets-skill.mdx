@@ -1,0 +1,373 @@
+---
+title: "Azure DevOps Tickets Skill"
+slug: "azure-devops-tickets-skill"
+description: "Claude Code skill for creating, updating, and querying Azure DevOps work items via the Azure DevOps MCP server."
+type: skill
+phase: discover
+category: jira-tickets
+projectType: ["custom-app", "etl"]
+stack: ["claude-code", "mcp"]
+tags: ["azure-devops", "agile", "automation", "boards"]
+difficulty: intermediate
+estimatedTime: "5 min setup"
+author: "Platform Engineering"
+featured: true
+createdAt: 2026-04-26
+updatedAt: 2026-04-26
+skillName: "azure-devops-tickets"
+requires:
+  - mcp-server: azure-devops
+files:
+  - SKILL.md
+  - templates/user-story-template.md
+  - templates/bug-template.md
+relatedAssets:
+  - "jira-ticket-manager"
+  - "user-story-from-prd"
+---
+
+# Azure DevOps Tickets Skill
+
+Claude Code skill that activates on Azure DevOps work item operations. Mirrors the Jira Ticket Manager skill but for teams using ADO Boards instead of Jira.
+
+## When it triggers
+
+- "Create a work item / story / bug / task in [project]"
+- "Log a bug for X"
+- Mentions of work item IDs (e.g., AB#1234)
+- "What's in the current sprint?"
+- "Move work item AB#1234 to In Progress"
+
+## Why a skill
+
+Azure DevOps work items have specific schemas (Bug, User Story, Task, Feature, Epic) with required fields per work item type that differ from Jira. Without a skill encoding the conventions, developers either skip required fields (causing template-validation errors in ADO) or spend time looking up the schema.
+
+## Installation
+
+1. Install and configure the Azure DevOps MCP server (see related: setup steps below)
+2. Copy this skill folder to `~/.claude/skills/azure-devops-tickets/`
+3. Restart Claude Code
+4. Try: "Create a user story in [project] for adding password reset"
+
+## SKILL.md content
+
+```markdown
+---
+name: azure-devops-tickets
+description: |
+  Use this skill when the user wants to manage Azure DevOps work items —
+  Bugs, User Stories, Tasks, Features, Epics. Triggers on:
+  - "create a work item / story / bug / task / feature / epic"
+  - mentions of work item IDs in AB#NNNN format
+  - sprint planning operations: "what's in the current sprint", "move to backlog"
+  - bulk operations: "create work items for each story in this PRD"
+  - PR-to-work-item linking
+  
+  Do NOT use for Jira work — that's a different skill (jira-ticket-manager).
+---
+
+# Azure DevOps Tickets
+
+You help users manage Azure DevOps Boards work items following your organisation's
+conventions. You apply the right template per work item type, fill required
+fields, and never create incomplete tickets.
+
+## Required fields by work item type
+
+### User Story
+- **Title:** Imperative voice, <100 chars
+- **Description:** Acceptance criteria + technical notes (use template)
+- **Story Points:** Fibonacci (1, 2, 3, 5, 8, 13, ?)
+- **Priority:** 1 (highest) - 4 (lowest)
+- **Area Path:** Match to existing Areas in the project
+- **Iteration Path:** Current sprint or backlog
+- **Tags:** Always `platform`. Add domain tags as appropriate.
+
+### Bug
+- **Title:** "Bug: [short description]"
+- **Repro Steps:** Numbered list
+- **System Info:** Environment, browser/OS, version
+- **Severity:** 1-Critical / 2-High / 3-Medium / 4-Low
+- **Priority:** 1-4 (independent of severity)
+- **Found In:** Build/version where the bug appeared
+
+### Task
+- **Title:** Imperative, action-oriented
+- **Description:** Steps to complete
+- **Activity:** Development / Testing / Documentation / etc.
+- **Original Estimate:** Hours
+- **Parent:** Link to parent User Story (most tasks should have a parent)
+
+### Feature
+- **Title:** Outcome-oriented, broader than a story
+- **Description:** Business value + scope (in/out)
+- **Target Date:** Quarterly granularity
+- **Parent:** Often linked to an Epic
+
+### Epic
+- **Title:** Initiative-level, business outcome
+- **Description:** Strategic context, success metrics, scope
+- **Start/Target Date:** Multi-quarter
+
+## Workflow
+
+### Single work item creation
+
+1. If the user provides enough context, restate what you'll create:
+   > "I'll create a User Story:
+   > - Title: [proposed title]
+   > - Description: [first 2 lines of description]
+   > - Story Points: [estimated]
+   > - Priority: [1-4]
+   > - Area: [path]
+   > - Iteration: [sprint or backlog]
+   >
+   > Confirm or adjust?"
+
+2. Wait for confirmation or edits.
+3. Create via the Azure DevOps MCP tool.
+4. Report back with the work item ID and URL.
+
+### Insufficient context
+
+If the user says "create a story for the auth feature" without enough detail:
+
+> "I can create that story. Quick questions:
+> 1. What's the user value? (As a [persona], I want [capability], so that
+>    [benefit])
+> 2. Acceptance criteria — 2-3 Given/When/Then bullets?
+> 3. Story points estimate?"
+
+Wait for answers. Then proceed.
+
+### Bulk creation from a PRD or list
+
+1. Parse the input into structured work items
+2. Show a preview table:
+
+| # | Type | Title | Story Points | Parent |
+|---|------|-------|--------------|--------|
+| 1 | User Story | Login with email/password | 3 | EPIC-001 |
+| 2 | User Story | Reset forgotten password | 5 | EPIC-001 |
+| ... | ... | ... | ... | ... |
+
+3. Get explicit confirmation: "Confirm I should create all [N] items?"
+4. Create one at a time, reporting progress every 5 items.
+5. At the end, output a summary:
+   - Created [N] work items
+   - All linked to parent: [link]
+   - Bulk view: [query URL]
+
+### Updates
+
+When updating an existing work item:
+1. Fetch the current state via MCP
+2. Show the proposed diff:
+   > "Updating AB#1234:
+   > - Status: New → Active
+   > - Assigned To: (unassigned) → @user
+   > - Tags: + 'in-progress'"
+3. Confirm before applying.
+
+### Status transitions
+
+State machine for User Story:
+```
+New → Active → Resolved → Closed
+                ↓
+            (Removed)
+```
+
+State machine for Bug:
+```
+New → Active → Resolved → Closed
+                ↓
+            (Removed)
+```
+
+Validate the transition is legal before attempting:
+- Don't move from "Closed" to "Active" — that's a reopen, requires comment
+- Don't skip "Resolved" when going from "Active" → "Closed"
+- For "Removed", require a reason in the comment
+
+### Linking work items
+
+Common relationships:
+- Story → Parent: Feature or Epic
+- Task → Parent: User Story
+- Bug → Related: User Story (cause) or Test Case (validation)
+
+When creating a child item, suggest the parent if context implies it:
+> "This task seems related to AB#1234 (the auth story). Link as parent?"
+
+## Templates (use exactly)
+
+### User Story description template
+
+```markdown
+## User Story
+
+As a [persona]
+I want [capability]
+So that [benefit]
+
+## Acceptance Criteria
+
+- [ ] **Given** [context]
+      **When** [action]
+      **Then** [outcome]
+
+- [ ] **Given** [context]
+      **When** [action]
+      **Then** [outcome]
+
+## Technical Notes
+
+- API endpoints affected:
+- Database changes:
+- Dependencies:
+- Estimated story points: [X]
+
+## Out of Scope
+
+- 
+
+## Definition of Done
+
+- [ ] Code merged to main
+- [ ] Unit tests added (>80% coverage on new code)
+- [ ] Integration tests pass
+- [ ] Documentation updated
+- [ ] Deployed to staging
+- [ ] PM/QA acceptance
+```
+
+### Bug description template
+
+```markdown
+## Summary
+
+[One-line description]
+
+## Steps to Reproduce
+
+1. 
+2. 
+3. 
+
+## Expected Behavior
+
+## Actual Behavior
+
+## Environment
+
+- App version:
+- Browser/OS:
+- User account/role:
+- Time observed:
+
+## Screenshots / Logs
+
+[Attach or paste]
+
+## Impact
+
+- Users affected: [scope]
+- Workaround available: [yes/no - describe]
+- Severity: [1-Critical / 2-High / 3-Medium / 4-Low]
+```
+
+## Conventions and anti-patterns
+
+### Always
+- Include a description with structure (no "Login broken." titles)
+- Set the area path explicitly (don't rely on default)
+- Tag with `platform` minimum
+- Link related items (parent/child, related)
+- For bugs: include reproduction steps even if trivial
+
+### Never
+- Create work items in "Closed" status
+- Modify human-created work items without confirmation
+- Bypass the template even for "quick" items
+- Auto-assign unless the user specifies an assignee
+- Use vague titles ("Fix bug", "Update code")
+- Leave "Activity" blank on Tasks (it's required for time tracking)
+
+## Linking PRs to work items
+
+When the user mentions both a PR and a work item:
+
+1. Use the MCP to add the work item link to the PR
+2. Or add the PR URL as a comment on the work item with a "GitHub Pull Request" link type
+3. Confirm the link took effect: "Linked PR #45 to AB#1234"
+
+ADO recognizes these formats in PR descriptions/commit messages:
+- `#1234` (auto-link if configured)
+- `AB#1234` (explicit ADO format)
+- "Fixes AB#1234" / "Closes AB#1234" (auto-transitions on merge)
+
+## Querying
+
+For "what's in the current sprint" / similar:
+
+1. Use the MCP query tool with a stored query or WIQL
+2. Default WIQL for "my current sprint":
+   ```sql
+   SELECT [System.Id], [System.Title], [System.State], [System.AssignedTo]
+   FROM WorkItems
+   WHERE [System.IterationPath] = @CurrentIteration
+     AND [System.AssignedTo] = @Me
+   ORDER BY [Microsoft.VSTS.Common.Priority]
+   ```
+3. Format results as a table with: ID, Title, State, Story Points, Assignee
+4. Limit to 20 results unless asked for more
+```
+
+## MCP setup (one-time)
+
+Before this skill works, the Azure DevOps MCP server needs to be configured. Add to `~/.config/claude-code/mcp.json`:
+
+```json
+{
+  "mcpServers": {
+    "azure-devops": {
+      "command": "npx",
+      "args": ["-y", "@your-org/azure-devops-mcp"],
+      "env": {
+        "AZURE_DEVOPS_ORG": "${AZURE_DEVOPS_ORG}",
+        "AZURE_DEVOPS_PROJECT": "${AZURE_DEVOPS_PROJECT}",
+        "AZURE_DEVOPS_PAT": "${AZURE_DEVOPS_PAT}"
+      }
+    }
+  }
+}
+```
+
+Required environment variables:
+
+```bash
+export AZURE_DEVOPS_ORG="your-org-name"     # from dev.azure.com/{org}
+export AZURE_DEVOPS_PROJECT="your-project"   # default project
+export AZURE_DEVOPS_PAT="your-pat"           # Personal Access Token
+```
+
+PAT scopes needed:
+- Work Items: Read, write, manage
+- Code: Read (for PR linking)
+- Project and Team: Read
+
+Generate a PAT at: `https://dev.azure.com/{org}/_usersSettings/tokens`
+
+## Tips
+
+- Pair with the **User Story Generator** template — feed its output directly into bulk creation
+- For teams that use both ADO and Jira, both skills can coexist; they trigger on different language
+- Save common WIQL queries in ADO and reference them by name in this skill — faster than re-typing complex filters
+
+## Limitations
+
+- Does not handle Test Plans / Test Cases (different ADO module)
+- Custom work item types (added by your org) need template additions in this skill
+- Multi-project linking requires explicit project specification
+- Does not work for on-premises Azure DevOps Server (TFS) — different MCP needed

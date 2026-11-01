@@ -1,0 +1,390 @@
+---
+title: "Azure Data Platform Modernization Playbook"
+slug: "azure-data-platform-modernization-playbook"
+description: "Build or modernize a cloud data platform on Azure: ADF/Fabric pipelines, PySpark transformations, Synapse/Fabric warehouse, BI consumption, and data governance."
+type: playbook
+phase: design
+category: architecture
+projectType: ["etl"]
+stack: ["azure", "adf", "fabric", "pyspark", "synapse"]
+tags: ["etl", "data-engineering", "azure", "fabric", "synapse", "modernization"]
+difficulty: advanced
+estimatedTime: "2-4 quarters"
+totalEstimatedTime: "2-4 quarters for the first domain at scale; longer for full multi-domain rollout"
+author: "Platform Engineering"
+featured: true
+createdAt: 2026-04-26
+updatedAt: 2026-04-27
+intakeFields:
+  - name: project_driver
+    label: "What's driving this project?"
+    type: textarea
+    required: true
+    placeholder: "Replacing legacy on-prem warehouse / Building first cloud data platform / Consolidating data across acquired companies / Compliance modernization"
+  - name: source_systems
+    label: "Source systems in scope"
+    type: textarea
+    required: true
+    placeholder: "Salesforce, SAP S/4, Azure SQL CRM, on-prem SQL Server (12 dbs), Excel from Finance, Workday HR"
+  - name: target_platform
+    label: "Target Azure platform choice"
+    type: text
+    required: true
+    placeholder: "Microsoft Fabric (Lakehouse + Warehouse) / Synapse + ADF + Power BI / Hybrid Fabric+Synapse"
+  - name: data_volume
+    label: "Approximate data volume"
+    type: text
+    required: true
+    placeholder: "Total ~5TB across sources, biggest tables ~200M rows, daily change ~50M rows"
+  - name: consumption_layer
+    label: "How users consume the data today"
+    type: textarea
+    required: true
+    placeholder: "Power BI (50+ reports), some Tableau, ad-hoc SQL via SSMS, ML notebooks in Databricks"
+  - name: timeline_driver
+    label: "Timeline driver"
+    type: text
+    required: false
+    placeholder: "On-prem warehouse contract ends Q3 2026 / Acquired company data must integrate by year-end / No hard deadline"
+  - name: regulatory_requirements
+    label: "Regulatory / compliance requirements"
+    type: text
+    required: false
+    placeholder: "GDPR (EU customers), SOX (financial reporting), HIPAA (healthcare data) / None special"
+steps:
+  - number: 1
+    title: "Discovery and Source Inventory"
+    description: "Profile every major source system, document quality issues, identify downstream consumers, and capture stakeholder pain points. This is a stakeholder conversation, not just a tech audit."
+    whatYoureDoing: "Generate a comprehensive data-source inventory. Profile each source (volumes, schemas, DQ issues). Talk to source-system owners, BI / analyst teams, business stakeholders, the data engineering team if one exists, and compliance / security. Capture pain points with root-cause analysis — they're the point of discovery."
+    primaryAsset: "data-source-inventory-profiling"
+    alternativeAssets:
+      - slug: "legacy-system-audit"
+        when: "You're replacing a legacy warehouse and want a more general audit framework alongside the source profiling"
+    relevantSkills:
+      - "migration-planner-skill"
+    relevantMcpConfigs:
+      - "postgres-mcp"
+      - "filesystem-mcp"
+      - "confluence-mcp"
+    estimatedTime: "4-6 weeks"
+    definitionOfDone:
+      - "Source-system inventory complete (all systems documented)"
+      - "Per-system profiling done (volumes, schemas, data quality)"
+      - "Downstream consumer inventory (who uses what, how often)"
+      - "Pain points captured with root-cause analysis"
+      - "Top 10 risks identified"
+      - "Strategic recommendations documented"
+    commonPitfalls:
+      - "Skipping stakeholder interviews — the audit document misses what people actually do with data"
+      - "Auditing only formal systems — spreadsheets, MS Access, custom Python scripts all carry data"
+      - "Trusting docs over reality — profile actual data; documentation lies"
+      - "Underestimating consumer count — reports nobody mentioned but everybody depends on"
+      - "Hiding data-quality findings — they're the point of discovery; surface them"
+
+  - number: 2
+    title: "Target Architecture Design"
+    description: "Make the Fabric vs Synapse vs Hybrid call. Design the lakehouse (medallion). Decide storage layout, compute strategy, orchestration, consumption layer, and governance — then capture as ADRs."
+    whatYoureDoing: "Decide Pure Fabric vs Synapse + ADF + ADLS vs Hybrid. Design the bronze / silver / gold lakehouse. Pick storage layout (ADLS Gen2 hierarchical, container strategy, partition convention). Choose compute (Fabric capacity / Synapse Spark pools / Synapse SQL pools / Databricks). Pick orchestration (ADF / Fabric Data Pipelines / Synapse Pipelines). Plan consumption (Power BI, semantic models, REST). Design governance (Microsoft Purview, Key Vault, Private Endpoints, managed identities, PII handling). Document as 10-15 ADRs."
+    primaryAsset: "coexistence-architecture-adr"
+    alternativeAssets:
+      - slug: "adr-generator"
+        when: "You'd rather author each architectural decision as its own ADR rather than one combined document"
+    relevantSkills:
+      - "migration-planner-skill"
+      - "documentation-skill"
+    relevantMcpConfigs:
+      - "filesystem-mcp"
+    estimatedTime: "3-4 weeks"
+    definitionOfDone:
+      - "Target platform decided (Fabric / Synapse / Hybrid) with rationale"
+      - "Lakehouse architecture documented (medallion: Bronze / Silver / Gold)"
+      - "Storage layout decided"
+      - "Compute strategy decided"
+      - "Orchestration tool decided"
+      - "Consumption layer planned"
+      - "Governance approach decided"
+      - "10-15 ADRs documenting key decisions"
+      - "High-level architecture diagram"
+    commonPitfalls:
+      - "\"We'll just use Fabric for everything\" without analysis — Fabric is excellent for many cases but isn't always the right choice"
+      - "Premature microservices for data — distributed data is harder than distributed apps"
+      - "Skipping governance design — adding it later is much harder"
+      - "No PII strategy — surfaces during compliance audit at the worst time"
+      - "Synapse SQL pool sizing decided once, never revisited — costs explode silently"
+
+  - number: 3
+    title: "Pipeline Framework Design"
+    description: "Build the metadata-driven framework before building any specific pipelines. Multiplier work — done right, every subsequent pipeline is faster."
+    whatYoureDoing: "Set up the patterns all pipelines will follow: metadata table for ingestion config, master orchestration pipeline that loops over metadata, parameterized child pipeline for ingesting one source object, standard error handling, structured logging, notification framework (Teams / email), naming conventions, repository structure with examples, sample \"onboarding a new source\" runbook."
+    primaryAsset: "adf-fabric-pipeline-design-patterns"
+    alternativeAssets:
+      - slug: "coexistence-architecture-adr"
+        when: "Capturing the framework decisions as architecture records"
+    relevantSkills:
+      - "compatibility-layer-generator-skill"
+      - "spec-driven-builder"
+    relevantMcpConfigs:
+      - "azure-devops-mcp"
+      - "filesystem-mcp"
+    estimatedTime: "4-6 weeks"
+    definitionOfDone:
+      - "Metadata-driven framework deployed in dev"
+      - "Master orchestration pipeline working"
+      - "Sample child pipeline working with metadata"
+      - "Error-handling pattern proven"
+      - "Logging to meta table working"
+      - "Notifications integrated"
+      - "Repository structure documented"
+      - "Sample \"onboarding a new source\" runbook written"
+    commonPitfalls:
+      - "Skipping metadata-driven design — building 50 nearly-identical pipelines is the most common ADF anti-pattern"
+      - "No error-handling baseline — pipelines without this are time bombs"
+      - "Hardcoded credentials — use Key Vault from day 1"
+      - "No logging — debugging at 3am without structured logs is brutal"
+      - "Building the framework without a real pipeline — validate on at least one real source before declaring it done"
+
+  - number: 4
+    title: "PySpark Transformation Framework"
+    description: "Establish PySpark standards before writing many notebooks. Shared utility library, Bronze / Silver / Gold templates, performance patterns, testing approach."
+    whatYoureDoing: "Build a shared utility library (wheel package or %run notebooks) with reusable functions. Create Bronze ingestion, Silver transformation (cleansing + MERGE upsert), and Gold dimensional notebook templates. Document performance patterns (partitioning, broadcast joins, caching). Establish a testing approach. Create a code-review checklist for PySpark notebooks."
+    primaryAsset: "pyspark-transformation-standards"
+    alternativeAssets:
+      - slug: "scd-implementation-pyspark"
+        when: "Building the dimension-table side of the framework with proper SCD handling"
+    relevantSkills:
+      - "spec-driven-builder"
+      - "test-generator-skill"
+      - "code-reviewer-skill"
+    relevantMcpConfigs:
+      - "azure-devops-mcp"
+      - "filesystem-mcp"
+    estimatedTime: "3-4 weeks"
+    definitionOfDone:
+      - "Shared utility library deployed and tested"
+      - "Standard notebook templates created (Bronze / Silver / Gold)"
+      - "Bronze, Silver, Gold patterns proven on a real entity"
+      - "Performance patterns documented with examples"
+      - "Testing approach proven"
+      - "Code-review checklist for PySpark notebooks created"
+    commonPitfalls:
+      - "Treating notebooks as scripts — no structure, no docs, no error handling"
+      - "Copy-paste boilerplate everywhere — build a shared library"
+      - "Spark for small data (&lt;1GB) — use SQL / pandas / DuckDB instead"
+      - "No idempotency — re-runs create duplicates"
+      - "inferSchema in production — slow, unpredictable"
+      - ".collect() on large data — OOM disasters"
+
+  - number: 5
+    title: "Data Quality Framework"
+    description: "Build the DQ framework before pipelines ship to production. Schema, freshness, volume, nulls, duplicates, ranges, referential integrity, business invariants."
+    whatYoureDoing: "Set up DQ test patterns, a DQ runner integrated into the pipeline framework, a quarantine pattern for bad data (separate clean from bad rather than always failing the pipeline), a DQ reporting dashboard, SLO definitions for critical tables, and alerting on violations. Pick tooling — Great Expectations or PySpark-native assertions in the shared library."
+    primaryAsset: "data-quality-test-suite"
+    alternativeAssets:
+      - slug: "behavior-parity-test-suite"
+        when: "DQ also has to prove parity with a legacy system being replaced"
+    relevantSkills:
+      - "data-validation-skill"
+      - "test-generator-skill"
+    relevantMcpConfigs:
+      - "azure-devops-mcp"
+      - "filesystem-mcp"
+    estimatedTime: "3-4 weeks"
+    definitionOfDone:
+      - "DQ framework deployed and tested"
+      - "Standard test patterns documented"
+      - "Quarantine pattern working"
+      - "DQ reporting dashboard created"
+      - "SLOs defined for the first set of tables"
+      - "Alerting integrated"
+      - "DQ runs as part of every pipeline (not separate)"
+    commonPitfalls:
+      - "Skipping DQ until production — discovers issues in production. Build it in from day 1"
+      - "DQ tests that always pass — broken tests give false confidence"
+      - "No quarantine pattern — pipeline either fails or ships bad data, no middle ground"
+      - "DQ separate from pipelines — drifts out of sync; rules don't apply consistently"
+      - "No alerting on violations — silent failures are worst"
+
+  - number: 6
+    title: "First Domain (Vertical Slice)"
+    description: "Migrate / build one complete business domain end-to-end (Customer or Sales is typical). Bronze + Silver + Gold + DQ + a Power BI semantic model. Validates everything from Phases 3-5 against a real use case."
+    whatYoureDoing: "Pick one domain that cross-cuts source systems, has a clear business owner, has a visible BI consumer, and isn't on the critical path (room to make mistakes). Build Bronze for all source systems contributing to the domain. Build Silver with conformed entities. Build Gold with 1-2 dimensional models. Wire DQ tests at every layer. Publish a Power BI semantic model. Reconcile against legacy reports."
+    primaryAsset: "pyspark-transformation-standards"
+    alternativeAssets:
+      - slug: "scd-implementation-pyspark"
+        when: "The domain has slowly-changing dimensions (customer, product, employee, etc.)"
+      - slug: "data-quality-test-suite"
+        when: "Adding domain-specific DQ checks"
+      - slug: "feature-flag-rollout-migration"
+        when: "Cutting consumers over from a legacy reporting source to the new domain"
+    relevantSkills:
+      - "spec-driven-builder"
+      - "test-generator-skill"
+      - "code-reviewer-skill"
+      - "data-validation-skill"
+    relevantMcpConfigs:
+      - "azure-devops-mcp"
+      - "github-mcp"
+      - "filesystem-mcp"
+      - "postgres-mcp"
+    estimatedTime: "8-12 weeks"
+    definitionOfDone:
+      - "Domain Bronze layer complete (all sources ingested)"
+      - "Domain Silver layer complete (conformed entities, SCD where needed)"
+      - "Domain Gold layer complete (1-2 dimensional models)"
+      - "DQ tests pass for all layers"
+      - "Power BI semantic model published"
+      - "Reconciliation with legacy reports passes (counts and key metrics match)"
+      - "Documentation complete (lineage, SLAs, ownership)"
+      - "Stakeholder validation passed"
+    commonPitfalls:
+      - "Domain too big — pick the smallest valuable domain"
+      - "Skipping reconciliation with legacy — discovers issues months later"
+      - "No semantic model — the platform is incomplete without consumption"
+      - "Stakeholder absent — they need to validate definitions in Silver"
+      - "Performance neglect — hot-path queries should be fast or users won't adopt"
+
+  - number: 7
+    title: "Continue Expanding Domains"
+    description: "Build out remaining domains, refining patterns. Common slicing: by business domain, by source system, by criticality, or by region."
+    whatYoureDoing: "Domain by domain — Sales, then Inventory, then HR, then Finance, etc. Each gets faster than the last as the team builds expertise. Track % of source data on platform (Bronze coverage), % of business domains modeled (Silver/Gold coverage), % of legacy reports migrated, # of pipelines in production, DQ pass rate trends."
+    primaryAsset: "pyspark-transformation-standards"
+    alternativeAssets:
+      - slug: "scd-implementation-pyspark"
+        when: "A new domain has its own dimensional models with SCD requirements"
+      - slug: "adf-fabric-pipeline-design-patterns"
+        when: "Refining the pipeline framework as new patterns emerge"
+      - slug: "data-quality-test-suite"
+        when: "Expanding DQ coverage as new domains come online"
+    relevantSkills:
+      - "spec-driven-builder"
+      - "migration-planner-skill"
+      - "test-generator-skill"
+      - "code-reviewer-skill"
+    relevantMcpConfigs:
+      - "azure-devops-mcp"
+      - "github-mcp"
+      - "filesystem-mcp"
+    estimatedTime: "1-3 quarters"
+    definitionOfDone:
+      - "All in-scope domains modeled in the platform"
+      - "All in-scope reports migrated"
+      - "DQ coverage acceptable (every Silver+ table has tests)"
+      - "Lineage tracked for all pipelines"
+      - "Documentation complete"
+    commonPitfalls:
+      - "Long tail of low-value data — migration takes 50% of time on last 10% of value"
+      - "Burnout — multi-quarter projects need rotation and small wins"
+      - "Scope creep — \"while we're modernizing, let's also add ML / streaming...\""
+      - "Pattern divergence — without governance, each domain reinvents patterns. Maintain code review and shared library"
+
+  - number: 8
+    title: "Migration of Consumption (BI, ML, Downstream Apps)"
+    description: "Switch consumers from legacy data sources to the new platform. Power BI, Tableau, ML pipelines, custom apps, Excel queries — each gets a different migration path."
+    whatYoureDoing: "Per consumer: Power BI → rebuild on top of new semantic models or repoint data sources. Tableau → repoint. ML pipelines → redirect feature sources. Custom apps → redirect connection strings (often hardest). Excel users → educate + provide alternative. For each, validate query results match within tolerance, performance is acceptable, and functionality is complete."
+    primaryAsset: "feature-flag-rollout-migration"
+    alternativeAssets:
+      - slug: "migration-cutover-runbook"
+        when: "Per significant consumer cutover that needs a formal runbook"
+    relevantSkills:
+      - "migration-planner-skill"
+      - "performance-profiler-skill"
+    relevantMcpConfigs:
+      - "azure-devops-mcp"
+      - "github-mcp"
+      - "filesystem-mcp"
+    estimatedTime: "1-2 quarters (often parallel with Phase 7)"
+    definitionOfDone:
+      - "All in-scope reports / dashboards migrated"
+      - "Performance acceptable on the new platform"
+      - "User acceptance validated"
+      - "Legacy consumers redirected"
+      - "Old report URLs / connection strings retired"
+    commonPitfalls:
+      - "\"They'll figure it out\" approach to migration — users don't; they complain or work around"
+      - "No performance testing on new platform — new is slower than expected; users dislike"
+      - "Forgetting Excel users — they have queries you don't know about"
+      - "No training plan — new tools / patterns require user training"
+      - "Big-bang cutover of many reports — phase by criticality"
+
+  - number: 9
+    title: "Decommission Legacy + Optimize"
+    description: "Turn off old systems. Run cost optimization (typically 30%+ savings opportunity). Tune performance. Mature governance."
+    whatYoureDoing: "Decommission: verify zero traffic on legacy DW + ETL tools for 30+ days, take final backup / archive, decommission infrastructure, cancel licenses. Cost optimization: right-size compute, lifecycle storage to cool / archive tiers, pause non-prod outside business hours, reserve capacity for predictable workloads. Performance: OPTIMIZE + ZORDER Delta tables, review partitioning, add materialized views. Governance: deploy Purview, formalize data contracts, document schema-evolution policies, formalize DQ SLOs."
+    primaryAsset: "migration-cutover-runbook"
+    alternativeAssets:
+      - slug: "performance-profiler-skill"
+        when: "Optimization phase needs systematic profiling of hot pipelines / queries"
+      - slug: "documentation-skill"
+        when: "Driving the post-migration retrospective and the optimization roadmap"
+      - slug: "regression-bed-master"
+        when: "Standing up a permanent regression suite for the new platform"
+    relevantSkills:
+      - "performance-profiler-skill"
+      - "documentation-skill"
+      - "code-reviewer-skill"
+    relevantMcpConfigs:
+      - "azure-devops-mcp"
+      - "filesystem-mcp"
+      - "postgres-mcp"
+    estimatedTime: "4-8 weeks for decommission, ongoing for optimization"
+    definitionOfDone:
+      - "Legacy systems decommissioned"
+      - "Final backup / archive complete"
+      - "Cost optimization round-1 complete (target: 30% reduction)"
+      - "Performance optimization on hot paths"
+      - "Governance tooling deployed"
+      - "Migration retrospective complete"
+    commonPitfalls:
+      - "Decommissioning too fast — 30+ days of zero traffic before pulling the plug"
+      - "Skipping cost optimization — costs sneak up if not actively managed"
+      - "No performance baseline — can't optimize what you don't measure"
+      - "No retrospective — lessons not captured = repeated mistakes"
+      - "Treating governance as bureaucracy — it's an enabler, not overhead"
+wrapUp:
+  deliverables:
+    - "Cloud data platform operational on Azure (Fabric / Synapse / Hybrid)"
+    - "Lakehouse with Bronze / Silver / Gold layers across all in-scope domains"
+    - "Metadata-driven pipeline framework + shared PySpark library"
+    - "DQ framework wired into every pipeline with SLOs on critical tables"
+    - "Power BI semantic models for in-scope domains"
+    - "All consumers migrated to the new platform"
+    - "Legacy systems decommissioned, license costs eliminated"
+    - "Architecture, ADRs, framework documentation, and runbooks in /docs/data-platform/"
+  nextSteps:
+    - title: "Run a 12-month optimization sprint"
+      description: "Most platform code shipped quickly. Allocate a quarter to refactor rushed parts and rationalize cloud spend."
+    - title: "Mature the data quality program"
+      description: "DQ went in to keep the platform honest. Now expand it: SLOs per Gold table, alerts to data owners, public DQ dashboard."
+    - title: "Plan the ML / streaming roadmap"
+      description: "The platform is ready for ML pipelines and streaming. Sequence them now that batch is stable."
+    - title: "Document the playbook updates for the next data-platform build"
+      description: "What surprised you? What would you do differently? Capture it while it's fresh."
+relatedAssets:
+  - "legacy-etl-to-azure-modernization-playbook"
+  - "data-source-inventory-profiling"
+  - "adf-fabric-pipeline-design-patterns"
+  - "pyspark-transformation-standards"
+  - "data-quality-test-suite"
+  - "scd-implementation-pyspark"
+---
+
+# Azure Data Platform Modernization Playbook
+
+A 9-phase playbook for building or modernizing a cloud data platform on Azure: ADF / Fabric pipelines, PySpark transformations, Synapse / Fabric warehouse, BI consumption, and data governance. Click through the phases — each one points you at the right templates, skills, and MCP configs to use in your IDE, with a clear definition-of-done before you move on.
+
+## When to use this playbook
+
+- You're building or modernizing a cloud data platform on Azure
+- Sources include a mix of SaaS, on-prem, and cloud databases
+- The target platform is Fabric, Synapse, or some hybrid
+- The work spans multiple business domains and consumers (BI / ML / apps)
+
+## When NOT to use this playbook
+
+- **You're retiring a legacy ETL tool specifically.** Use the [Legacy ETL to Azure Modernization Playbook](/playbook/legacy-etl-to-azure-modernization-playbook) instead — it focuses on parity and cutover.
+- **You're building a small one-off pipeline.** This playbook is platform-scale; for a single pipeline, just use the templates directly.
+- **Your stack isn't Azure.** The patterns generalize but the specifics (ADF, Fabric, Synapse, ADLS, Purview) don't.
+
+## Independent of the other playbooks
+
+This playbook is for **building / modernizing the Azure data platform**. For retiring a specific legacy ETL tool, see [Legacy ETL to Azure Modernization](/playbook/legacy-etl-to-azure-modernization-playbook). For application migrations, see [ASP.NET Modernization](/playbook/aspnet-to-angular-dotnet-modernization-playbook), [VB.NET WinForms Migration](/playbook/vbnet-winforms-to-spa-migration-playbook), [COBOL Modernization](/playbook/cobol-modernization-playbook), or [RPG / IBM i Modernization](/playbook/rpg-modernization-playbook). For pure DB engine moves, see [Database Migration](/playbook/database-migration-playbook).

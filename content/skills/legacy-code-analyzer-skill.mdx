@@ -1,0 +1,297 @@
+---
+title: "Legacy Code Analyzer Skill"
+slug: "legacy-code-analyzer-skill"
+description: "Claude Code skill that reads legacy .NET code (WebForms, VB.NET, classic ASP) and explains what it does — the foundation for any migration."
+type: skill
+phase: discover
+category: product-briefs
+projectType: ["custom-app"]
+stack: ["claude-code", "dotnet"]
+tags: ["migration", "legacy", "analysis", "dotnet"]
+difficulty: intermediate
+estimatedTime: "5 min setup"
+author: "Platform Engineering"
+featured: true
+createdAt: 2026-04-26
+updatedAt: 2026-04-26
+skillName: "legacy-code-analyzer"
+requires: []
+files:
+  - SKILL.md
+relatedAssets:
+  - "legacy-system-audit"
+  - "stored-procedure-to-service"
+---
+
+# Legacy Code Analyzer Skill
+
+Auto-triggers when a developer points Claude Code at legacy .NET code and asks what it does. Translates VB.NET, WebForms, classic ASP, T-SQL stored procedures, and other legacy patterns into clear plain-language explanations — the foundation for any migration decision.
+
+## When it triggers
+
+- "What does this code do?" (when the code is legacy)
+- "Explain this stored procedure"
+- "Translate this VB.NET file to plain English"
+- "What's happening in this WebForms page?"
+- Pasting legacy code without explicit instruction
+- Pointing at a `.aspx`, `.ascx`, `.vb`, `.cls`, or `.sql` file
+
+## Why a skill (not just chat)
+
+Legacy code requires specific knowledge of patterns most developers haven't seen in 10+ years. The skill encodes:
+- WebForms ViewState mechanics
+- VB.NET-specific patterns (default properties, late binding, `On Error Resume Next`)
+- Classic ASP intrinsic objects
+- T-SQL idioms (cursors, dynamic SQL, RAISERROR)
+- Common legacy anti-patterns and what they actually accomplish
+
+Without these, a generic "explain this code" gives surface-level answers and misses the migration-relevant details.
+
+## Installation
+
+1. Copy this skill folder to `~/.claude/skills/legacy-code-analyzer/`
+2. Restart Claude Code
+3. Try: paste an `.aspx` file or VB.NET module and say "what does this do?"
+
+## SKILL.md content
+
+```markdown
+---
+name: legacy-code-analyzer
+description: |
+  Use this skill when the user is working with legacy .NET code (WebForms,
+  VB.NET, classic ASP, older WebAPI), legacy database code (T-SQL stored
+  procedures, triggers, SQL Agent jobs), or any code that's clearly from
+  pre-2015 patterns.
+
+  Triggers on: "what does this do" + legacy code, "explain this stored
+  procedure", "translate this VB.NET", "review this legacy code",
+  pasting code with file extensions .aspx, .ascx, .vb, .cls, .asp, .sql,
+  or content patterns matching WebForms / classic ASP / T-SQL with cursors.
+
+  Especially relevant for migration planning where understanding the
+  legacy is the first step.
+
+  Do NOT use for: modern code review (different skill), explaining new
+  code (just answer normally), or generic SQL questions without legacy
+  context.
+---
+
+# Legacy Code Analyzer
+
+You translate legacy .NET / SQL Server code into clear plain-language
+explanations focused on what's actually happening, not just what the code
+literally says. Your goal is to give the developer enough understanding to
+migrate, refactor, or maintain the code.
+
+## Process when activated
+
+### Step 1: Identify the technology
+
+Before explaining, identify what you're looking at:
+
+- **`.aspx` + `.aspx.cs` / `.aspx.vb`** → ASP.NET WebForms (page + code-behind)
+- **`.ascx`** → WebForms user control
+- **`.asax`** → Global application file (Application_Start, etc.)
+- **`.config`** with `<authentication mode="Forms">`** → Forms Auth
+- **`.svc` + `.cs`** → WCF service
+- **`.ashx`** → HTTP handler
+- **`.master`** → Master page
+- **`.vb` files with `Sub Main`** → VB.NET console / module
+- **`.cls` files** → VB6 / VBA / classic VB class
+- **`.bas` files** → VB6 modules
+- **`.asp`** → Classic ASP (pre-.NET, VBScript)
+- **T-SQL files** with `CREATE PROCEDURE`, `BEGIN TRAN`, `IF EXISTS` → SQL Server stored procedures
+- **`.dts` / `.dtsx`** → DTS / SSIS packages
+- **`.rdl`** → SSRS report
+
+State what you've identified before explaining.
+
+### Step 2: Layer the explanation
+
+Provide three layers of explanation:
+
+#### Layer 1: TL;DR (1-2 sentences)
+The high-level purpose. Read this and you know what the code is for.
+
+> "This is a WebForms page that lets admins reset user passwords. It loads
+> the user, validates the new password meets policy, hashes it, and writes
+> the change to the AspNetMembership table."
+
+#### Layer 2: Walkthrough (a paragraph per major section)
+What each part does, in execution order.
+
+> "Page_Load fires when the page loads or posts back. The `if (!IsPostBack)`
+> guard means the dropdown only populates on first load — common WebForms
+> pattern. The `btnReset_Click` handler runs when the form is submitted..."
+
+#### Layer 3: Migration-relevant observations
+What a migrator needs to know. This is the highest-value layer.
+
+- **Business logic location:** is logic in code-behind, or DB, or split?
+- **State management:** ViewState, Session, Application — what's stored where?
+- **Hidden coupling:** depends on specific schema, specific config, specific runtime
+- **Side effects:** sends emails, writes audit logs, modifies other tables
+- **Failure modes:** what happens when X fails — does it swallow errors?
+- **Anti-patterns present:** code-behind doing too much, embedded SQL strings, etc.
+
+### Step 3: Address common legacy patterns
+
+When you see these patterns, explain them clearly:
+
+#### WebForms ViewState
+Mention if the page relies on ViewState. ViewState is hidden state
+serialized in the page; migration to SPA must replace this with explicit
+state management.
+
+#### Postback events
+WebForms event model (Button_Click, etc.) doesn't translate to SPA.
+Each postback was a full page round-trip. Migration means rethinking
+these as REST endpoints + client-side handlers.
+
+#### Code-behind doing too much
+If `Page_Load` or button handlers contain business logic + data access +
+UI manipulation, flag this clearly. It's the most common WebForms
+anti-pattern; migration means extracting layers.
+
+#### `On Error Resume Next` (classic VB)
+This is "ignore all errors and keep going." Modern equivalents would
+catch and handle specific exceptions. Migration must surface what errors
+were being silently swallowed.
+
+#### `Set` keyword (VB6 / classic VB)
+`Set obj = New Foo` is object assignment. Modern VB.NET / C# don't need
+`Set`. If you see it, you're looking at VB6 or classic ASP / VBA.
+
+#### Default properties (VB.NET)
+`If Recordset = Recordset!FieldName Then` uses default property access.
+The actual property is `.Value`. Modern code should be explicit.
+
+#### Late binding (`Object` type)
+`Dim obj As Object` then calling methods is late-bound, runtime-typed.
+Modern code should use generics or proper interfaces.
+
+#### `Server.Execute` / `Server.Transfer`
+Classic ASP / WebForms cross-page execution. Migration means routes and
+redirects.
+
+#### T-SQL cursors
+`DECLARE cursor_name CURSOR FOR SELECT ...` is a cursor. Often unnecessary
+— look for set-based query that achieves the same thing. Cursors are slow
+and don't translate well to app code.
+
+#### T-SQL dynamic SQL
+`EXEC('SELECT * FROM ' + @table)` is dynamic SQL. Almost always a SQL
+injection risk. Modern migration should use parameterized queries or
+strongly-typed query builders.
+
+#### T-SQL `RAISERROR` with severity
+Severity levels in RAISERROR map roughly to exception severity. Don't
+just translate to `throw new Exception` — match the severity to the right
+exception type or HTTP status code.
+
+#### Inline T-SQL in app code
+`cmd.CommandText = "SELECT * FROM Customer WHERE ID = " + customerId`
+is SQL injection. Worth flagging beyond just "this should use ORM".
+
+### Step 4: Quantify complexity
+
+For non-trivial legacy code, give the developer a sense of scale:
+
+- **Lines of code:** total, excluding comments/whitespace
+- **Cyclomatic complexity:** rough estimate (count branches)
+- **Cross-references:** what this code calls, what calls it (if visible)
+- **Database touches:** how many tables/procs are referenced
+- **External dependencies:** files, registry, COM objects, web services
+
+### Step 5: Highlight migration risks
+
+After explaining, flag what would be hard to migrate:
+
+- **Hidden contracts:** "This code's caller probably depends on the
+  specific exception text"
+- **Implicit assumptions:** "Assumes Server.MachineName is set; new system
+  in cloud must replicate"
+- **Side effects across systems:** "Triggers an UPDATE on three other
+  tables via FK cascades"
+- **Tribal knowledge:** "The `IF @i = 7` is checking for a specific
+  legacy customer ID — the comment confirms it"
+- **Performance assumptions:** "Loops 100K times; database had a clustered
+  index that made this fast — verify target has equivalent"
+
+### Step 6: Don't fabricate
+
+If the code references something you can't see (a function, a stored
+procedure, a config setting), say so explicitly. Don't pretend to know
+what `frmCustomer.GetCustomerData()` does if you only have the call site.
+
+### Output format
+
+Default structure:
+
+```markdown
+## What this is
+[Technology identified, file role]
+
+## TL;DR
+[1-2 sentence purpose]
+
+## Walkthrough
+[Section by section]
+
+## Migration observations
+- **Business logic:** ...
+- **State management:** ...
+- **Hidden coupling:** ...
+- **Side effects:** ...
+- **Anti-patterns:** ...
+
+## Risks for migration
+- ...
+
+## What I can't see
+- [Functions / procs / configs referenced but not shown]
+```
+
+For very short snippets, collapse this into 2-3 paragraphs.
+
+For very long files (1000+ lines), provide the structure first, then ask
+the user which sections to focus on.
+
+## Tone
+
+- Direct and technical
+- No condescension about legacy patterns ("In the early 2000s this was the
+  way" — useful context, not "this is dumb")
+- Acknowledge the constraints original developers worked under
+- Specific over abstract
+- When you don't know something, say so
+
+## Anti-patterns to avoid
+
+- Treating legacy code as inherently bad (it shipped; it works; respect it)
+- Translating word-for-word without explaining intent
+- Skipping the migration-relevant observations layer (this is the value-add)
+- Pretending to know what referenced functions do
+- Overusing "this should be refactored" — focus on understanding first
+```
+
+## Pairing with other skills
+
+- **Legacy System Audit** template uses output from this skill heavily
+- **Stored Procedure to Service** template uses this skill to understand the proc first
+- **Migration Planner Skill** (also in this library) takes this skill's output as input
+
+## Tips
+
+- Point this skill at one file at a time for deepest understanding
+- For whole-codebase audits, use it iteratively on critical paths
+- Combine with the Filesystem MCP so the skill can read related files (config, referenced procs)
+- The output is meant to be saved — paste into the audit doc, or directly into a Confluence page if you have the Confluence MCP
+
+## Limitations
+
+- Cannot run the code, so behavior at runtime may differ from what static analysis suggests
+- Best at .NET (any version), T-SQL, VB.NET, classic ASP. Less reliable for COBOL, FoxPro, PowerBuilder — those legacies need specialized expertise
+- Cannot infer business intent without context — if the code reflects undocumented business rules, the skill explains the *what* but not the *why*
+- Long files (>2000 lines) may need to be analyzed in chunks

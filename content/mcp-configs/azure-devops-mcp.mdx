@@ -1,0 +1,210 @@
+---
+title: "Azure DevOps MCP"
+slug: "azure-devops-mcp"
+description: "Pre-configured Azure DevOps MCP server for Claude Code — work items, repos, PRs, and pipelines from chat."
+type: mcp-config
+phase: discover
+category: jira-tickets
+projectType: ["custom-app", "etl"]
+stack: ["claude-code", "mcp"]
+tags: ["azure-devops", "ado", "boards", "repos"]
+difficulty: beginner
+estimatedTime: "10 min setup"
+author: "Platform Engineering"
+featured: true
+createdAt: 2026-04-26
+updatedAt: 2026-04-26
+serverName: "azure-devops"
+configFormat: "claude-code"
+envVars:
+  - name: AZURE_DEVOPS_ORG
+    description: "Your Azure DevOps organization name (from dev.azure.com/{org})"
+    example: "your-org"
+  - name: AZURE_DEVOPS_PROJECT
+    description: "Default project to scope operations to (optional but recommended)"
+    example: "PlatformPlaybook"
+  - name: AZURE_DEVOPS_PAT
+    description: "Personal Access Token from dev.azure.com/{org}/_usersSettings/tokens"
+    secret: true
+relatedAssets:
+  - "azure-devops-tickets-skill"
+  - "code-reviewer-skill"
+---
+
+# Azure DevOps MCP
+
+A Model Context Protocol (MCP) server config that lets Claude Code interact with Azure DevOps: manage work items in Boards, view and review PRs in Repos, check pipeline status, and query across the org.
+
+## What you can do once configured
+
+- "Create a User Story in PlatformPlaybook for adding password reset"
+- "What are my open work items in the current sprint?"
+- "Show me the PR for AB#1234"
+- "Move AB#1234 to Active and assign to me"
+- "What's the status of the last deployment pipeline?"
+- "Review the diff in PR !456"
+
+## Setup
+
+### Step 1: Generate an Azure DevOps Personal Access Token (PAT)
+
+1. Go to `https://dev.azure.com/{your-org}/_usersSettings/tokens`
+2. Click **New Token**
+3. Name: `Claude Code MCP`
+4. Organization: Select your org (or "All accessible organizations")
+5. Expiration: 90 days (rotate regularly)
+6. **Scopes (Custom defined):**
+   - **Work Items:** Read, write, & manage
+   - **Code:** Read & write (for PR comments)
+   - **Build:** Read (for pipeline status)
+   - **Project and Team:** Read
+7. Click **Create** and **copy the token immediately** — you can't see it again
+
+### Step 2: Set environment variables
+
+Add to your shell profile (`~/.zshrc` or `~/.bashrc`):
+
+```bash
+export AZURE_DEVOPS_ORG="your-org"
+export AZURE_DEVOPS_PROJECT="PlatformPlaybook"
+export AZURE_DEVOPS_PAT="your-pat-from-step-1"
+```
+
+Reload: `source ~/.zshrc`
+
+### Step 3: Add the MCP config to Claude Code
+
+Edit `~/.config/claude-code/mcp.json` (or wherever your Claude Code config lives) and add:
+
+```json
+{
+  "mcpServers": {
+    "azure-devops": {
+      "command": "npx",
+      "args": ["-y", "@your-org/azure-devops-mcp"],
+      "env": {
+        "AZURE_DEVOPS_ORG": "${AZURE_DEVOPS_ORG}",
+        "AZURE_DEVOPS_PROJECT": "${AZURE_DEVOPS_PROJECT}",
+        "AZURE_DEVOPS_PAT": "${AZURE_DEVOPS_PAT}"
+      }
+    }
+  }
+}
+```
+
+### Step 4: Restart Claude Code
+
+Quit and relaunch. The Azure DevOps tools should now be available.
+
+### Step 5: Test it
+
+Ask Claude Code: "List my open work items in Azure DevOps"
+
+If you see results, you're set.
+
+## Available tools (provided by the MCP server)
+
+### Work items (Boards)
+- `ado_search_work_items` - WIQL-powered search
+- `ado_get_work_item` - Fetch a specific work item with full history
+- `ado_create_work_item` - Create User Story / Bug / Task / Feature / Epic
+- `ado_update_work_item` - Update fields, state, assignment
+- `ado_add_comment` - Comment on a work item
+- `ado_link_work_items` - Parent/child, related, dependency links
+
+### Code (Repos)
+- `ado_list_repos` - List repos in the project
+- `ado_get_pr` - Fetch PR details
+- `ado_list_prs` - List PRs (open, completed, by author)
+- `ado_get_pr_diff` - Get the diff for a PR
+- `ado_add_pr_comment` - Add a review comment
+
+### Pipelines
+- `ado_list_pipelines` - List build/release pipelines
+- `ado_get_pipeline_run` - Get status of a specific run
+- `ado_recent_runs` - Recent runs across pipelines
+
+### Org-level
+- `ado_list_projects` - List accessible projects
+- `ado_search_users` - Find users to assign work items
+
+## Recommended pairings
+
+This MCP config pairs naturally with:
+
+- **Azure DevOps Tickets Skill** - applies team conventions when creating work items
+- **Code Reviewer Skill** - fetches PR diffs to review
+- **Spec-Driven Builder Skill** - can auto-create work items from generated user stories
+
+## Troubleshooting
+
+**"401 Unauthorized"**
+- Token expired or wrong
+- PAT must be from the same org you're querying
+- For "All accessible organizations" PATs, set `AZURE_DEVOPS_ORG` correctly
+
+**"403 Forbidden"**
+- Your account doesn't have permission for that project
+- Check Project Settings → Permissions for your group
+- Some operations (deleting work items) require admin rights
+
+**"Cannot find Azure DevOps tools" in Claude Code**
+- MCP server didn't start; check Claude Code logs
+- Try running `npx -y @your-org/azure-devops-mcp` manually to see startup errors
+
+**Work item creation fails with "Required field missing"**
+- ADO project's screen scheme requires fields beyond defaults
+- Check the project's process template (Agile, Scrum, CMMI, Basic) for required fields
+- Add missing fields explicitly in the create call
+
+**WIQL queries return nothing**
+- WIQL is case-sensitive on field names: `[System.AssignedTo]` not `[system.assignedto]`
+- @CurrentIteration only works inside the project context
+- Test queries first in the ADO web UI
+
+## Security notes
+
+- Treat your PAT like a password
+- Never commit it to a repo or paste it in chat history
+- Rotate every 90 days (set the expiration when creating)
+- For shared/CI use, create a service account PAT, not a personal one
+- Revoke immediately at `https://dev.azure.com/{org}/_usersSettings/tokens` if compromised
+
+## Customization
+
+Common customizations:
+
+- **Default work item type:** Add `ADO_DEFAULT_WORK_ITEM_TYPE=User Story` env var
+- **Custom fields mapping:** If your org uses non-standard field names, configure in `~/.config/claude-code/ado-fields.json`
+- **Multi-project workflow:** Don't set `AZURE_DEVOPS_PROJECT`, then specify project per command
+
+## On-prem Azure DevOps Server (TFS)
+
+This config is for **Azure DevOps Cloud** (`dev.azure.com`). For on-premises Azure DevOps Server:
+
+```json
+{
+  "mcpServers": {
+    "azure-devops": {
+      "command": "npx",
+      "args": ["-y", "@your-org/azure-devops-server-mcp"],
+      "env": {
+        "ADO_SERVER_URL": "https://your-server/your-collection",
+        "ADO_PROJECT": "PlatformPlaybook",
+        "ADO_PAT": "..."
+      }
+    }
+  }
+}
+```
+
+The MCP server package is different (`azure-devops-server-mcp`), and authentication may use NTLM/Windows auth instead of PAT.
+
+## What this enables
+
+This MCP unlocks the full power of two skills you already have:
+
+1. The **Azure DevOps Tickets Skill** can now actually create, query, and update work items rather than just generating descriptions
+2. The **Code Reviewer Skill** can now fetch PR diffs from ADO Repos automatically when you share a PR URL
+
+Without this MCP, both skills are limited to working with text the user pastes manually.

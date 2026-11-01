@@ -1,0 +1,180 @@
+---
+title: "PR Governance Gate Skill"
+slug: "pr-governance-gate-skill"
+description: "Governance-hook skill that gates pull requests on security, compliance, and enterprise-standard checks before merge."
+type: skill
+phase: deploy
+category: ci-cd
+projectType: ["custom-app", "etl"]
+stack: ["claude-code", "github-actions", "azure"]
+tags: ["governance", "guardrails", "pr-gate", "compliance", "hard-guardrail", "ci-cd"]
+difficulty: advanced
+estimatedTime: "20 min setup"
+author: "Platform Engineering"
+featured: false
+createdAt: 2026-06-03
+updatedAt: 2026-06-03
+skillName: "pr-governance-gate"
+requires:
+  - mcp-server: github
+  - mcp-server: azure-devops
+files:
+  - SKILL.md
+  - templates/governance-report.md
+relatedAssets:
+  - "owasp-security-review-skill"
+  - "secure-coding-guardrails-skill"
+  - "vibe-coding-guardrails-policy"
+  - "security-persona-rbac-matrix"
+---
+
+# PR Governance Gate Skill
+
+The **hard guardrail** at the pipeline boundary. It runs a fixed governance checklist against a pull request and produces a pass/block verdict with an auditable report. This is the GitHub/Azure DevOps PR governance integration from the demo — the control that turns "we have standards" into "code that violates the standards cannot merge."
+
+It is the enforcement counterpart to the author-time soft guardrails: the [secure-coding skill](/asset/skill/secure-coding-guardrails-skill) and [OWASP review skill](/asset/skill/owasp-security-review-skill) help developers do the right thing; this gate is what happens if they didn't.
+
+## When it triggers
+
+- "Gate this PR" / "run the governance check on PR #123"
+- A PR URL is shared with "can this merge?" / "does this pass our checks?"
+- Invoked from CI as a required status check before merge.
+
+## Why a gate, not a guideline
+
+Persona-based access control and standardization only mean something if there's a point where non-conformance is actually stopped. Discovery, orchestration, and validation agents do the work; the **governance hook** is where their output is checked against enterprise standards before it reaches `main`. Without a blocking gate, guardrails are suggestions.
+
+## Installation
+
+1. Copy this skill folder to `.claude/skills/pr-governance-gate/` in the repo.
+2. Configure the GitHub or Azure DevOps MCP so the skill can read PR metadata,
+   diffs, and status checks (see related MCP configs).
+3. Optionally wire it as a required check in branch protection so the verdict
+   blocks merge automatically.
+
+## SKILL.md content
+
+```markdown
+---
+name: pr-governance-gate
+description: |
+  Use this skill to run your organisation's enterprise governance gate on a pull request.
+  Triggers on: "gate this PR", "governance check", "can this merge?", "does
+  this pass our standards?", or a PR URL with a merge-readiness question.
+
+  Produces a deterministic PASS / BLOCK verdict against a fixed checklist and
+  an auditable governance report. It does not fix the code — it judges it and
+  tells the author exactly what to resolve.
+
+  Do NOT use for: open-ended code review (use owasp-security-review or
+  code-reviewer), or writing code.
+---
+
+# PR Governance Gate
+
+You are the enterprise governance gate. You evaluate a pull request against a
+FIXED checklist and return a clear verdict. You are strict, consistent, and
+auditable: the same PR must get the same verdict every time, and every BLOCK
+must cite the specific rule and location.
+
+## Process
+
+### Step 1: Load the PR
+Fetch via the GitHub or Azure DevOps MCP: title, description, changed files,
+diff, linked work item/issue, and existing status checks. If you cannot fetch
+it, ask for the diff and PR metadata — do not guess.
+
+### Step 2: Run the governance checklist
+
+Evaluate every item. Each is HARD (blocks merge) or SOFT (warns, does not block).
+
+**Security (HARD)**
+- [ ] No secrets, keys, tokens, or connection strings in the diff.
+- [ ] No unresolved 🔴 findings from the OWASP review rubric (injection, broken
+      access control, crypto failures, SSRF, insecure deserialization).
+- [ ] No new dependency with a known critical/high CVE.
+- [ ] No new endpoint without an authorization check.
+
+**Compliance & data (HARD)**
+- [ ] No PII/PHI logged or sent to a third party without an approved basis.
+- [ ] Data-handling changes touching regulated data have the required reviewer.
+
+**Standards (SOFT unless policy says otherwise)**
+- [ ] PR description explains what & why; links a work item.
+- [ ] Tests added/updated for changed behavior.
+- [ ] No drop below the team's coverage threshold.
+- [ ] Follows project conventions (naming, structure, lint clean).
+- [ ] Branding / UI guardrails respected for user-facing changes.
+
+**Provenance (SOFT)**
+- [ ] AI-generated changes are disclosed per policy.
+- [ ] Generated code carries no hallucinated imports/APIs.
+
+### Step 3: Decide the verdict
+- **🔴 BLOCK** if any HARD item fails.
+- **🟡 PASS WITH WARNINGS** if only SOFT items fail.
+- **✅ PASS** if all clear.
+
+### Step 4: Emit the governance report
+Use `templates/governance-report.md`:
+
+---
+## Governance gate — PR #<n>: <title>
+
+**Verdict:** ✅ PASS | 🟡 PASS WITH WARNINGS | 🔴 BLOCK
+**Evaluated:** <UTC timestamp> · **Ruleset:** ai-governance v1
+
+### 🔴 Blocking failures
+For each: **[Rule]** — `file:line` — what failed — exactly what to do to clear it.
+(None → "None.")
+
+### 🟡 Warnings
+Same format, non-blocking.
+
+### ✅ Passed checks
+List every HARD check that passed (this is the audit trail — proof it was looked at).
+
+### Required actions before merge
+Numbered, concrete. If PASS, write "Ready to merge."
+---
+
+### Step 5: Be precise about remediation
+For each blocking failure, tell the author the smallest concrete change that
+clears it. Do not re-architect. Do not soften a HARD failure to be nice.
+
+## Rules of engagement
+- Deterministic: identical PR ⇒ identical verdict. No mood, no drift.
+- Cite-or-drop: every failure names a rule and a location, or it isn't a failure.
+- Don't fix the code here — that's the author's job; you're the gate.
+- HARD items are not negotiable in this skill. Exceptions go through the
+  documented waiver process (a human approver), never through the gate
+  softening a rule.
+```
+
+## The hooks model
+
+This skill is one **governance hook**. In your organisation's agentic SDLC it sits at the merge boundary; see [`AGENTS.md`](/contribute) for the full hook taxonomy (pre-generation, post-generation, pre-merge, pre-deploy). The gate here is the canonical **pre-merge hook**.
+
+```
+Discovery → Build (soft guardrails) → Validator agent → ⛔ PR Governance Gate → main
+                                                          (this skill = hard guardrail)
+```
+
+## Pairing with MCPs
+
+- **GitHub MCP** / **Azure DevOps MCP** — read PR metadata, diffs, and post the
+  governance report back as a PR comment or status check.
+
+## Tips
+
+- Demo the BLOCK path: open a PR that hardcodes a token and let the gate refuse
+  it, then show the report naming the exact line — that's the governance story.
+- Keep the ruleset versioned (`ai-governance v1`). Bumping the version is
+  how you roll out a standards change org-wide with a clear audit boundary.
+
+## Limitations
+
+- The gate is only as strong as branch protection behind it — wire it as a
+  *required* check or it's advisory.
+- It judges what's in the diff; it can't catch a vulnerability whose root cause
+  is outside the changed files. Keep periodic full audits.

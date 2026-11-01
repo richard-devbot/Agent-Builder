@@ -1,0 +1,55 @@
+import {
+  Briefcase,
+  BrainCircuit,
+  Cloud,
+  Database,
+  FileText,
+  FlaskConical,
+  Infinity as InfinityIcon,
+  LayoutPanelTop,
+  Megaphone,
+  Palette,
+  Server,
+  Shapes,
+  ShieldCheck,
+  Smartphone,
+  Workflow,
+} from "lucide-react";
+import type { DomainId } from "@/lib/skill-catalog/domains";
+
+export const DOMAIN_ICON: Record<DomainId, typeof Workflow> = {
+  "agent-workflows": Workflow,
+  frontend: LayoutPanelTop,
+  design: Palette,
+  backend: Server,
+  data: Database,
+  cloud: Cloud,
+  devops: InfinityIcon,
+  testing: FlaskConical,
+  security: ShieldCheck,
+  "ai-ml": BrainCircuit,
+  mobile: Smartphone,
+  docs: FileText,
+  product: Briefcase,
+  marketing: Megaphone,
+  other: Shapes,
+};
+
+/** Accent per domain, used for tile artwork and icon tints. */
+export const DOMAIN_ACCENT: Record<DomainId, string> = {
+  "agent-workflows": "#14b8a6",
+  frontend: "#0ea5e9",
+  design: "#d946ef",
+  backend: "#6366f1",
+  data: "#8b5cf6",
+  cloud: "#3b82f6",
+  devops: "#f97316",
+  testing: "#f59e0b",
+  security: "#10b981",
+  "ai-ml": "#a855f7",
+  mobile: "#06b6d4",
+  docs: "#64748b",
+  product: "#eab308",
+  marketing: "#f43f5e",
+  other: "#94a3b8",
+};

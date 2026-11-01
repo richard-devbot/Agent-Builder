@@ -1,0 +1,208 @@
+---
+title: "FastAPI REST API Scaffolder"
+slug: "fastapi-scaffolder-python"
+description: "Scaffold a production-ready FastAPI service with Pydantic v2, async SQLAlchemy, dependency injection, and OpenAPI docs."
+type: template
+phase: build
+category: api-development
+projectType: ["custom-app"]
+stack: ["python", "fastapi", "postgres"]
+tags: ["python", "rest", "async", "boilerplate"]
+difficulty: intermediate
+estimatedTime: "30 min"
+author: "Platform Engineering"
+featured: false
+createdAt: 2026-04-26
+updatedAt: 2026-04-26
+inputs:
+  - name: resource_name
+    description: "The resource (e.g., 'product', 'order')"
+    required: true
+  - name: fields
+    description: "Fields with types"
+    required: true
+  - name: auth_required
+    description: "Should endpoints require auth? (yes/no)"
+    required: true
+output:
+  format: code
+relatedAssets:
+  - "openapi-spec-generator"
+  - "postgres-schema-designer"
+---
+
+# FastAPI REST API Scaffolder
+
+Generate a production-ready FastAPI service for a single resource with Pydantic v2 schemas, async SQLAlchemy, dependency-injected services, structured logging, and auto-generated OpenAPI docs.
+
+## When to use
+
+- Starting a new Python backend service
+- Adding a resource to an existing FastAPI app
+- Migrating a Flask/Django service to FastAPI
+- Need typed, async-first Python API patterns
+
+## Prompt
+
+````text
+You are a senior Python engineer specializing in FastAPI and async patterns.
+Generate a production-ready REST API for the resource below.
+
+## Input
+
+**Resource name:** {{resource_name}}
+**Fields:**
+```
+{{fields}}
+```
+**Auth required:** {{auth_required}}
+
+## Files to generate
+
+### Project layout
+
+```
+src/
+├── api/
+│   └── v1/
+│       └── {{resource_name}}.py        # FastAPI router
+├── schemas/
+│   └── {{resource_name}}.py            # Pydantic schemas
+├── services/
+│   └── {{resource_name}}_service.py    # Business logic
+├── models/
+│   └── {{resource_name}}.py            # SQLAlchemy ORM model
+├── repositories/
+│   └── {{resource_name}}_repository.py # DB access layer
+├── core/
+│   ├── dependencies.py                 # FastAPI dependencies
+│   ├── exceptions.py                   # Custom exceptions
+│   └── error_handlers.py               # Global error handlers
+└── tests/
+    └── test_{{resource_name}}.py       # pytest tests
+```
+
+### 1. `models/{{resource_name}}.py`
+SQLAlchemy 2.0 async model with:
+- UUID primary key (default `uuid.uuid4`)
+- `created_at` / `updated_at` with timezone-aware timestamps
+- Type-annotated columns using `Mapped[T]`
+- `__repr__` for debugging
+
+### 2. `schemas/{{resource_name}}.py`
+Pydantic v2 schemas:
+- `{{Resource}}Base` — shared fields
+- `{{Resource}}Create` — input for POST
+- `{{Resource}}Update` — input for PATCH (all fields optional)
+- `{{Resource}}Response` — output (includes id, timestamps)
+- `{{Resource}}ListResponse` — paginated wrapper
+- Use `Field()` with constraints (min_length, max_length, ge, le)
+- `model_config = ConfigDict(from_attributes=True)` for ORM compat
+
+### 3. `repositories/{{resource_name}}_repository.py`
+Repository class with async methods:
+- `get_by_id(id) -> Optional[Model]`
+- `list(filters, pagination) -> tuple[list[Model], int]`
+- `create(data) -> Model`
+- `update(id, data) -> Model`
+- `delete(id) -> None`
+Receives `AsyncSession` via constructor injection. No FastAPI imports here.
+
+### 4. `services/{{resource_name}}_service.py`
+Service class wrapping the repository:
+- Validates business rules (e.g., uniqueness, cross-resource checks)
+- Raises domain exceptions (`NotFoundException`, `ConflictException`)
+- Pure async, no FastAPI imports
+
+### 5. `api/v1/{{resource_name}}.py`
+FastAPI router:
+- `APIRouter(prefix="/{{resource_name}}s", tags=["{{Resource}}s"])`
+- Endpoints:
+  - `GET /` — list with `?page`, `?page_size`, filters
+  - `GET /{id}` — get one
+  - `POST /` — create, returns 201 + Location header
+  - `PATCH /{id}` — partial update
+  - `DELETE /{id}` — delete, returns 204
+- Each endpoint:
+  - Has `summary` and `description` for OpenAPI
+  - Lists possible response codes with `responses={}`
+  - Uses `Depends()` for service injection
+  - Uses `Depends(require_auth)` if auth_required is yes
+
+### 6. `core/dependencies.py`
+- `get_db()` — async session provider
+- `get_{{resource_name}}_service()` — service factory using db session
+- `require_auth()` — extracts user from JWT, raises 401 if invalid (skip if no auth)
+- `pagination_params(page=1, page_size=20)` with bounds (page_size ≤ 100)
+
+### 7. `core/exceptions.py`
+Domain exceptions:
+- `NotFoundException`
+- `ConflictException`
+- `ValidationException`
+- `UnauthorizedException`
+
+### 8. `core/error_handlers.py`
+Global exception handlers that convert domain exceptions to consistent JSON:
+```python
+{ "error": { "code": "not_found", "message": "...", "details": [] } }
+```
+Map exceptions to status codes: NotFound→404, Conflict→409, Validation→422, Unauthorized→401.
+
+### 9. `tests/test_{{resource_name}}.py`
+pytest + httpx async client:
+- Fixtures for db, client, sample data
+- Tests:
+  - `test_create_{{resource_name}}_success`
+  - `test_create_{{resource_name}}_validation_error`
+  - `test_get_{{resource_name}}_not_found`
+  - `test_list_{{resource_name}}s_pagination`
+  - `test_update_{{resource_name}}_partial`
+  - `test_delete_{{resource_name}}`
+  - Auth tests if applicable
+
+## Standards
+
+- Python 3.11+ syntax (use `X | None` not `Optional[X]`)
+- Type-hint everything, no untyped functions
+- Use `async def` consistently — no sync DB calls in async handlers
+- Use SQLAlchemy 2.0 style (`select()` not `query()`)
+- Pydantic v2 syntax (`model_config`, not `Config` class)
+- Logger via structlog or stdlib logging — no print statements
+- No business logic in routers — push to services
+
+## Conventions
+
+- Snake_case for variables, functions, file names
+- PascalCase for classes
+- Endpoints return `Response` schemas, never raw ORM models
+- No bare `except:` clauses
+
+## Output format
+
+For each file:
+1. Full file path
+2. Complete code in fenced code block with `python`
+
+After the files:
+- **"## requirements.txt"** — list dependencies with version pins
+- **"## Wiring"** — how to register the router in `main.py`
+- **"## Database migration"** — Alembic migration to create the table
+- **"## Critical tests"** — list of edge cases to cover
+````
+
+## Tips
+
+- Pin Pydantic to v2.x — v1 syntax is incompatible
+- Use `asyncpg` driver for Postgres (faster than psycopg)
+- FastAPI auto-generates OpenAPI at `/docs` and `/redoc` — no extra work needed
+- Pair with the **OpenAPI Spec Generator** for spec-first API design
+- Pair with the **Postgres Schema Designer** to keep DB and ORM in sync
+
+## Common mistakes to avoid
+
+- Returning ORM models directly (leak DB internals; always serialize via Pydantic schemas)
+- Using sync DB calls inside async handlers (blocks the event loop)
+- Catching exceptions in routers instead of using global handlers
+- Forgetting `from_attributes=True` on response schemas (Pydantic can't read ORM objects)
+- Hardcoding settings instead of using `pydantic-settings` BaseSettings

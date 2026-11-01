@@ -1,0 +1,374 @@
+---
+title: "Database Migration Skill"
+slug: "database-migration-skill"
+description: "Claude Code skill that generates safe forward and reverse migrations with transaction-wrapping, idempotency, and zero-downtime patterns."
+type: skill
+phase: build
+category: database-development
+projectType: ["custom-app"]
+stack: ["claude-code"]
+tags: ["database", "migrations", "postgres", "safety"]
+difficulty: intermediate
+estimatedTime: "5 min setup"
+author: "Platform Engineering"
+featured: true
+createdAt: 2026-04-26
+updatedAt: 2026-04-26
+skillName: "database-migration"
+requires: []
+files:
+  - SKILL.md
+relatedAssets:
+  - "postgres-schema-designer"
+  - "code-reviewer-skill"
+---
+
+# Database Migration Skill
+
+Activates on schema-change requests. Generates paired forward + reverse migrations, validates safety (transaction-wrapped, idempotent, backward-compatible during rolling deploys), and refuses dangerous operations without explicit confirmation.
+
+## When it triggers
+
+- "Add a column to X"
+- "Change Y to nullable" / "Make Z required"
+- "Migrate the schema"
+- "Rename table/column"
+- "Add an index"
+- "Drop the unused column"
+- "Create a new table for X"
+- "Backfill data for Y"
+
+## Why a skill (and a strict one)
+
+Migrations are dangerous. A bad migration in production = an outage, data loss, or both. The conventions for safe migrations (online schema changes, backward compatibility during deploys, paired up/down) are non-obvious and easy to skip when in a hurry.
+
+This skill enforces them.
+
+## Installation
+
+1. Copy this skill folder to `~/.claude/skills/database-migration/`
+2. Restart Claude Code
+3. Try: "Add a `phone_number` column to the customers table"
+
+## SKILL.md content
+
+```markdown
+---
+name: database-migration
+description: |
+  Use this skill when the user wants to change the database schema in any way:
+  add/remove columns, change types, add/remove constraints, create/drop
+  tables, add/remove indexes, rename anything, or backfill data.
+
+  Triggers on: "migrate", "add column", "drop column", "change type", "make
+  nullable", "rename table/column", "add index", "schema change", "alter
+  table", "create table", "backfill".
+
+  Generates paired forward + reverse migrations with safety checks.
+
+  Do NOT use for: data fixes (use a one-off script), reading the schema (use
+  database tools directly), or designing a fresh schema for a new project
+  (use the Postgres Schema Designer template).
+---
+
+# Database Migration
+
+You generate safe, paired migrations. You refuse dangerous operations without
+explicit confirmation. You always think about what happens during a rolling
+deploy where old code and new code run simultaneously.
+
+## Operating principles
+
+1. **Always paired.** Every forward migration has a matching reverse.
+2. **Always wrapped.** All DDL inside a transaction (where the DB supports it).
+3. **Always idempotent.** Running twice should not fail.
+4. **Always backward compatible during deploys.** New code must work with old
+   schema; old code must survive new schema briefly.
+5. **Refuse dangerous operations.** DROP TABLE, DROP COLUMN with data, type
+   narrowing — confirm before generating.
+6. **Online schema changes** for tables likely to be large.
+
+## Process when activated
+
+### Step 1: Understand the change
+
+Ask up to 3 clarifying questions if needed:
+
+- **Target table size.** "Roughly how many rows in this table? <1K, ~10K-1M, >1M?"
+  Affects whether we need online (concurrent) operations.
+- **Deploy model.** "Rolling deploy or full downtime window?" Affects backward
+  compat strategy.
+- **Production data?** "Is there existing data to consider, or is this a new
+  table?"
+
+For trivial changes (adding nullable column to small table), skip questions.
+
+### Step 2: Classify the change
+
+| Type | Risk | Default approach |
+|------|------|------------------|
+| Add nullable column | LOW | Add directly |
+| Add NOT NULL column with default | MEDIUM | Add nullable → backfill → set NOT NULL (3 migrations) |
+| Add NOT NULL column no default | HIGH | Refuse for tables with data; force a default |
+| Drop column | HIGH | Two-deploy: stop using → drop in next migration |
+| Rename column | HIGH | Two-deploy: add new → backfill → switch code → drop old |
+| Change type (compat) | MEDIUM | USING clause + verify |
+| Change type (incompat) | HIGH | New column → backfill → swap |
+| Add CHECK constraint | MEDIUM | Add NOT VALID → VALIDATE separately |
+| Add foreign key | MEDIUM | Add NOT VALID → VALIDATE separately |
+| Add index | LOW (small) / MEDIUM (large) | CREATE INDEX CONCURRENTLY for large tables |
+| Add unique constraint | MEDIUM | Add unique index CONCURRENTLY → ALTER TABLE constraint |
+| Drop NOT NULL | LOW | Direct |
+| Add NOT NULL to existing column | HIGH | Verify no NULLs first → add as NOT VALID → validate |
+| Drop table | CRITICAL | Refuse without explicit confirmation |
+| Truncate table | CRITICAL | Refuse |
+
+### Step 3: Generate paired migrations
+
+Use the project's existing migration tool. Detect by looking for:
+- `migrations/` folder + bare SQL files → straight SQL migrations
+- `prisma/` folder → Prisma migrations
+- `alembic.ini` → Alembic (Python)
+- `knexfile.*` → Knex
+- `node_modules/typeorm` → TypeORM
+- `flyway.conf` → Flyway
+
+If unclear, ASK: "Which migration tool — bare SQL, Prisma, Alembic, Knex,
+TypeORM, Flyway, or other?"
+
+Match the project's naming convention. Common patterns:
+- Sequential: `0001_initial.sql`, `0002_add_phone.sql`
+- Timestamped: `20240126_120000_add_phone.sql`
+
+Generate BOTH:
+- **Forward migration** (e.g., `0042_add_phone_to_customers.sql`)
+- **Reverse migration** (e.g., `0042_add_phone_to_customers.down.sql`)
+
+### Step 4: Apply safety patterns
+
+#### Always: wrap in transaction
+
+```sql
+BEGIN;
+
+-- changes here
+
+COMMIT;
+```
+
+EXCEPTION: Operations that don't run in transactions (Postgres):
+- `CREATE INDEX CONCURRENTLY`
+- `ALTER TYPE ... ADD VALUE` (in some versions)
+- `VACUUM`
+
+For these, omit BEGIN/COMMIT and add a comment explaining why.
+
+#### Always: make idempotent
+
+```sql
+-- Safe to re-run
+ALTER TABLE customers ADD COLUMN IF NOT EXISTS phone_number TEXT;
+
+CREATE INDEX IF NOT EXISTS idx_customers_phone ON customers(phone_number);
+
+-- For data backfill: scoped to NULL only, so re-runs are no-ops
+UPDATE customers SET tier = 'standard' WHERE tier IS NULL;
+```
+
+#### Online operations for large tables
+
+```sql
+-- BAD on large tables (locks table)
+CREATE INDEX idx_orders_customer ON orders(customer_id);
+
+-- GOOD on large tables (no full table lock)
+-- Note: cannot run in transaction
+CREATE INDEX CONCURRENTLY idx_orders_customer ON orders(customer_id);
+```
+
+```sql
+-- BAD: rewrites the entire table
+ALTER TABLE orders ADD COLUMN status TEXT NOT NULL DEFAULT 'pending';
+
+-- GOOD: split into 3 migrations
+-- Migration 1: add nullable
+ALTER TABLE orders ADD COLUMN IF NOT EXISTS status TEXT;
+-- (deploy code that writes to status)
+-- Migration 2: backfill in batches (separate script)
+-- Migration 3: set NOT NULL with default
+ALTER TABLE orders ALTER COLUMN status SET DEFAULT 'pending';
+ALTER TABLE orders ALTER COLUMN status SET NOT NULL;
+```
+
+#### Always: validate constraints separately
+
+```sql
+-- Step 1: add as NOT VALID (fast, doesn't scan existing rows)
+ALTER TABLE orders ADD CONSTRAINT chk_amount_positive
+  CHECK (amount > 0) NOT VALID;
+
+-- Step 2: validate later (in next migration or off-hours)
+ALTER TABLE orders VALIDATE CONSTRAINT chk_amount_positive;
+```
+
+#### Foreign keys: same pattern
+
+```sql
+-- NOT VALID first
+ALTER TABLE orders ADD CONSTRAINT fk_orders_customer
+  FOREIGN KEY (customer_id) REFERENCES customers(id) NOT VALID;
+
+-- VALIDATE later
+ALTER TABLE orders VALIDATE CONSTRAINT fk_orders_customer;
+```
+
+### Step 5: Output the migration set
+
+Format:
+
+---
+
+## Forward migration
+
+`migrations/NNNN_brief_description.sql`
+
+```sql
+[SQL]
+```
+
+## Reverse migration
+
+`migrations/NNNN_brief_description.down.sql`
+
+```sql
+[SQL]
+```
+
+## Why this approach
+
+[2-3 sentences explaining the safety rationale]
+
+## Deploy sequence
+
+If multi-step (rolling deploy needed):
+
+1. **Deploy 1:** Run forward migration.
+   - Add column as nullable / add NOT VALID constraint / etc.
+   - Deploy new code that handles both shapes.
+
+2. **Deploy 2:** Backfill (if applicable).
+   - Run a separate backfill script.
+   - Confirm data is good.
+
+3. **Deploy 3:** Tighten.
+   - Set NOT NULL / VALIDATE / drop old column.
+
+If single-step, just say: "Single migration. Apply directly."
+
+## Verification queries
+
+```sql
+-- Run these AFTER the migration to verify it worked:
+SELECT [...]
+```
+
+## Rollback safety
+
+[Note any caveats: e.g., "Rolling back loses data added since deploy."]
+
+---
+
+### Step 6: Handle dangerous requests
+
+If the request involves any of these, REFUSE generating until explicit
+confirmation:
+
+- DROP TABLE
+- TRUNCATE
+- DROP COLUMN where the table likely has data
+- Type narrowing that could lose data (TEXT → VARCHAR(N), DECIMAL → INT)
+- DELETE without a WHERE clause
+- UPDATE without a WHERE clause
+- ALTER COLUMN to NOT NULL on a column that may have NULLs
+
+Ask:
+> "This will [destructive action]. Confirm:
+>  1. Do you have a current backup?
+>  2. Is this on production data?
+>  3. Are you sure you want to proceed?
+>
+> If yes to all, reply 'CONFIRM DROP'. I'll then generate the migration with
+> a clear warning header."
+
+If they confirm, generate it but include a warning header in the SQL:
+
+```sql
+-- ⚠️  DESTRUCTIVE MIGRATION ⚠️
+-- This drops [thing] and CANNOT be undone by the down migration.
+-- Verify backup exists before applying.
+-- Confirmed by: [user/PR/etc.]
+```
+
+### Step 7: Don't run the migration
+
+Generate the files. Do NOT execute them. Tell the user:
+
+> "Migrations generated at [paths]. To apply:
+> 1. Review them carefully
+> 2. Test on a non-prod database first
+> 3. Apply with [project's migration command]
+>
+> I do not run migrations directly — that's your call to make."
+
+## Anti-patterns to avoid
+
+- Generating only a forward migration without a reverse
+- Wrapping `CREATE INDEX CONCURRENTLY` in a transaction
+- Adding NOT NULL without a default to a non-empty table
+- Renaming a column without the multi-deploy sequence
+- Forgetting `IF NOT EXISTS` / `IF EXISTS` clauses
+- Updating a non-trivial number of rows in the migration itself (use a
+  separate backfill script)
+- Adding indexes that duplicate existing ones (check the schema)
+- Forgetting to update related ORM models / TypeScript types
+
+## Database-specific notes
+
+### PostgreSQL
+- Most operations use ALTER TABLE
+- `IF NOT EXISTS` / `IF EXISTS` widely supported
+- Concurrent index creation available
+- DDL is transactional
+
+### MySQL
+- ALTER TABLE rewrites the table (slow on large tables)
+- Use `pt-online-schema-change` or gh-ost for large tables in prod
+- Limited transactional DDL support
+- Watch out for implicit row format changes
+
+### MongoDB
+- Schema changes are mostly application-level
+- Use schema validators with `validationLevel: 'moderate'` during transitions
+- Index creation: use `background: true` in older versions; modern drivers
+  default to background
+- For collection rename: use `db.collection.renameCollection()` (atomic)
+```
+
+## Pairing with other skills
+
+- **Code Reviewer skill** can review your migration before you apply it
+- **Spec-Driven Builder** generates initial schemas — this skill handles changes after launch
+
+## Tips
+
+- For Postgres specifically, install `pg_repack` for online table reorganization
+- Test migrations against a copy of production data, not just dev seed
+- Keep migration files small — one logical change per migration is easier to roll back
+- For Rails-style migrations, the skill follows the same patterns but uses Ruby DSL when applicable
+
+## Limitations
+
+- Doesn't auto-detect table size; relies on user input or assumes small unless told otherwise
+- Cannot generate the data backfill script (separate concern — use a one-off script)
+- Doesn't handle multi-database migrations (e.g., Postgres + Redis simultaneously) — generate them separately
+- For very complex migrations (sharding, partitioning), this skill flags but doesn't fully handle — recommend consulting a DBA

@@ -1,0 +1,139 @@
+---
+title: "Next.js Page + Component Scaffolder"
+slug: "nextjs-page-scaffolder"
+description: "Scaffold a Next.js 15 App Router page with server component, client interactivity, loading state, and tests."
+type: template
+phase: build
+category: frontend-development
+projectType: ["custom-app"]
+stack: ["nextjs", "react", "typescript", "tailwind", "shadcn-ui"]
+tags: ["boilerplate", "app-router", "rsc"]
+difficulty: intermediate
+estimatedTime: "20 min"
+author: "Platform Engineering"
+featured: true
+createdAt: 2026-04-26
+updatedAt: 2026-04-26
+inputs:
+  - name: page_purpose
+    description: "What this page does (e.g., 'list all customers with filters')"
+    required: true
+  - name: route
+    description: "URL route (e.g., /customers, /admin/users)"
+    required: true
+  - name: data_source
+    description: "Where data comes from (REST API URL, function name, etc.)"
+    required: false
+output:
+  format: code
+relatedAssets:
+  - "react-form-builder"
+  - "shadcn-component-generator"
+---
+
+# Next.js Page + Component Scaffolder
+
+Generate a Next.js 15 App Router page with proper server/client component boundaries, loading and error states, and a co-located test file.
+
+## When to use
+
+- Adding a new page to a Next.js app
+- Want consistent structure across pages in a team
+- Need RSC + client interactivity boundaries done right
+
+## Prompt
+
+````text
+You are a senior Next.js engineer. Generate a Next.js 15 App Router page
+following the spec below.
+
+## Input
+
+**Page purpose:** {{page_purpose}}
+**Route:** {{route}}
+**Data source:** {{data_source}}
+
+## Output
+
+Generate these files with full code:
+
+1. **app{{route}}/page.tsx**
+   - Server component by default
+   - Fetches data using async/await directly in the component (no useEffect)
+   - Passes data to client components as props
+   - Includes generateMetadata() for SEO if it's a public page
+   - Wraps interactive sections in Suspense boundaries
+
+2. **app{{route}}/loading.tsx**
+   - Skeleton UI matching the page layout
+   - Uses shadcn/ui Skeleton component
+
+3. **app{{route}}/error.tsx**
+   - Client component
+   - Shows user-friendly error
+   - Includes a "Try again" button calling reset()
+
+4. **app{{route}}/_components/[ComponentName].tsx** (one or more)
+   - Client components for interactive sections
+   - Use "use client" directive
+   - Strongly typed props
+   - Use shadcn/ui components where applicable
+
+5. **app{{route}}/_components/[ComponentName].test.tsx**
+   - One test file per client component
+   - Use Vitest + React Testing Library
+   - Test 3-5 critical behaviors
+
+## Standards
+
+- TypeScript strict mode, no `any`
+- Co-locate components in `_components/` (underscore prevents routing)
+- Server components stay async functions
+- Client components are minimal — push interactivity to leaves
+- Tailwind for styling, shadcn/ui for primitives
+- Forms use react-hook-form + Zod
+- Loading state: never show a blank screen; use skeletons
+- Error state: catch in error.tsx, log to monitoring (use placeholder console.error)
+- Accessibility: semantic HTML, aria-labels on icon buttons, focus visible
+
+## File structure example
+
+```
+app/customers/
+├── page.tsx                  (server component, async)
+├── loading.tsx               (skeleton)
+├── error.tsx                 (client, "use client")
+└── _components/
+    ├── CustomerFilters.tsx   (client, interactive filters)
+    ├── CustomerFilters.test.tsx
+    ├── CustomerTable.tsx     (server, renders rows)
+    └── CustomerRow.tsx       (server)
+```
+
+## Naming
+
+- PascalCase for component files and components
+- camelCase for hooks (useFoo.ts)
+- kebab-case for routes (app/customer-list/, NOT app/CustomerList/)
+````
+
+## Example input
+
+```yaml
+page_purpose: "List all customers with search, status filter, and pagination"
+route: "/customers"
+data_source: "GET /api/customers (returns { data: Customer[], meta: { page, total } })"
+```
+
+## Tips
+
+- Keep server components as the default; reach for "use client" only when you need state, effects, or browser APIs
+- Co-locate everything page-specific under the route folder using `_components/` (underscore prevents Next from making them routes)
+- For shared components used by 2+ pages, move them to `/components` at the root
+- Use `loading.tsx` for instant feedback — Next.js streams it while the server component fetches data
+
+## Common mistakes to avoid
+
+- Don't fetch in client components when a server component can do it
+- Don't mark whole pages "use client" just because one button needs onClick
+- Don't forget `generateMetadata()` for SEO-critical pages

@@ -1,0 +1,127 @@
+---
+title: "Architecture Decision Record (ADR) Generator"
+slug: "adr-generator"
+description: "Generate a structured ADR documenting a technical decision and its trade-offs."
+type: template
+phase: design
+category: adr
+projectType: ["custom-app", "etl"]
+stack: []
+tags: ["architecture", "documentation", "decision-making"]
+difficulty: intermediate
+estimatedTime: "15 min"
+author: "Platform Engineering"
+featured: false
+createdAt: 2026-04-26
+updatedAt: 2026-04-26
+inputs:
+  - name: decision_context
+    description: "What needs to be decided and why now"
+    required: true
+  - name: options_considered
+    description: "List of options with brief descriptions"
+    required: true
+  - name: chosen_option
+    description: "Which option you picked (or 'undecided' to have the AI recommend)"
+    required: false
+output:
+  format: markdown
+relatedAssets:
+  - "system-design-doc-generator"
+  - "tech-stack-selector"
+---
+
+# Architecture Decision Record (ADR) Generator
+
+Generate a well-structured ADR following the Michael Nygard format. ADRs capture *why* a decision was made — invaluable for future engineers (including future you).
+
+## When to use
+
+- About to make a non-trivial technical decision
+- Have already made a decision and need to document it
+- Onboarding new engineers who keep asking "why did we...?"
+
+## Prompt
+
+```text
+You are a principal engineer. Generate an Architecture Decision Record (ADR)
+in the Michael Nygard format.
+
+## Input
+
+**Decision context:**
+{{decision_context}}
+
+**Options considered:**
+{{options_considered}}
+
+**Chosen option (if decided):**
+{{chosen_option}}
+
+## Output
+
+Produce a Markdown ADR with these sections:
+
+# ADR-XXX: [Short title in active voice]
+
+## Status
+[Proposed | Accepted | Deprecated | Superseded by ADR-YYY]
+
+## Context
+What is the issue we're seeing that motivates this decision? Include:
+- Business or technical drivers
+- Constraints (time, budget, team skills, existing systems)
+- What we know and what we don't
+
+## Decision
+What is the change we're making? State it plainly.
+
+## Options considered
+
+For each option:
+### Option N: [Name]
+**Pros:**
+- ...
+**Cons:**
+- ...
+**Trade-off summary:** one sentence
+
+## Consequences
+
+### Positive
+What becomes easier?
+
+### Negative
+What becomes harder? What technical debt are we accepting?
+
+### Neutral
+Side effects worth noting.
+
+## Compliance / Follow-ups
+- Migration steps (if any)
+- Documentation that needs updating
+- Monitoring / metrics to add
+- Date for revisiting this decision (if applicable)
+
+## Style notes
+- Be honest about downsides. Future readers need the full picture.
+- If "chosen_option" is not provided, recommend one based on the trade-offs and
+  flag it as "Proposed" status.
+- Use plain language. Avoid jargon when a clear word works.
+- Numbers > adjectives.
+```
+
+## Example use
+
+**Input:**
+- decision_context: "We need to choose a database for the customer portal. ~10K users, mixed read/write, strong consistency for financial data."
+- options_considered: "1) PostgreSQL on RDS, 2) DynamoDB, 3) MongoDB Atlas"
+- chosen_option: "undecided"
+
+**Output:** A full ADR recommending Postgres with reasoning, trade-offs, and follow-up actions.
+
+## Tips
+
+- Number ADRs sequentially in your repo's `/docs/adr/` folder
+- Once accepted, an ADR is **immutable** — supersede with a new ADR rather than editing
+- Link ADRs to the user stories or PRDs they affect

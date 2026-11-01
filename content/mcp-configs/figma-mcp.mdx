@@ -1,0 +1,242 @@
+---
+title: "Figma MCP"
+slug: "figma-mcp"
+description: "Pre-configured Figma MCP server for Claude Code — read design files and convert frames to component specs for design-to-code workflows."
+type: mcp-config
+phase: design
+category: ux-design
+projectType: ["custom-app"]
+stack: ["claude-code", "mcp"]
+tags: ["figma", "design", "design-to-code", "design-systems"]
+difficulty: intermediate
+estimatedTime: "10 min setup"
+author: "Platform Engineering"
+featured: false
+createdAt: 2026-04-26
+updatedAt: 2026-04-26
+serverName: "figma"
+configFormat: "claude-code"
+envVars:
+  - name: FIGMA_ACCESS_TOKEN
+    description: "Personal access token from Figma → Settings → Account → Personal access tokens"
+    secret: true
+relatedAssets:
+  - "component-library-skill"
+  - "shadcn-component-builder"
+---
+
+# Figma MCP
+
+A Model Context Protocol server config that lets Claude Code read Figma design files: extract design tokens, inspect frame structure, fetch component specs, and convert designs into starter code matching the project's design system.
+
+## What you can do once configured
+
+- "Read this Figma frame and create a React component matching the design"
+- "Extract the color tokens from our design system file"
+- "What's the typography scale defined in our Figma library?"
+- "Compare this implementation to the Figma design and tell me what's off"
+- "List all the components defined in the Buttons frame"
+
+## Setup
+
+### Step 1: Generate a Figma access token
+
+1. Go to https://www.figma.com/developers/api#access-tokens
+2. Or directly: Figma → Settings → Account → Personal access tokens
+3. Click **Generate new token**
+4. Name: `Claude Code MCP`
+5. Expiration: Recommended 90 days
+6. Scopes:
+   - **File content:** Read (required)
+   - **Comments:** Read (optional, for design feedback workflows)
+   - **Variables:** Read (required for design tokens)
+   - **Library content:** Read (required for component libraries)
+7. Click **Generate** and **copy immediately**
+
+### Step 2: Set environment variable
+
+```bash
+export FIGMA_ACCESS_TOKEN="figd_..."
+```
+
+Reload your shell.
+
+### Step 3: Add the MCP config
+
+Edit `~/.config/claude-code/mcp.json`:
+
+```json
+{
+  "mcpServers": {
+    "figma": {
+      "command": "npx",
+      "args": ["-y", "@your-org/figma-mcp"],
+      "env": {
+        "FIGMA_ACCESS_TOKEN": "${FIGMA_ACCESS_TOKEN}"
+      }
+    }
+  }
+}
+```
+
+### Step 4: Restart Claude Code
+
+### Step 5: Test it
+
+Ask: "Get the file metadata for [paste a Figma file URL you have access to]"
+
+You should get back the file's name, last modified date, and team info.
+
+## Working with Figma URLs
+
+Figma file URLs look like:
+
+```
+https://www.figma.com/design/AbCdEfGh1234/My-Design-File?node-id=42-1234&...
+```
+
+Two important parts:
+- **File key:** `AbCdEfGh1234` (the alphanumeric ID after `/design/`)
+- **Node ID:** `42-1234` (after `node-id=`, identifies a specific frame/component)
+
+When asking Claude Code to do things with a Figma design, you can:
+- Paste the full URL — Claude Code parses both file key and node ID
+- Reference just the file key for whole-file operations
+- Reference the node ID for specific frames
+
+## Available tools
+
+### File-level
+- `figma_get_file` - Get file metadata and tree structure
+- `figma_get_file_styles` - All styles defined in the file (colors, text, effects)
+- `figma_get_file_components` - All components in the file
+- `figma_search_file` - Find frames/components by name
+
+### Frame/node-level
+- `figma_get_node` - Full data for a specific frame/component
+- `figma_get_node_image` - Render a node as a PNG/SVG (returns image URL)
+- `figma_get_node_dimensions` - Width, height, padding, margins
+- `figma_get_node_styles` - Colors, fonts, effects on a specific node
+
+### Design tokens
+- `figma_get_variables` - Variables (Figma Variables / design tokens)
+- `figma_get_published_styles` - Styles published from a design system file
+
+### Comments
+- `figma_get_comments` - Read comments on a file (handy for design QA)
+- `figma_create_comment` - Add a comment (e.g., "implementation question for designer")
+
+## Recommended pairings
+
+- **Component Library Skill** - reads Figma component specs, generates matching React components using project conventions
+- **Shadcn/ui Component Builder** template - similar workflow with manual paste of Figma details
+
+## Common workflows
+
+### Design → React component
+
+```
+You: "Build me this component" + paste Figma URL of the frame
+
+Claude Code with Figma MCP + Component Library Skill:
+1. Fetches the frame from Figma
+2. Inspects dimensions, colors, typography, layout
+3. Cross-references with project's design tokens (Filesystem MCP)
+4. Generates a React component using shadcn/ui primitives
+5. Matches sizing to project's spacing scale (not raw Figma px values)
+```
+
+### Extracting design tokens
+
+```
+You: "Read our design system file and update tailwind.config.ts to use these tokens"
+
+Claude Code:
+1. Calls figma_get_file_styles + figma_get_variables
+2. Maps Figma color/type/spacing tokens to Tailwind config
+3. Shows proposed diff to tailwind.config.ts
+4. Updates after confirmation
+```
+
+### Visual diff (implementation vs design)
+
+```
+You: "Compare my Card component implementation to this Figma frame"
+
+Claude Code:
+1. Reads the React component (Filesystem MCP)
+2. Reads the Figma frame (Figma MCP)
+3. Renders a comparison: padding mismatch, color drift, missing variants
+4. Suggests specific fixes
+```
+
+## Limitations
+
+### Translating Figma to code is lossy
+
+Figma is design-first; code is component-first. Things that don't translate perfectly:
+
+- **Auto-layout** maps roughly to flexbox, but spacing nuances may differ
+- **Constraints** (anchor points) don't always map to responsive design
+- **Effects** (drop shadows, blurs) translate to CSS but values may need tweaking
+- **Components with variants** in Figma → component with props in React, but the mapping isn't 1:1
+
+The MCP gives Claude Code data to work with; the **interpretation** still matters. Generated code is a starting point, not a final implementation.
+
+### Pixel-perfect is rarely the goal
+
+If the design says "16px padding" and your project's spacing scale is `4, 8, 12, 16, 20, 24...`, the closest match is usually right. If your project uses `4, 8, 16, 24, 32...`, picking 16 still works. **Don't generate code with raw Figma pixel values** — match to the project's tokens. The Component Library Skill enforces this; it won't dump `style={{ padding: '16px' }}`.
+
+### Variables vs styles
+
+Figma's "Styles" (older system) and "Variables" (newer) are different things. The MCP supports both, but:
+
+- Variables are richer (modes for light/dark, scoped values)
+- Styles are flatter
+- If your design system uses Variables, get `figma_get_variables`. If it uses Styles, use `figma_get_file_styles`.
+
+## Troubleshooting
+
+**"Forbidden" on a file you can open in browser**
+- The token might not have access to that team
+- Re-check token scopes (File content: Read)
+- Some files require team membership; ensure your account is a member
+
+**"Node not found" on a node ID from a URL**
+- Figma URLs use `node-id=42-1234` but the API expects `42:1234` (colon, not hyphen)
+- The MCP handles this conversion; if not, adjust manually
+
+**Image rendering fails**
+- The MCP requests rendered images from Figma's API; large frames or many requests may rate-limit
+- Try smaller frames or reduce the request rate
+
+**Generated component looks wrong**
+- This is usually not a Figma MCP problem — it's the Component Library Skill's interpretation
+- Check that the project has a design system the skill can match (tailwind.config.ts, shadcn primitives)
+- Provide more specific guidance: "Match the Figma exactly, don't adapt to existing tokens"
+
+## Security notes
+
+- Figma access tokens grant access to all files your account can read
+- For sensitive design files (e.g., not-yet-announced features), be cautious
+- Tokens don't grant comment-write or file-write unless those scopes are checked
+- Rotate tokens regularly
+- For shared/team use, prefer a Figma "service account" rather than a personal token
+
+## When NOT to use this
+
+- Your team doesn't use Figma (or moved to Penpot, Sketch, etc.)
+- Designs are aspirational — too rough for code generation
+- Engineering and design haven't agreed on tokens — you'll get tokens that don't match the project
+- Designs change daily — the loop of "Figma changed → code changed" gets noisy
+
+## What this enables
+
+For teams doing design-first product work:
+
+- Faster handoff from designer to engineer
+- Less drift between intended design and shipped UI
+- Design tokens become single source of truth (Figma → tokens.json → Tailwind config)
+- Visual regression QA gets a starting point
+
+For teams where design is lightweight (sketches, ad hoc decisions), this MCP is overkill — skip it.

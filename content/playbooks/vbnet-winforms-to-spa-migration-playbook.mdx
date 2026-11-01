@@ -1,0 +1,393 @@
+---
+title: "VB.NET WinForms to SPA + .NET API Migration Playbook"
+slug: "vbnet-winforms-to-spa-migration-playbook"
+description: "Migrate a legacy VB.NET WinForms desktop application to a modern web SPA (React or Angular) + .NET API. The hardest scenario — it's an architectural reshape, not just tech translation."
+type: playbook
+phase: build
+category: architecture
+projectType: ["custom-app"]
+stack: ["dotnet", "vbnet", "angular", "react", "typescript"]
+tags: ["migration", "modernization", "winforms", "desktop-to-web", "vbnet"]
+difficulty: advanced
+estimatedTime: "3-6 quarters"
+totalEstimatedTime: "3-6 quarters — desktop-to-web takes longer than web-to-web"
+author: "Platform Engineering"
+featured: true
+createdAt: 2026-04-26
+updatedAt: 2026-04-27
+intakeFields:
+  - name: legacy_app_description
+    label: "Legacy app description"
+    type: textarea
+    required: true
+    placeholder: "Internal CRM built on VB.NET WinForms 4.8 + SQL Server, ~80 forms, 200 daily users"
+  - name: user_count_concurrency
+    label: "User count + concurrency model"
+    type: text
+    required: true
+    placeholder: "200 daily users, peak 80 concurrent, single-user-at-a-time data assumptions throughout"
+  - name: data_location
+    label: "Data location"
+    type: text
+    required: true
+    placeholder: "On-prem SQL Server 2016, ~300GB"
+  - name: integration_touchpoints
+    label: "Integration touch-points"
+    type: textarea
+    required: false
+    placeholder: "Salesforce sync, Outlook plugin, Crystal Reports, label printer over LPT"
+  - name: target_deployment
+    label: "Target deployment"
+    type: text
+    required: true
+    placeholder: "Azure App Service + Azure SQL"
+  - name: ux_redesign_appetite
+    label: "UX redesign appetite"
+    type: text
+    required: true
+    placeholder: "Open to redesign — the WinForms UX has been frustrating users for years"
+  - name: timeline
+    label: "Timeline pressure"
+    type: text
+    required: false
+    placeholder: "Hardware EOL Q3 2026; remote-work demand is forcing browser access"
+steps:
+  - number: 1
+    title: "Audit the WinForms App"
+    description: "Inventory every form, local-resource dependency, and single-user assumption. WinForms apps hide a lot in code-behind and stored procs."
+    whatYoureDoing: "Generate a comprehensive audit. Beyond the standard fields, focus on: forms inventory (every form, role, frequency), local-resource dependencies (file system, registry, COM, printers, scanners), single-user assumptions, modal-dialog patterns, and background-thread work."
+    primaryAsset: "legacy-system-audit"
+    alternativeAssets:
+      - slug: "cobol-functional-spec"
+        when: "You're auditing COBOL programs alongside VB.NET (some hybrid systems)"
+    relevantSkills:
+      - "legacy-code-analyzer-skill"
+      - "migration-planner-skill"
+    relevantMcpConfigs:
+      - "filesystem-mcp"
+      - "postgres-mcp"
+    estimatedTime: "2-3 weeks"
+    definitionOfDone:
+      - "Audit document at /docs/migration/audit.md"
+      - "Form inventory: every form, its purpose, user role, complexity"
+      - "Local-resource dependencies catalogued (files, registry, COM, printers)"
+      - "Single-user assumptions identified (concurrency hot spots)"
+      - "Modal-dialog patterns identified (which workflows depend on blocking UI)"
+      - "Background work catalogued (threads, timers, scheduled tasks within the app)"
+      - "Reporting / printing requirements documented"
+    commonPitfalls:
+      - "Underestimating form count — \"we have 50 forms\" usually turns out to be 200 when you actually count user controls too"
+      - "Missing user controls — .ascx-style controls are reused across forms and easy to overlook"
+      - "Ignoring keyboard shortcuts and power-user flows — desktop users build muscle memory; web app must replicate or have a transition plan"
+      - "Skipping the printing audit — printing is often more complex than realized (custom drivers, label printers, multi-tray printers)"
+
+  - number: 2
+    title: "Reshape Architecture for Multi-User Web"
+    description: "Redesign the app for the web before migrating any code. The most important phase — get this wrong and you ship a desktop app rendered in a browser."
+    whatYoureDoing: "Decide what the new app looks like — not what the old app does. WinForms patterns rarely translate. Make explicit decisions on concurrency, state, auth, multi-tenancy, file handling, printing, real-time updates, and responsive scope."
+    primaryAsset: "coexistence-architecture-adr"
+    alternativeAssets:
+      - slug: "adr-generator"
+        when: "You'd rather author each decision as its own ADR rather than one combined document"
+    relevantSkills:
+      - "migration-planner-skill"
+    relevantMcpConfigs:
+      - "filesystem-mcp"
+    estimatedTime: "2-3 weeks"
+    definitionOfDone:
+      - "Target architecture documented"
+      - "5-10 ADRs covering: concurrency, state, auth, multi-tenancy, files, printing, real-time, responsive"
+      - "UX redesign approach decided (1:1 port vs ground-up redesign vs hybrid)"
+      - "Component library / design system chosen (shadcn for React, PrimeNG for Angular, etc.)"
+      - "Performance targets set (load time, interaction latency)"
+    commonPitfalls:
+      - "1:1 port mentality — porting WinForms patterns directly produces a bad web app"
+      - "No UX redesign — desktop UX (modals everywhere, dense data grids) doesn't translate"
+      - "Skipping the multi-tenant question — adding multi-tenancy later is much harder than designing it in"
+      - "Ignoring mobile — even if \"users will use desktop,\" tablet and phone use cases emerge"
+
+  - number: 3
+    title: "Map the Data Model"
+    description: "Plan how data moves from on-prem SQL Server to cloud-hosted DB, including any schema reshape and stored-procedure migration."
+    whatYoureDoing: "WinForms apps often share a SQL Server with the client connecting directly. The new architecture has APIs in between, which exposes schema issues that \"worked because the client was right there.\" Inventory tables / procs / triggers / jobs, decide schema reshape vs as-is, plan migration strategy."
+    primaryAsset: "data-migration-plan"
+    alternativeAssets:
+      - slug: "sql-server-schema-translator"
+        when: "Moving to a different DB engine (Azure SQL → Postgres, etc.) and need explicit type/feature mapping"
+      - slug: "stored-procedure-to-service"
+        when: "You have stored procedures whose business logic should move to .NET application code"
+    relevantSkills:
+      - "data-validation-skill"
+      - "migration-planner-skill"
+      - "database-migration-skill"
+    relevantMcpConfigs:
+      - "postgres-mcp"
+      - "filesystem-mcp"
+    estimatedTime: "2-3 weeks"
+    definitionOfDone:
+      - "Data migration plan at /docs/migration/data-plan.md"
+      - "Schema mapping (source → target, with transformations)"
+      - "Stored-procedure migration decisions per proc (translate / rewrite / view / decommission)"
+      - "Migration strategy chosen (big-bang / dual-write / CDC / trickle)"
+      - "Data quality audit completed (orphans, duplicates, NULL violations)"
+      - "Validation queries written"
+    commonPitfalls:
+      - "\"We'll use the same database\" — sometimes the right answer; sometimes the schema needs reshape and skipping it forces it later"
+      - "Missing stored-procedure logic — WinForms apps often delegate heavily to procs"
+      - "Data-quality issues surfacing only at migration — audit BEFORE you're committed"
+      - "Big-bang migration of large data — may exceed your downtime window; plan accordingly"
+
+  - number: 4
+    title: "Design the API"
+    description: "Define the API contract before writing any backend code. Web realities (network latency, pagination, versioning) drive the design — not the WinForms patterns."
+    whatYoureDoing: "Map every WinForms operation to a backend endpoint, but design with web realities in mind. Lock the contract as OpenAPI 3.1 before implementation so the frontend and backend can build in parallel."
+    primaryAsset: "openapi-spec-generator"
+    alternativeAssets:
+      - slug: "api-contract-extraction"
+        when: "Easier to extract the contract from existing patterns (legacy stored procs / data calls) than to design from scratch"
+      - slug: "rest-api-scaffolder-nodejs"
+        when: "You're picking Node + TypeScript instead of .NET for the API layer"
+      - slug: "fastapi-scaffolder-python"
+        when: "Picking Python / FastAPI instead of .NET"
+    relevantSkills:
+      - "spec-driven-builder"
+      - "migration-planner-skill"
+    relevantMcpConfigs:
+      - "filesystem-mcp"
+    estimatedTime: "2-3 weeks"
+    definitionOfDone:
+      - "OpenAPI 3.1 spec at /api/openapi.yaml"
+      - "Every WinForms operation mapped to an endpoint"
+      - "Pagination / filtering / sorting designed for grid replacements"
+      - "Auth scheme documented (Bearer JWT)"
+      - "Error format consistent across endpoints"
+      - "Spec validated with openapi-cli lint"
+      - "SDK clients can be generated"
+    commonPitfalls:
+      - "Chatty endpoints — WinForms code-behind makes 50 DB calls per form; don't make 50 API calls per page"
+      - "No pagination — WinForms grids load 50K rows in memory; web grids need server-side pagination"
+      - "Inconsistent error formats — every endpoint should return errors the same way"
+
+  - number: 5
+    title: "Design Authentication"
+    description: "Plan the move from Windows Authentication (typical for WinForms) to web auth (OAuth / JWT via an IdP)."
+    whatYoureDoing: "Decide on the IdP (Azure AD / Auth0 / Okta / IdentityServer / ASP.NET Core Identity), plan password / role / SSO migration, and design the MFA experience."
+    primaryAsset: "auth-migration-strategy"
+    alternativeAssets:
+      - slug: "auth-setup-oauth-jwt"
+        when: "You've made the IdP decision and need the implementation template"
+    relevantSkills:
+      - "migration-planner-skill"
+    relevantMcpConfigs:
+      - "filesystem-mcp"
+    estimatedTime: "2 weeks"
+    definitionOfDone:
+      - "Auth strategy documented at /docs/migration/auth-strategy.md"
+      - "Identity provider chosen with rationale"
+      - "User-identity migration plan (if moving from AD)"
+      - "Role / permission mapping designed (AD groups → JWT claims)"
+      - "MFA strategy"
+      - "Logout / session-timeout policies"
+    commonPitfalls:
+      - "Trying to keep Windows Auth — possible with Kerberos middleware but complicated; usually better to move to OAuth"
+      - "Rolling your own IdP — almost always wrong; use Azure AD / Auth0"
+      - "Forgetting role mapping — Windows AD groups don't automatically translate to JWT roles"
+      - "No MFA plan — internal apps suddenly facing the internet need MFA"
+
+  - number: 6
+    title: "Migrate Vertical Slice 1"
+    description: "Pick a small, contained workflow (e.g., \"view customer details\"). Build the entire vertical: SPA page → .NET API → DB query. Use it to validate every architectural decision."
+    whatYoureDoing: "Ship one complete user-facing capability through the new web app. For desktop-to-web specifically, slice 1 should be read-only or low-risk write, exercise the auth flow, use the new design system, and connect to the legacy DB."
+    primaryAsset: "feature-flag-rollout-migration"
+    alternativeAssets:
+      - slug: "react-form-builder"
+        when: "Slice 1 is a form-heavy screen (the Angular equivalent uses reactive forms with the same patterns)"
+      - slug: "auth-setup-oauth-jwt"
+        when: "Slice 1 is the sign-in flow itself"
+      - slug: "behavior-parity-test-suite"
+        when: "Slice 1 covers a critical workflow that needs parity verified against the legacy"
+      - slug: "nestjs-module-scaffolder"
+        when: "You're using NestJS for the API instead of .NET"
+    relevantSkills:
+      - "spec-driven-builder"
+      - "test-generator-skill"
+      - "code-reviewer-skill"
+    relevantMcpConfigs:
+      - "azure-devops-mcp"
+      - "github-mcp"
+      - "filesystem-mcp"
+      - "postgres-mcp"
+    estimatedTime: "6-8 weeks"
+    definitionOfDone:
+      - "Slice 1 working end-to-end (frontend + API + DB)"
+      - "Auth working: a real user can sign in via the IdP"
+      - "Tested against the legacy DB"
+      - "Performance meets targets"
+      - "Internal validation complete"
+    commonPitfalls:
+      - "Slice 1 too big — pick the smallest meaningful slice; you'll learn things to apply to bigger slices"
+      - "Skipping the parity check — even if redesigning UX, validate the data is correct"
+      - "Performance neglect — API calls over the network are slower than direct DB; design for it"
+
+  - number: 7
+    title: "Continue Migrating Slices"
+    description: "Migrate the remaining capabilities, refining patterns as you go. Edge cases (file uploads, printing, real-time data) emerge mid-way through this phase."
+    whatYoureDoing: "Ship slice after slice. Most follow the same pattern as slice 1: page + API + DB query. Edge cases (complex grids → server-side pagination, file uploads → presigned URLs, printing → PDF generation, real-time → polling/WS) need decisions as they appear."
+    primaryAsset: "feature-flag-rollout-migration"
+    alternativeAssets:
+      - slug: "react-form-builder"
+        when: "More forms to migrate"
+      - slug: "shadcn-component-builder"
+        when: "Building reusable UI components for the SPA"
+      - slug: "openapi-spec-generator"
+        when: "Adding endpoints to the API contract"
+    relevantSkills:
+      - "spec-driven-builder"
+      - "migration-planner-skill"
+      - "test-generator-skill"
+      - "code-reviewer-skill"
+    relevantMcpConfigs:
+      - "azure-devops-mcp"
+      - "github-mcp"
+      - "filesystem-mcp"
+    estimatedTime: "2-4 quarters"
+    definitionOfDone:
+      - "All forms have a web equivalent"
+      - "All workflows can be completed without WinForms"
+      - "Performance acceptable across all flows"
+      - "User testing passed for each major slice"
+    commonPitfalls:
+      - "Long tail of forms nobody uses — audit usage; some forms can be deprecated, not migrated"
+      - "Power-user feature gaps — keyboard shortcuts, bulk operations, exports — desktop users have these; ensure web has equivalents"
+      - "Reporting and exports — easy to defer; users will scream when they realize their reports don't work yet"
+
+  - number: 8
+    title: "Pilot with a Subset of Users"
+    description: "Move 5-10% of users to the new app exclusively. Watch their behavior. Fix what breaks. This is where the workflows nobody mentioned (because they were \"obvious\") surface."
+    whatYoureDoing: "Identify pilot users, onboard them with support, run daily / weekly check-ins, triage and prioritize issues, deploy fixes, and measure satisfaction before expanding."
+    primaryAsset: "feature-flag-rollout-migration"
+    alternativeAssets:
+      - slug: "behavior-parity-test-suite"
+        when: "Pilot reveals parity gaps — record more golden tests for the affected flows"
+    relevantSkills:
+      - "performance-profiler-skill"
+      - "code-reviewer-skill"
+    relevantMcpConfigs:
+      - "azure-devops-mcp"
+      - "github-mcp"
+    estimatedTime: "4-6 weeks"
+    definitionOfDone:
+      - "Pilot users identified, onboarded, supported"
+      - "Daily / weekly check-ins with pilot users"
+      - "Issues triaged and prioritized"
+      - "Fixes deployed"
+      - "Pilot user satisfaction acceptable to expand"
+    commonPitfalls:
+      - "No pilot phase — going from internal testing to 100% rollout misses real-world issues"
+      - "Pilot users not representative — picking \"tech-friendly\" users hides issues real users will hit"
+      - "Ignoring pilot feedback — if pilot users hate something, real users will too"
+
+  - number: 9
+    title: "Cutover with Rollback Plan"
+    description: "Move the remaining 90% of users to the new app — usually a phased rollout over weeks, not a single cutover day."
+    whatYoureDoing: "Disable the WinForms client for users in waves (10% / 25% / 50% / 75% / 100%). Each wave gets support resources and stop conditions. Keep WinForms available as an emergency fallback throughout."
+    primaryAsset: "migration-cutover-runbook"
+    alternativeAssets:
+      - slug: "migration-rollback-plan"
+        when: "Pre-flight check — make sure rollback is documented and rehearsed before the first wave"
+      - slug: "feature-flag-rollout-migration"
+        when: "Each wave is gated by a feature flag rather than a hard cutover"
+    relevantSkills:
+      - "migration-planner-skill"
+      - "performance-profiler-skill"
+    relevantMcpConfigs:
+      - "azure-devops-mcp"
+      - "filesystem-mcp"
+    estimatedTime: "4-8 weeks"
+    definitionOfDone:
+      - "Cutover runbook completed"
+      - "All users migrated"
+      - "Support volume returned to baseline"
+      - "No critical issues outstanding"
+    commonPitfalls:
+      - "Big-bang final cutover — even after months of incremental migration, going from 50% to 100% in one day is risky"
+      - "No support escalation plan — the cutover wave will produce a support ticket spike"
+      - "Disabling old before new is proven — keep WinForms client available for emergencies for at least 30 days post-cutover"
+
+  - number: 10
+    title: "Decommission the Desktop Installer"
+    description: "Remove the WinForms installer / ClickOnce deployment. Decommission the build pipeline. Archive code. Run the retro."
+    whatYoureDoing: "After 30+ days of stable web operation, formally retire the desktop client: remove the ClickOnce manifest, decommission the WinForms build pipeline, archive source code, and decommission infrastructure specific to the WinForms client (file shares, on-prem SQL if migrated)."
+    primaryAsset: "migration-cutover-runbook"
+    alternativeAssets:
+      - slug: "migration-rollback-plan"
+        when: "Document the rollback path for the formal decommission, in case a critical issue appears in the first 30 days"
+    relevantSkills:
+      - "migration-planner-skill"
+      - "documentation-skill"
+    relevantMcpConfigs:
+      - "azure-devops-mcp"
+      - "filesystem-mcp"
+      - "confluence-mcp"
+    estimatedTime: "2-3 weeks"
+    definitionOfDone:
+      - "WinForms client no longer downloadable"
+      - "Build pipeline for WinForms decommissioned"
+      - "Source code archived"
+      - "Legacy infrastructure decommissioned (compute, DB, file shares, etc.)"
+      - "Post-migration retrospective complete"
+      - "Lessons documented for the next migration"
+    commonPitfalls:
+      - "Keeping legacy \"just in case\" — the longer you keep it, the more it accumulates new patches and divergence"
+      - "No retrospective — the next desktop-to-web migration won't benefit"
+      - "Forgetting to decommission infrastructure — VPN, file shares, SQL Server licenses keep costing money"
+wrapUp:
+  deliverables:
+    - "A modern web SPA replacing the WinForms client"
+    - "A modern .NET API backend"
+    - "Cloud-hosted infrastructure (App Service or AKS)"
+    - "Modern auth (IdP-fronted) with role mapping from the legacy AD groups"
+    - "Multi-user concurrency working — no more single-user assumptions"
+    - "Data migrated from on-prem SQL to the cloud target"
+    - "Decommissioned WinForms installer + build pipeline"
+    - "Audit, slice plan, ADRs, parity tests, and rollback runbook in /docs/migration/"
+  nextSteps:
+    - title: "Schedule a remote-work readiness review"
+      description: "The web app removed the office-network requirement. Validate VPN / SSO / MFA hold up under remote-first usage patterns."
+    - title: "Plan the offline / PWA story"
+      description: "If your users sometimes work disconnected, the migration didn't solve that. PWAs are a v2 conversation."
+    - title: "Run a usability study with power users"
+      description: "Power users had keyboard muscle memory in WinForms. Study what's missing in the web version and prioritize the gaps."
+relatedAssets:
+  - "aspnet-to-angular-dotnet-modernization-playbook"
+  - "database-migration-playbook"
+  - "legacy-system-audit"
+  - "auth-migration-strategy"
+---
+
+# VB.NET WinForms to SPA + .NET API Migration Playbook
+
+A 10-phase playbook for moving a legacy VB.NET WinForms desktop application onto the web — SPA frontend, .NET API backend, cloud-hosted, multi-user concurrent. This is the hardest migration scenario because it's not just tech translation: it's an architectural reshape from single-user desktop to multi-user web.
+
+## When to use this playbook
+
+- You have a VB.NET WinForms app (4.x or earlier) that needs to become a web app
+- The app must keep running while you migrate
+- Users will continue to need the app (you're not deprecating, you're modernizing)
+- Timeline is multi-quarter (anything &lt;6 months should question scope)
+
+## Why this is harder than web-to-web
+
+Web-to-web migrations (e.g., ASP.NET → Angular) translate UI patterns one-to-one most of the time. Desktop-to-web doesn't. The reasons:
+
+- **Concurrency model** — desktop is single-user-at-a-time; web is concurrent. Every assumption about "I'm the only one editing this" has to be revisited.
+- **Resource access** — desktop has direct file/registry/printer/COM access; web doesn't.
+- **State** — desktop holds tons of state in memory across long-running sessions; web is stateless or session-scoped.
+- **Latency** — desktop talks to local DB at sub-millisecond latency; web talks to cloud DB over the network.
+- **UX patterns** — modals, dense grids, keyboard-driven workflows have different web equivalents.
+
+Phase 2 (architectural reshape) is where most desktop-to-web migrations fail. Get it right; the rest follows.
+
+## Independent of the other playbooks
+
+This playbook is for **modernizing existing desktop apps**. If you're starting from scratch, use the [Custom Web App Playbook](/playbook/custom-web-app). If you're modernizing a web app, use the [ASP.NET Modernization Playbook](/playbook/aspnet-to-angular-dotnet-modernization-playbook).

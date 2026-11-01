@@ -1,0 +1,145 @@
+---
+title: "Comprehensive Code Review"
+slug: "code-review-comprehensive"
+description: "Multi-axis code review covering correctness, security, performance, and maintainability."
+type: template
+phase: test
+category: code-review
+projectType: ["custom-app", "etl"]
+stack: []
+tags: ["quality", "security", "review"]
+difficulty: intermediate
+estimatedTime: "15 min"
+author: "Platform Engineering"
+featured: true
+createdAt: 2026-04-26
+updatedAt: 2026-04-26
+inputs:
+  - name: code_or_diff
+    description: "The code or diff to review"
+    required: true
+  - name: context
+    description: "What this code does, related files, constraints"
+    required: false
+output:
+  format: markdown
+relatedAssets:
+  - "security-review"
+  - "performance-audit"
+---
+
+# Comprehensive Code Review
+
+Get a thorough, prioritized code review across correctness, security, performance, and maintainability axes. Designed to surface issues a senior engineer would catch in a real PR review.
+
+## When to use
+
+- Before opening a PR (self-review)
+- Reviewing someone else's PR and want a second opinion
+- Auditing legacy code you're about to modify
+
+## Prompt
+
+````text
+You are a principal engineer performing a thorough code review. Review the
+following code with the rigor of a senior reviewer who cares about long-term
+maintainability.
+
+## Code under review
+
+{{code_or_diff}}
+
+## Context
+
+{{context}}
+
+## Review axes
+
+Evaluate the code along these axes and report findings in priority order:
+
+### 1. Correctness 🔴
+- Logic errors or bugs
+- Edge cases not handled (null, empty, max bounds, concurrent access)
+- Off-by-one errors
+- Incorrect error handling (swallowed, miscategorized)
+- Race conditions
+- Time zone / locale bugs
+
+### 2. Security 🔴
+- Input validation gaps
+- Injection risks (SQL, command, XSS)
+- Authentication / authorization checks
+- Secrets in code
+- Insecure dependencies
+- PII handling
+- CSRF / SSRF vectors
+
+### 3. Performance 🟡
+- N+1 queries
+- Unnecessary work in loops
+- Missing indexes implied by queries
+- Memory leaks
+- Blocking operations on hot paths
+- Algorithmic complexity issues
+
+### 4. Maintainability 🟡
+- Naming clarity
+- Function length / complexity
+- Duplication
+- Tight coupling
+- Missing or misleading comments
+- Test coverage gaps
+
+### 5. Style & conventions 🟢
+- Project conventions (if implied by context)
+- Idiomatic language usage
+- Consistent formatting
+
+## Output format
+
+Produce a Markdown report with:
+
+### Summary
+2-3 sentence verdict. Use one of these labels:
+- ✅ Approve - ready to merge
+- 🟡 Approve with non-blocking suggestions
+- 🔴 Request changes - blocking issues
+
+### Blocking issues (🔴)
+Numbered list. For each:
+- **What:** specific problem with line/file reference
+- **Why:** impact and risk
+- **Fix:** concrete suggestion or code snippet
+
+### Non-blocking suggestions (🟡)
+Same format, lower priority.
+
+### Nitpicks (🟢)
+Brief, optional.
+
+### Positive callouts
+Things done well. Don't fabricate — only mention if genuinely good.
+
+### Test coverage
+What test cases are missing? List 3-5 you'd add.
+
+## Tone
+- Direct but kind
+- Specific over generic ("line 42: missing await on userService.findById" not "missing awaits")
+- No fluff. No "I think maybe perhaps consider possibly..."
+- Acknowledge constraints — don't suggest perfection if "good enough" is required
+````
+
+## Tips
+
+- Provide context about what the code does — reviews without context produce generic feedback
+- For large changes, run this prompt on focused sections rather than the whole diff
+- Combine with the **Security Review** template for security-sensitive code
+- Combine with the **Performance Audit** template for hot-path code
+
+## Reading the output
+
+- Always fix 🔴 issues before merging
+- 🟡 issues: fix or file follow-up tickets
+- 🟢 issues: optional, fix opportunistically
+- Push back on suggestions you disagree with — the AI is a reviewer, not the boss

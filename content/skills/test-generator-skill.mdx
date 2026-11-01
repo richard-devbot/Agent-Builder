@@ -1,0 +1,299 @@
+---
+title: "Test Generator Skill"
+slug: "test-generator-skill"
+description: "Claude Code skill that picks the right test type (unit/integration/E2E) based on context and applies your organisation's testing patterns automatically."
+type: skill
+phase: test
+category: unit-testing
+projectType: ["custom-app"]
+stack: ["claude-code"]
+tags: ["testing", "automation", "coverage"]
+difficulty: intermediate
+estimatedTime: "5 min setup"
+author: "Platform Engineering"
+featured: true
+createdAt: 2026-04-26
+updatedAt: 2026-04-26
+skillName: "test-generator"
+requires: []
+files:
+  - SKILL.md
+relatedAssets:
+  - "vitest-unit-test-generator"
+  - "playwright-e2e-generator"
+---
+
+# Test Generator Skill
+
+Activates on test-related requests. Inspects what's being tested, decides whether unit, integration, or E2E tests are appropriate, matches existing project conventions, and generates tests that actually verify behavior — not just confirm what the code currently does.
+
+## When it triggers
+
+- "Write tests for [thing]"
+- "Add test coverage for X"
+- "I need tests for this component/function/endpoint"
+- "Increase coverage on [module]"
+- "Test this" (with code attached)
+
+## Why a skill, not just templates
+
+You have separate Vitest and Playwright templates. Without this skill, the developer has to:
+1. Decide which type of test is appropriate
+2. Find the right template
+3. Copy and customize it
+
+The skill collapses all three steps into a natural request.
+
+## Installation
+
+1. Copy this skill folder to `~/.claude/skills/test-generator/`
+2. Restart Claude Code
+3. Try: paste a function and say "write tests for this"
+
+## SKILL.md content
+
+```markdown
+---
+name: test-generator
+description: |
+  Use this skill when the user asks for tests, test coverage, or wants to
+  verify behavior. Triggers on: "write tests for X", "test this", "add
+  coverage for Y", "what tests should I add", "verify this works".
+
+  Picks the right test type based on what's being tested:
+  - Pure functions, classes, hooks → unit tests
+  - API endpoints, DB code → integration tests
+  - User flows through the UI → E2E tests
+
+  Do NOT use for: generating test data (different concern), debugging
+  failing tests (different skill), or explaining why a test fails.
+---
+
+# Test Generator
+
+You generate tests that verify behavior, not implementation. Tests are clear,
+fast, and reveal what code is supposed to do — not just what it currently does.
+
+## Decision tree: which test type?
+
+Before generating, classify what you're testing:
+
+**UNIT TEST** — single thing, no I/O
+- Pure functions
+- Classes (with mocked dependencies)
+- React hooks
+- React components (with mocked children/data)
+- Reducers, selectors, validators
+
+**INTEGRATION TEST** — multiple things together, controlled boundaries
+- API endpoints (with test DB)
+- Database queries / repositories
+- Service classes that call multiple repositories
+- Multi-component React flows (without browser)
+
+**E2E TEST** — real browser, real network
+- User completes a multi-step flow
+- Auth flows
+- Cross-page navigation
+- Anything that exercises the actual deployed UI
+
+If unclear, ASK ONCE: "I can write [type A] or [type B] tests for this. The
+former is faster and isolates the logic; the latter verifies the integration
+with [other thing]. Which would help more?"
+
+## Process when activated
+
+### Step 1: Understand what's being tested
+
+If the user pasted code: identify what kind of artifact (function, component, route handler, etc.).
+
+If the user pointed at a file: read it.
+
+If the user said "test the X feature" but didn't specify scope: ask:
+> "Test what specifically — the [Y service], the [Z endpoint], the full user
+> flow, or all of these?"
+
+### Step 2: Match existing conventions
+
+Before generating, look at the project's existing tests:
+
+1. Check `package.json` / `pyproject.toml` for test runner (Vitest, Jest,
+   pytest, RTL, Playwright)
+2. Find one or two existing test files in the project
+3. Match their patterns:
+   - Test file location and naming (`__tests__/`, `*.test.ts`, `*.spec.ts`)
+   - Setup/teardown patterns
+   - Fixture patterns
+   - Assertion style (`expect().toBe()` vs custom matchers)
+   - Mocking approach (`vi.mock`, `jest.mock`, dependency injection)
+
+If no existing tests, ask: "I don't see existing tests in this project. I'll
+use [Vitest + RTL for TS, pytest for Python, etc.] unless you'd prefer
+something else."
+
+### Step 3: Identify what to test
+
+For each function/method/component, generate tests covering:
+
+**Happy path** (1-3 tests)
+- Standard inputs, expected outputs
+
+**Edge cases** (3-5 tests)
+- Empty inputs (empty string, empty array, null, undefined)
+- Boundary values (0, -1, max, min)
+- Special characters in strings (unicode, emoji, quotes)
+- Single-element vs multi-element collections
+
+**Error paths** (2-4 tests)
+- Invalid inputs
+- Missing required fields
+- Async failures (rejected promises, network errors)
+- Constraint violations
+
+**State transitions** (for stateful code)
+- Initial state
+- After each meaningful interaction
+- Idempotency
+
+**Side effects** (when applicable)
+- Functions called on dependencies (mock + assert called with)
+- State updates
+- Event emissions
+
+DO NOT generate:
+- Tests that only assert structure ("the object has property X")
+- Tests for getters/setters that just read fields
+- Snapshot tests (unless explicitly requested)
+- Tests that duplicate the implementation
+
+## Test quality bar
+
+Each test must:
+
+1. **Have a behavior-describing name.** Not "test1" or "it works".
+   ✓ "returns null when user not found"
+   ✓ "emits onClose when escape key pressed"
+   ✗ "test getUser"
+   ✗ "checks the function"
+
+2. **Follow Arrange-Act-Assert structure**, with comments if it aids
+   readability.
+
+3. **Test one concept per test.** Multiple `expect()` are fine if they
+   verify one behavior, not many.
+
+4. **Avoid conditional logic in the test.** No `if/else`. If you need
+   branching, it's two tests.
+
+5. **Mock at the boundary, not deeply.** Mock the database, not internal
+   helpers within the unit being tested.
+
+6. **Use `test.each()` for parameterized cases.** Don't write 5 nearly-
+   identical tests by hand.
+
+## Output format
+
+For each file:
+
+```typescript
+// path/to/test/file.test.ts
+import { describe, test, expect, vi, beforeEach } from 'vitest';
+import { ... } from '...';
+
+describe('SubjectUnderTest', () => {
+  describe('happyPathBehavior', () => {
+    test('does the expected thing when conditions are right', () => {
+      // Arrange
+      const input = ...;
+
+      // Act
+      const result = subject(input);
+
+      // Assert
+      expect(result).toBe(...);
+    });
+  });
+
+  describe('edge cases', () => { ... });
+  describe('error handling', () => { ... });
+});
+```
+
+After the test file:
+
+- **What's covered:** bullet list of behaviors tested
+- **What's NOT covered:** bullets — areas needing different test type or
+  manual testing
+- **Setup needed:** any new dev dependencies or config
+
+## Special handling per stack
+
+### TypeScript / JavaScript
+
+**Unit tests:** Vitest preferred (or Jest if project uses it)
+**Component tests:** React Testing Library
+**Hook tests:** `@testing-library/react` `renderHook`
+**E2E tests:** Playwright preferred
+
+### Python
+
+**Unit tests:** pytest with fixtures
+**API tests:** httpx async client + pytest-asyncio
+**Database tests:** test database via fixtures, transaction rollback per test
+**E2E:** Playwright (Python bindings) or pytest-bdd
+
+### Java / Kotlin
+
+**Unit tests:** JUnit 5 + Mockito
+**Spring tests:** `@WebMvcTest` for controller layer, `@DataJpaTest` for repos
+**E2E:** REST-Assured for API, Playwright for browser
+
+## Common pitfalls to avoid
+
+- **Don't mock the thing being tested.** If you mock the function under test,
+  you're testing the mock.
+- **Don't write integration tests as unit tests** (they'll be slow and brittle)
+- **Don't write unit tests as integration tests** (they'll over-mock and miss real bugs)
+- **Don't snapshot UI without good reason.** Snapshot tests rot; nobody reads
+  the diff.
+- **Don't test private methods directly.** Test through the public API.
+- **Don't assert on internal state.** Assert on observable behavior.
+
+## When the user says "100% coverage"
+
+Push back. 100% coverage is rarely the right goal:
+
+> "100% coverage often means writing tests for trivial code (getters,
+> setters, simple delegation) that doesn't catch real bugs. Targeted high
+> coverage on critical paths (auth, payments, data integrity) is more
+> valuable. Want me to focus on the critical paths first?"
+
+If they insist, generate them — but flag the trivial ones in the summary.
+
+## Re-running and watch mode
+
+After generating tests, suggest the right command:
+
+- Vitest: `pnpm vitest [path]` for watch mode
+- Jest: `pnpm jest --watch [path]`
+- pytest: `pytest path/ -v --watch`
+- Playwright: `pnpm playwright test [file] --ui`
+```
+
+## Pairing with other skills
+
+- After **Spec-Driven Builder** generates code, this skill writes its tests
+- After **Code Reviewer** identifies test gaps, this skill fills them
+- Pair with the **Vitest Unit Test Generator** and **Playwright E2E Generator** templates — those are the deeper references this skill draws from
+
+## Tips
+
+- The skill matches existing conventions — so if the project uses Jest already, you'll get Jest tests, not Vitest
+- For new projects without conventions, the skill defaults to Vitest (TS) or pytest (Python)
+- If you want a specific test type regardless of context, just say so: "Write E2E tests for the login flow" — skips the auto-classification
+
+## Limitations
+
+- Generated tests still need human review — they encode what the code *appears* to do
+- For test-driven development workflows (write test first, then code), this skill is less ideal — better for adding tests after the fact
+- Doesn't run the tests; only generates them. Run them yourself to verify they pass and catch what they should

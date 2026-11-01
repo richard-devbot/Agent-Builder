@@ -1,0 +1,236 @@
+---
+title: "GitHub MCP"
+slug: "github-mcp"
+description: "Pre-configured GitHub MCP server for Claude Code — issues, PRs, code search, and Actions from chat."
+type: mcp-config
+phase: build
+category: code-review
+projectType: ["custom-app", "etl"]
+stack: ["claude-code", "mcp"]
+tags: ["github", "git", "pull-requests", "issues"]
+difficulty: beginner
+estimatedTime: "10 min setup"
+author: "Platform Engineering"
+featured: true
+createdAt: 2026-04-26
+updatedAt: 2026-04-26
+serverName: "github"
+configFormat: "claude-code"
+envVars:
+  - name: GITHUB_TOKEN
+    description: "Personal Access Token (classic or fine-grained) from github.com/settings/tokens"
+    secret: true
+  - name: GITHUB_DEFAULT_OWNER
+    description: "Default org/user to scope operations to (optional)"
+    example: "your-org"
+relatedAssets:
+  - "code-reviewer-skill"
+  - "azure-devops-mcp"
+---
+
+# GitHub MCP
+
+A Model Context Protocol (MCP) server config that lets Claude Code interact with GitHub: review pull requests, manage issues, search across repos, check Actions runs, and link work to ADO when both are in use.
+
+## What you can do once configured
+
+- "Review the diff in PR acme/customer-portal#142"
+- "Show me all open issues assigned to me"
+- "Create an issue for the auth bug we just discussed"
+- "What's the status of the deploy workflow on main?"
+- "Search for usages of `legacyAuthAdapter` across the org"
+- "Compare the last 3 PRs to main and summarize what changed"
+
+## Setup
+
+### Step 1: Generate a GitHub Personal Access Token
+
+You have two options. Fine-grained tokens are more secure but require per-repo configuration.
+
+**Option A: Classic PAT (simpler, broader access)**
+
+1. Go to `https://github.com/settings/tokens` → **Generate new token (classic)**
+2. Name: `Claude Code MCP`
+3. Expiration: 90 days
+4. **Scopes:**
+   - `repo` (full repo access — required for private repos)
+   - `read:org` (to list org members and teams)
+   - `workflow` (for Actions data — optional)
+   - `read:packages` (if your projects use GitHub Packages)
+5. Click **Generate token** and **copy immediately**
+
+**Option B: Fine-grained token (more secure, per-repo)**
+
+1. Go to `https://github.com/settings/personal-access-tokens/new`
+2. Name: `Claude Code MCP`
+3. Resource owner: select your org
+4. Repository access: All repos OR select specific repos
+5. Permissions:
+   - **Repository:** Contents (Read), Issues (Read & Write), Pull requests (Read & Write), Metadata (Read), Actions (Read), Discussions (Read)
+   - **Organization:** Members (Read)
+6. Click **Generate** and **copy immediately**
+
+### Step 2: Set environment variables
+
+```bash
+export GITHUB_TOKEN="ghp_..."  # or github_pat_... for fine-grained
+export GITHUB_DEFAULT_OWNER="your-org"
+```
+
+Reload your shell.
+
+### Step 3: Add the MCP config
+
+Edit `~/.config/claude-code/mcp.json`:
+
+```json
+{
+  "mcpServers": {
+    "github": {
+      "command": "npx",
+      "args": ["-y", "@modelcontextprotocol/server-github"],
+      "env": {
+        "GITHUB_PERSONAL_ACCESS_TOKEN": "${GITHUB_TOKEN}"
+      }
+    }
+  }
+}
+```
+
+> Note: the official MCP server uses `GITHUB_PERSONAL_ACCESS_TOKEN` as the env var name. We map our `GITHUB_TOKEN` to it in the config.
+
+### Step 4: Restart Claude Code
+
+### Step 5: Test it
+
+Ask: "List my open pull requests on GitHub"
+
+## Available tools
+
+### Pull Requests
+- `gh_list_prs` - List PRs (filter by state, author, base)
+- `gh_get_pr` - Full PR details including reviews and CI status
+- `gh_get_pr_diff` - Diff content
+- `gh_get_pr_files` - Changed files with patches
+- `gh_create_pr_comment` - Add a review comment
+- `gh_create_pr_review` - Submit a full review (approve, request changes, comment)
+- `gh_merge_pr` - Merge a PR (requires write access)
+
+### Issues
+- `gh_list_issues` - List with filters
+- `gh_get_issue` - Full issue including comments
+- `gh_create_issue` - New issue
+- `gh_update_issue` - Update labels, assignees, state
+- `gh_create_issue_comment` - Comment
+
+### Repositories
+- `gh_search_code` - Search code across accessible repos
+- `gh_search_repos` - Find repos by name/description
+- `gh_get_file` - Read a file at a specific ref
+- `gh_list_branches` - List branches
+- `gh_get_commit` - Commit details
+
+### Actions / CI
+- `gh_list_workflow_runs` - Recent runs (filter by workflow, branch, status)
+- `gh_get_workflow_run` - Specific run with logs URL
+- `gh_rerun_workflow` - Re-run a failed workflow
+
+### Org / Users
+- `gh_list_org_members` - Members of an org
+- `gh_search_users` - Find users by name/email
+
+## Recommended pairings
+
+- **Code Reviewer Skill** - shares a PR URL like `github.com/owner/repo/pull/123` and the skill auto-fetches the diff
+- **Spec-Driven Builder Skill** - generated user stories can be turned into GitHub issues
+- **Azure DevOps MCP** - if some teams use ADO and others GitHub, both MCPs coexist; tools are namespaced
+
+## Troubleshooting
+
+**"401 Bad credentials"**
+- Token expired or revoked
+- For fine-grained tokens: check the token has access to the specific repo
+- Some endpoints (org members) need org-level scopes
+
+**"404 Not Found" on a repo you can access in browser**
+- Token doesn't have access to that repo
+- For fine-grained tokens: the repo wasn't selected during token creation
+- Org may have restricted PAT access — check org settings
+
+**Rate limit errors**
+- Authenticated requests have 5,000/hr limit (vs 60/hr unauthenticated)
+- Heavy code search burns through this fast — be specific in queries
+- Check current rate via `curl -H "Authorization: token $GITHUB_TOKEN" https://api.github.com/rate_limit`
+
+**`gh_search_code` returns nothing**
+- GitHub code search requires the org or repo to allow it
+- Search by language or path qualifiers helps: `language:python path:src extension:py`
+
+## Security notes
+
+- **Never commit your token.** Add `.env` to `.gitignore` and use environment variables.
+- **Use fine-grained tokens for production** — limits blast radius if compromised
+- **Rotate every 90 days minimum**
+- **For shared use** (CI, automation, team accounts), create a dedicated machine user, not a personal PAT
+- **GitHub App** is more secure than PAT for org-wide use — consider this if you're doing this for the whole org
+
+## Customization
+
+### Working with multiple GitHub instances
+
+If your team uses both `github.com` and a self-hosted GitHub Enterprise:
+
+```json
+{
+  "mcpServers": {
+    "github": {
+      "command": "npx",
+      "args": ["-y", "@modelcontextprotocol/server-github"],
+      "env": {
+        "GITHUB_PERSONAL_ACCESS_TOKEN": "${GITHUB_TOKEN}"
+      }
+    },
+    "github-enterprise": {
+      "command": "npx",
+      "args": ["-y", "@modelcontextprotocol/server-github"],
+      "env": {
+        "GITHUB_PERSONAL_ACCESS_TOKEN": "${GHE_TOKEN}",
+        "GITHUB_API_URL": "https://github.your-org.internal/api/v3"
+      }
+    }
+  }
+}
+```
+
+You'll see both as available in Claude Code.
+
+### Cross-linking with Azure DevOps
+
+If a project uses both GitHub for code and Azure DevOps for tracking:
+
+- Reference ADO work items in PR descriptions: `Fixes AB#1234`
+- Reference GitHub PRs in ADO work items via the link feature
+- Claude Code can use both MCPs in one workflow: "Review GitHub PR #45 and update the linked ADO work item AB#1234 to Resolved"
+
+## What this enables
+
+This MCP makes the **Code Reviewer Skill** work end-to-end: paste a GitHub PR URL and the skill fetches the diff, runs the review, and (optionally) posts findings as PR comments.
+
+It also enables casual workflows that would otherwise need the GitHub web UI:
+- "What's broken in CI right now?"
+- "Show me PRs waiting on my review"
+- "Find every place we still call the old API"
+
+## Comparison: GitHub vs Azure DevOps MCP
+
+If your team uses both, here's how they differ:
+
+| Capability | GitHub MCP | Azure DevOps MCP |
+|------------|-----------|-------------------|
+| Code review | Strong (PR-focused) | Good (Repos PRs) |
+| Work tracking | Issues (lighter) | Boards (deeper hierarchy) |
+| CI/CD | Actions | Pipelines |
+| Search | Strong code search | Limited code search |
+| Wiki | Basic | More structured |
+
+Use both if your teams are split. They don't conflict.

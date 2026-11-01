@@ -1,0 +1,235 @@
+---
+title: "Strangler Fig Migration Plan"
+slug: "strangler-fig-migration-plan"
+description: "Plan an incremental migration where new code gradually replaces legacy, with both running in parallel during the transition."
+type: template
+phase: design
+category: architecture
+projectType: ["custom-app"]
+stack: []
+tags: ["migration", "modernization", "strangler-fig", "incremental"]
+difficulty: advanced
+estimatedTime: "1-2 days"
+author: "Platform Engineering"
+featured: true
+createdAt: 2026-04-26
+updatedAt: 2026-04-26
+inputs:
+  - name: legacy_audit
+    description: "Output from the Legacy System Audit (paste or summarize)"
+    required: true
+  - name: target_architecture
+    description: "Where you want to end up (target stack, hosting, architecture)"
+    required: true
+  - name: timeline_constraint
+    description: "Hard deadlines (compliance, hardware EOL, contract end)"
+    required: false
+  - name: team_size
+    description: "How many engineers on this migration"
+    required: false
+output:
+  format: markdown
+relatedAssets:
+  - "legacy-system-audit"
+  - "behavior-parity-test-suite"
+  - "coexistence-architecture-adr"
+---
+
+# Strangler Fig Migration Plan
+
+Named after the strangler fig vine that grows around a host tree until the host dies. The pattern: build the new system around the old one, route traffic to new endpoints incrementally, until nothing is left of the old.
+
+This template generates the detailed plan: which slices to migrate first, in what sequence, with what risk profile.
+
+## When to use
+
+- After the Legacy System Audit, before starting development
+- When the system is too large/critical to rewrite from scratch
+- When you need to keep delivering business value during migration (almost always)
+
+## Prompt
+
+````text
+You are a senior solution architect specializing in legacy system migrations.
+Generate a strangler fig migration plan based on the audit and target below.
+
+## Input
+
+**Legacy audit summary:**
+{{legacy_audit}}
+
+**Target architecture:**
+{{target_architecture}}
+
+**Timeline constraints:** {{timeline_constraint}}
+**Team size:** {{team_size}}
+
+## Output structure
+
+### 1. Migration philosophy
+2-3 paragraphs setting expectations:
+- This is a marathon (months/quarters), not a sprint
+- Both systems will run in parallel — that's a feature, not a bug
+- We migrate by user-facing capability, not by layer
+- Every slice must be independently shippable and reversible
+- We're never more than one deploy away from rollback
+
+### 2. Coexistence architecture
+
+How the new and old systems coexist during migration.
+
+Cover at minimum:
+- **Routing layer:** What decides whether a request goes to old or new?
+  Options: reverse proxy, API gateway, feature flags in old code, DNS-level
+- **Authentication continuity:** Single sign-on between old and new (during transition, users should not notice)
+- **Data layer strategy:** Shared DB? Dual-write? CDC?
+- **Session handling:** How sessions persist across both systems
+- **URL strategy:** Same URLs (proxy decides) or different (302 redirects)?
+- **Static assets and CSS:** Risk of visual inconsistency during transition
+
+Diagram (Mermaid) showing legacy + new + routing layer.
+
+### 3. Slicing strategy
+
+How to break the migration into independent slices. Each slice should be:
+- **A complete user-facing capability** (not a layer or a horizontal cut)
+- **Independently deployable**
+- **Independently rollback-able**
+- **Small enough to ship in 2-4 weeks**
+- **Big enough to be worth the deployment overhead**
+
+For each candidate slice, score:
+
+| Slice | User value | Complexity | Risk | Dependencies | Recommended order |
+|-------|-----------|------------|------|--------------|-------------------|
+| Sign-in flow | High | Medium | High | none | 1 (foundation) |
+| User profile page | Low | Low | Low | sign-in | 2 (warmup) |
+| Order history | High | Medium | Medium | sign-in | 3 |
+| Order detail | High | High | Medium | order history | 4 |
+| Reports | Low | High | Low | order history | last |
+
+Recommend the order with rationale. The first slice should:
+- Build the coexistence infrastructure
+- Be visible (proves migration is real)
+- Be reversible (we'll learn things)
+- Touch authentication (the hardest cross-cutting concern)
+
+### 4. Slice 1 detailed plan
+
+For the first slice, produce:
+- **Scope:** what's IN, what's OUT (be ruthless about scope)
+- **Definition of done:** specific, measurable
+- **Dependencies:** what must exist before this slice can ship (auth, routing layer, observability)
+- **Coexistence approach:** how this specific slice will coexist with the rest of the legacy system
+- **Migration of any related data:** schema changes, backfills
+- **Behavior parity tests:** what current behavior must NOT change
+- **Rollout plan:** dark launch → 5% → 25% → 100% → decommission old
+- **Rollback plan:** specific steps to revert if needed
+- **Estimated effort:** team-weeks
+- **Risks:** specific to this slice
+
+### 5. Slice 2-N high-level plan
+
+For each remaining slice, produce a one-page plan:
+- Scope summary
+- Estimated effort
+- Dependencies on previous slices
+- Notable risks
+
+Don't go into detail — that happens when you actually start the slice.
+
+### 6. Decommissioning plan
+
+How to know when each slice can be removed from the legacy system:
+- Traffic metrics (legacy gets 0% of slice X traffic for N days)
+- Audit logs (no calls to legacy slice X for N days)
+- Stakeholder sign-off
+
+When the last slice is migrated, what's the final decommission?
+- Remove old DNS / routing
+- Archive legacy code
+- Decommission legacy infrastructure
+- Celebrate (don't skip this)
+
+### 7. Cross-cutting concerns
+
+These don't fit into any one slice but matter throughout:
+
+- **Authentication:** how sessions work during migration (often the hardest part)
+- **Authorization:** keeping permissions consistent
+- **Observability:** logs/metrics/traces in both systems, centralized
+- **Database evolution:** schema can't break legacy or new during transition
+- **Search and reporting:** if data is split or duplicated, how do we report on it?
+- **Background jobs:** scheduled tasks that touch both systems
+- **Email and notifications:** which system sends them during transition?
+- **API consumers:** external systems calling our APIs — they shouldn't notice
+
+For each, document the strategy.
+
+### 8. Risk register
+
+Top 10 risks in this migration. For each:
+- Description
+- Likelihood (1-5)
+- Impact (1-5)
+- Owner
+- Mitigation
+- Trigger (what would tell us the risk is materializing)
+
+### 9. Success metrics
+
+How we'll know the migration is working:
+- **Per-slice:** parity tests pass, error rates stable, performance regression <X%
+- **Overall:** % of traffic on new system, # of legacy components decommissioned
+- **Business:** no degradation in user-facing metrics (conversion, NPS, support tickets)
+
+### 10. Anti-patterns to avoid
+
+Specific to this migration. Examples:
+- Don't try to "improve" the data model in slice 1
+- Don't refactor legacy code that's about to be deleted
+- Don't migrate by layer (UI first, then API, then DB) — migrate by capability
+- Don't skip behavior parity tests because "it's a rewrite"
+
+### 11. First 30 days
+
+Concrete actions for the first month:
+- Week 1: stand up routing layer, basic observability, parity test framework
+- Week 2: ship a "hello world" slice through the new system (no real functionality, just proves the pipes work)
+- Weeks 3-4: ship slice 1 to internal users
+- Specific: who does what, what's the demo at the end of the month
+
+### 12. Open questions
+
+Decisions still needed before starting. For each:
+- The question
+- Default assumption
+- Cost of the wrong default
+- Who needs to decide and by when
+
+## Style
+
+- Concrete over abstract
+- Numbers over adjectives
+- Honest about uncertainty
+- Strategic but actionable
+- Optimistic but realistic
+````
+
+## Tips
+
+- **Slice 1 is foundational, not impressive.** Don't try to migrate the most valuable feature first; migrate something low-risk that builds the coexistence infrastructure.
+- **Authentication first.** It's the hardest cross-cutting concern. If you don't solve it early, every slice will trip over it.
+- **Migrate by capability, not by layer.** "Migrate the database" is wrong. "Migrate user sign-in" includes UI + API + auth + data, and ships independently.
+- **Estimate generously.** Migrations always take longer than expected. Use historical data if you have any.
+- **Plan for the long tail.** The last 10% of migration takes 50% of the time. Edge cases, integrations, the report nobody uses but somebody depends on.
+
+## Common mistakes to avoid
+
+- Migrating by layer instead of capability
+- Trying to improve the data model during migration (one change at a time)
+- Underestimating authentication complexity
+- Skipping behavior parity tests ("it's a rewrite, we'll fix the bugs")
+- Big-bang cutover at the end (defeats the point of strangler fig)
+- Not planning the decommission (legacy lingers for years)
+- Letting scope expand into general improvement work

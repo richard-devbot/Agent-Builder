@@ -1,0 +1,363 @@
+---
+title: "Migration Cutover Runbook"
+slug: "migration-cutover-runbook"
+description: "Detailed step-by-step runbook for the actual cutover from legacy to new system, including verification, communication, and rollback."
+type: template
+phase: deploy
+category: documentation
+projectType: ["custom-app"]
+stack: []
+tags: ["migration", "runbook", "cutover", "operations"]
+difficulty: advanced
+estimatedTime: "1 day to write"
+author: "Platform Engineering"
+featured: false
+createdAt: 2026-04-26
+updatedAt: 2026-04-26
+inputs:
+  - name: cutover_scope
+    description: "What's being cut over (specific slice or entire system)"
+    required: true
+  - name: maintenance_window
+    description: "Acceptable downtime window (e.g., 'Saturday 2-6am')"
+    required: true
+  - name: team_roles
+    description: "Who's involved (engineering, ops, support, comms, leadership)"
+    required: true
+output:
+  format: markdown
+relatedAssets:
+  - "data-migration-plan"
+  - "feature-flag-rollout-migration"
+  - "migration-risk-register"
+---
+
+# Migration Cutover Runbook
+
+The cutover is the most stressful day of any migration. Things will go wrong. The runbook is what gets you through it without making it worse.
+
+## When to use
+
+- Before any planned migration cutover
+- For each slice cutover in a strangler-fig migration
+- For the final big cutover to fully decommission legacy
+
+## Prompt
+
+````text
+You are a senior site reliability engineer who has run dozens of high-stakes
+migrations. Generate a complete cutover runbook for the migration described.
+
+## Input
+
+**Cutover scope:** {{cutover_scope}}
+**Maintenance window:** {{maintenance_window}}
+**Team roles:** {{team_roles}}
+
+## Output
+
+A Markdown runbook designed to be:
+- **Followed at 2am by tired engineers** (clarity > cleverness)
+- **Reviewed by everyone involved beforehand** (no surprises during)
+- **Specific** (real commands, real URLs, real names)
+- **Decision-tree-driven** (if X happens, do Y)
+
+### 1. Cutover summary
+
+One page:
+- What's being cut over
+- When (exact times)
+- Expected duration
+- Expected downtime (if any)
+- Who's running the cutover (incident commander)
+- Where the team is (war room location, Zoom link)
+- Status page URL
+- Customer communication going out at what times
+
+### 2. Roles and responsibilities
+
+For this cutover:
+
+| Role | Person | Phone | Responsibilities |
+|------|--------|-------|-------------------|
+| Incident Commander | [name] | ... | Calls go/no-go, runs the runbook |
+| Tech Lead | [name] | ... | Owns technical decisions |
+| Database Engineer | [name] | ... | DB cutover steps |
+| Network / Infra | [name] | ... | DNS, load balancer changes |
+| Frontend | [name] | ... | UI verification |
+| Support Lead | [name] | ... | Customer-facing communication |
+| Comms | [name] | ... | Status page, broader announcements |
+| Executive on-call | [name] | ... | Escalation for major decisions |
+
+Rule: only the Incident Commander makes "stop / continue / rollback" decisions. Everyone else recommends, IC decides.
+
+### 3. Pre-cutover (T-7 days to T-1 hour)
+
+**T-7 days:**
+- [ ] Final dress rehearsal in staging — full runbook walkthrough
+- [ ] Customer communication sent (heads-up)
+- [ ] Status page incident scheduled
+- [ ] Backup of legacy DB taken and verified restorable
+- [ ] On-call rotation scheduled with extra coverage
+
+**T-3 days:**
+- [ ] Code freeze on legacy system (no new deploys)
+- [ ] Final data validation script run; results reviewed
+- [ ] Reminder communication to customers
+- [ ] All team members confirm availability
+
+**T-24 hours:**
+- [ ] Final go/no-go decision meeting
+- [ ] All risks reviewed against current state
+- [ ] Decision documented (go / postpone)
+- [ ] If go: war room ready, communications drafted, status page updated
+
+**T-1 hour:**
+- [ ] Team in war room / on Zoom
+- [ ] Status page incident opens at start of window
+- [ ] Customer email / banner activated ("maintenance in progress")
+- [ ] All access tokens, credentials, passwords ready
+- [ ] Documents open: this runbook, monitoring dashboards, rollback procedure
+- [ ] Slack channel for the cutover — pinned with status
+
+### 4. Go / No-Go checklist (T-0)
+
+Before starting cutover, IC verifies:
+
+- [ ] Backups verified within last 24 hours
+- [ ] Rollback procedure tested in staging
+- [ ] All team members present and ready
+- [ ] No active production incidents
+- [ ] Monitoring is green
+- [ ] No business-critical events in the next 4 hours
+- [ ] Customer comms confirmed sent
+
+If any unchecked → defer cutover.
+
+### 5. Cutover steps (T+0 onward)
+
+Each step has:
+- **Action:** what to do (with exact commands)
+- **Verification:** how to confirm it worked
+- **Rollback:** how to undo if it failed
+- **Stop condition:** when to halt and call
+
+Example structure:
+
+```markdown
+## Step 1: Stop traffic to legacy (T+0)
+
+**Owner:** Network / Infra
+
+**Action:**
+```
+# In Azure Portal:
+az network application-gateway rule update \
+  --gateway-name api-gw \
+  --name legacy-rule \
+  --address-pool maintenance-pool
+```
+
+This routes all traffic to a maintenance page.
+
+**Verification:**
+- Open https://app.example.com in a browser
+- Should see maintenance page within 30 seconds
+
+**If not verified:**
+- Check the rule was applied: `az network application-gateway rule show ...`
+- Check the maintenance pool is healthy
+- If still failing, abort cutover (rollback is just to revert this step)
+
+**Rollback:** Revert the rule change above
+
+**Time budget:** 5 minutes
+
+**Stop and escalate if:** verification fails after 10 minutes
+
+---
+
+## Step 2: Final data sync (T+5)
+
+**Owner:** Database Engineer
+
+**Action:**
+```sql
+-- Run final CDC sync
+SELECT trigger_final_sync();
+-- Wait for completion (typically 60-120 seconds)
+SELECT * FROM cdc_status WHERE state = 'completed';
+```
+
+**Verification:**
+- Run validation queries from data-migration-plan.md
+- Counts must match between source and target ±0
+- Sums must match ±0.01 (rounding tolerance)
+- Spot-check 10 random rows match
+
+**If not verified:**
+- Investigate where the discrepancy is
+- May need to extend window or rollback
+
+**Rollback:** Revert step 1 to bring legacy back online
+
+**Time budget:** 15 minutes
+
+**Stop and escalate if:** discrepancies cannot be resolved in 30 minutes
+
+---
+
+[Continue for all cutover steps]
+```
+
+Generate ALL the steps for the specific cutover. Include:
+
+1. Stop traffic to legacy
+2. Final data sync (if applicable)
+3. Validation
+4. DNS / proxy switch to new
+5. Smoke test new system
+6. Resume traffic on new
+7. Monitor for issues
+
+### 6. Verification checklist (post-cutover)
+
+Once cutover steps complete, verify the new system:
+
+**Functional:**
+- [ ] Sign in works (test 3 different user types)
+- [ ] Critical user journeys work (run through top 5 manually)
+- [ ] Data displays correctly (sample 10 records)
+- [ ] Transactions complete (place a real test order)
+- [ ] Reports run (check 1 critical report)
+- [ ] Notifications send (trigger an email)
+- [ ] Integrations work (test Salesforce sync, etc.)
+
+**Performance:**
+- [ ] Response times within expected range
+- [ ] No slow query alerts
+- [ ] CPU / memory within expected bounds
+
+**Errors:**
+- [ ] Error rate &lt;0.5% (acceptable bar)
+- [ ] No critical errors in last 15 minutes
+- [ ] Logs flowing to expected destinations
+
+**Specific to this cutover:**
+- [Specific scenarios from the audit]
+
+### 7. Communication checkpoints
+
+| Time | Who | What |
+|------|-----|------|
+| T-0 | Status page | "Maintenance started" |
+| T+0 | Slack | "Cutover in progress" |
+| T+30min | Slack | Status update (% done) |
+| T+60min | Slack | Status update |
+| T+complete | Status page | "Maintenance complete" |
+| T+complete | Email | "Migration complete; here's what's new" |
+| T+24hr | Slack / email | Day-1 status report |
+
+### 8. Rollback procedure
+
+If at any step the IC calls a rollback:
+
+**Decision criteria for rollback:**
+- Verification fails and can't be resolved in remaining window
+- Critical bug discovered
+- Performance regression > 50%
+- Data integrity issue
+- Multiple customers reporting issues
+
+**Steps to roll back:**
+
+1. Announce rollback in Slack
+2. Update status page: "Rolling back, additional maintenance time"
+3. Revert traffic to legacy (reverse Step 1)
+4. Verify legacy is healthy
+5. Run validation against legacy data
+6. Update status page when stable
+7. Schedule post-mortem within 48 hours
+
+**Critical:** rollback is acceptable. It's not a failure. A clean rollback is much better than a partially-broken cutover.
+
+### 9. The first 24 hours after
+
+**Hour 1-4 after cutover:**
+- One engineer on watch
+- All hands available on Slack
+- Watching error rates, customer complaints
+
+**Hour 4-24:**
+- Rotation watching dashboards
+- Daily check-in meeting
+- Any issues triaged and prioritized
+
+**Day 1+:**
+- Daily standups for 7 days
+- Watch for "long tail" issues (reports run weekly, monthly batch jobs, etc.)
+
+### 10. Post-mortem
+
+Schedule within 48 hours of cutover (whether successful or rolled back).
+
+Cover:
+- What went well
+- What went badly
+- What surprised us
+- What did we learn
+- Action items for next cutover
+
+### 11. Common cutover failures (learn from these)
+
+These come up across most migrations:
+
+- **DNS propagation surprise:** TTL longer than expected, some users still hit legacy
+- **CDN caching:** users see stale assets pointing to legacy
+- **Long-running connections:** existing DB connections don't drop on schedule
+- **Background jobs running mid-cutover:** kicked off before stop, finish after, write to wrong system
+- **Dependent system caches:** Salesforce / partner systems cached our endpoints
+- **Mobile apps with cached config:** old API URL baked in; can't push update fast enough
+- **SSL cert mismatch:** new system on same domain but cert not yet provisioned
+- **Email reputation reset:** new SMTP server has no reputation; emails go to spam
+
+For each, suggest mitigation in the runbook before they bite you.
+
+### 12. Sign-off
+
+After everything is verified and stable, formally close the cutover:
+
+- [ ] Tech Lead: technical sign-off
+- [ ] Support Lead: customer impact assessment
+- [ ] Compliance: audit log unbroken
+- [ ] IC: cutover complete in log
+
+Document time, who signed off, any open issues for follow-up.
+
+## Style
+
+- Imperative voice ("Stop traffic" not "Traffic should be stopped")
+- One step at a time
+- No assumptions about what the reader remembers — restate context
+- Visual breaks (=== separators) between phases
+- Escalation paths embedded in each step
+````
+
+## Tips
+
+- **Practice the runbook end-to-end in staging.** Discover bugs in the runbook before you discover them in production.
+- **Have someone NOT involved in writing the runbook** read it and try to follow it. They'll catch ambiguities.
+- **Keep the runbook short enough to follow at 2am.** Detailed appendices are fine; the main flow must be clear.
+- **Time-box decisions.** "If verification fails for 30 minutes, escalate." Without time-boxes, things drag.
+- **Make it OK to roll back.** Culture matters. If rolling back is seen as failure, teams ship broken cutovers.
+
+## Common mistakes to avoid
+
+- Vague verification steps ("check that it works")
+- No rollback procedure
+- No stop conditions
+- One person carrying all the knowledge
+- Cutover > maintenance window because no time-boxing
+- No post-mortem (we don't learn from cutovers)
+- Skipping the dress rehearsal
+- Putting customer-impacting changes in the same window as risky migration steps

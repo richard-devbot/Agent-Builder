@@ -1,0 +1,126 @@
+---
+title: "OWASP Top 10 Security Audit"
+slug: "owasp-top10-audit"
+description: "One-shot prompt that audits a codebase or diff against the OWASP Top 10 (2021) with CWE-tagged, severity-ranked findings and fixes."
+type: template
+phase: test
+category: security-review
+projectType: ["custom-app", "etl"]
+stack: []
+tags: ["security", "owasp", "audit", "appsec", "cwe"]
+difficulty: intermediate
+estimatedTime: "20 min"
+author: "Platform Engineering"
+featured: false
+createdAt: 2026-06-03
+updatedAt: 2026-06-03
+inputs:
+  - name: code_or_diff
+    description: "The code, file, or diff to audit"
+    required: true
+  - name: context
+    description: "What the code does, its trust boundaries, the data it handles"
+    required: false
+  - name: stack
+    description: "Language/framework so fixes are idiomatic (e.g. Next.js + Postgres)"
+    required: false
+output:
+  format: markdown
+relatedAssets:
+  - "owasp-security-review-skill"
+  - "threat-model-stride"
+  - "code-review-comprehensive"
+---
+
+# OWASP Top 10 Security Audit
+
+The copy-paste version of the [OWASP security review skill](/asset/skill/owasp-security-review-skill) — for when you want a one-off audit without installing anything, or want to run it in a tool other than Claude Code. Produces the same CWE-tagged, severity-ranked output contract.
+
+## When to use
+
+- Auditing a module before a security-sensitive release.
+- Reviewing legacy code you're about to modernize (pairs with the modernization playbooks).
+- A quick second opinion on a diff that touches auth, input handling, or crypto.
+
+## Prompt
+
+````text
+You are a senior application security engineer. Audit the code below against
+the OWASP Top 10 (2021). Be rigorous, evidence-based, and fix-oriented. If you
+cannot see enough to judge an item, say so — never assume it's safe.
+
+## Code under audit
+{{code_or_diff}}
+
+## Context
+{{context}}
+
+## Stack (make fixes idiomatic)
+{{stack}}
+
+## Method
+
+1. Map the trust boundaries: where does untrusted input enter (params, headers,
+   uploads, queues, env) and where does it reach a sink (DB, shell, file path,
+   HTML, redirect, deserializer)?
+2. Walk every OWASP Top 10 (2021) category and look for its patterns:
+   - A01 Broken Access Control — missing authz, IDOR, path traversal, bad JWT
+     validation, permissive CORS. (CWE-22/285/639)
+   - A02 Cryptographic Failures — secrets in code, weak/again-broken hashing,
+     ECB, missing TLS, sensitive data in logs. (CWE-327/798/311)
+   - A03 Injection — string-built SQL, eval/exec, shell interpolation, XSS,
+     NoSQL/LDAP/template injection. (CWE-89/79/78/94)
+   - A04 Insecure Design — missing rate limits/lockout, client-side-only checks,
+     business-logic bypass.
+   - A05 Security Misconfiguration — debug in prod, default creds, verbose
+     errors to users, missing security headers.
+   - A06 Vulnerable & Outdated Components — known-vulnerable or unmaintained deps.
+   - A07 Identification & Auth Failures — weak password policy, no MFA on
+     sensitive flows, session fixation, predictable tokens. (CWE-384/307)
+   - A08 Software & Data Integrity Failures — insecure deserialization, unsigned
+     updates, untrusted CI plugins. (CWE-502)
+   - A09 Logging & Monitoring Failures — no audit log on auth events, logging
+     secrets/PII.
+   - A10 SSRF — server-side fetch of user-supplied URLs without an allowlist.
+     (CWE-918)
+
+## Output (Markdown)
+
+### Audit summary
+- **Verdict:** ✅ No blocking issues | 🟡 Fix before release | 🔴 Critical exposure
+- **Overall risk:** Critical | High | Medium | Low
+- **Headline:** the single most important risk, one sentence.
+
+### Findings (highest severity first)
+For each:
+- **Title** — `file:line`
+- **OWASP / CWE:** e.g. A03 Injection / CWE-89
+- **Severity:** 🔴 Critical | 🟠 High | 🟡 Medium | 🟢 Low
+- **What:** the vulnerable pattern
+- **Exploit path:** source → sink, how an attacker reaches it
+- **Fix:** the secure pattern with a concrete code snippet in the given stack
+
+### Cleared checks
+List the OWASP categories you actively checked and found clean (audit trail).
+
+### Recommended follow-ups
+Threat model? Dependency audit? Pen test? Name only what's warranted.
+
+## Rules
+- Every finding cites a file:line and a data flow. No generic advice.
+- Use the four-level severity scale; don't invent CVSS scores you can't justify.
+- Mark "needs verification" when a validator/sanitizer is referenced but not shown.
+````
+
+## Tips
+
+- Always fill in **context** and **stack** — without them the audit drifts to generic checklist output and the fixes won't be idiomatic.
+- For large codebases, run per-module rather than dumping everything at once.
+- Feed 🔴 findings straight into the [PR governance gate](/asset/skill/pr-governance-gate-skill) checklist as blocking items.
+
+## Reading the output
+
+- 🔴 Critical / 🟠 High → block the release until fixed.
+- 🟡 Medium → fix or file a tracked ticket with a due date.
+- 🟢 Low → opportunistic.
+- Treat "cleared checks" as the proof-of-work that makes the audit auditable.

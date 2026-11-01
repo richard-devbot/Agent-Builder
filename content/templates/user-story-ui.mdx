@@ -1,0 +1,161 @@
+---
+title: "User Story Generator — UI / Frontend"
+slug: "user-story-ui"
+description: "Generate a frontend-focused user story with components, interaction flow, accessibility, and responsive notes."
+type: template
+phase: discover
+category: user-stories
+projectType: ["custom-app"]
+stack: ["react", "nextjs", "tailwind"]
+tags: ["agile", "scrum", "ui", "ux", "accessibility", "requirements"]
+difficulty: beginner
+estimatedTime: "10 min"
+author: "Platform Engineering"
+createdAt: 2026-04-26
+updatedAt: 2026-04-26
+inputs:
+  - name: requirements
+    description: "The requirement, ticket, or design brief to convert"
+    required: true
+  - name: design_link
+    description: "Figma / Zeplin / mock URL (optional)"
+    required: false
+output:
+  format: json
+relatedAssets:
+  - "user-story-from-prd"
+  - "user-story-api"
+  - "user-story-gherkin"
+  - "nextjs-page-scaffolder"
+  - "shadcn-component-builder"
+---
+
+# User Story Generator — UI / Frontend
+
+Generate a frontend-focused user story with explicit notes on components, interaction flow, accessibility (WCAG), and responsive behavior. Output is structured JSON that's easy to drop into Jira and feed into a component scaffolder.
+
+## When to use
+
+- A new screen, flow, or component is being scoped
+- You want every UI ticket to call out a11y and responsive behavior by default
+- The story will feed into the Next.js page scaffolder or a component template
+
+## Prompt
+
+```text
+You are an expert Agile Product Owner and Business Analyst specializing in UI
+and UX. Create a detailed user story focused on UI functionality based on the
+following requirements.
+
+## Requirements
+
+{{requirements}}
+
+## Design reference (if any)
+
+{{design_link}}
+
+## Template Type
+
+UI Story (Frontend / User Interface)
+
+## Output requirements
+
+Return ONLY a valid JSON object with exactly this structure — no markdown
+fences, no commentary, no leading or trailing text:
+
+{
+  "title": "Clear and concise title of the user story",
+  "description": "User story in the format: As a <user>, I want to <UI interaction> so that <user experience goal>",
+  "acceptance_criteria": [
+    "List of acceptance criteria as separate strings"
+  ],
+  "velocity_points": "Estimated story points as a string (1-13)",
+  "priority": "High | Medium | Low",
+  "template_type": "UI Story",
+  "components": [
+    "Names of UI components involved (e.g. SignInForm, TextField, PrimaryButton)"
+  ],
+  "interaction_flow": [
+    "Step-by-step user actions and resulting state"
+  ],
+  "responsive": {
+    "mobile": "Layout / behavior at < 640px",
+    "tablet": "Layout / behavior 640-1024px",
+    "desktop": "Layout / behavior > 1024px"
+  },
+  "accessibility": [
+    "WCAG checks (focus order, ARIA roles, contrast, keyboard nav, screen reader)"
+  ],
+  "states": [
+    "Empty / loading / error / success / disabled — describe each"
+  ],
+  "copy": "Microcopy guidance — primary CTA label, error messages, helper text"
+}
+
+## Style guide
+
+- Lead with what the user does, not how the framework does it.
+- Acceptance criteria should be testable by clicking — not by reading the code.
+- Always include a11y notes; never assume "we'll do that later."
+- Velocity points: 1-13 (Fibonacci). Bigger than 8? Split it.
+
+## Hard rules
+
+1. Output is a single JSON object — no surrounding text, no markdown fences.
+2. Use double quotes for all strings.
+3. acceptance_criteria, components, interaction_flow, accessibility, states must be arrays of strings.
+4. priority must be exactly one of: "High", "Medium", "Low".
+5. velocity_points must be a string ("1" through "13").
+6. No trailing commas. All brackets balanced.
+```
+
+## Example output
+
+```json
+{
+  "title": "Inline edit for customer display name",
+  "description": "As a logged-in customer, I want to edit my display name in place on the profile page so that I don't have to navigate away to update it.",
+  "acceptance_criteria": [
+    "Clicking the display name turns it into a text field with the current value selected",
+    "Pressing Enter saves; pressing Escape cancels and reverts",
+    "An error toast shows if the save call fails, and the field stays in edit mode",
+    "Field is keyboard-accessible: Tab focuses it, Enter activates edit"
+  ],
+  "velocity_points": "3",
+  "priority": "Medium",
+  "template_type": "UI Story",
+  "components": ["ProfileHeader", "InlineEditField", "Toast"],
+  "interaction_flow": [
+    "User lands on /profile and sees their name as a heading",
+    "User clicks (or focuses + presses Enter on) the name",
+    "Heading swaps to a TextField pre-filled with the name, focus moves into it",
+    "User edits, then presses Enter — optimistic update + PATCH /users/me",
+    "On success: heading shows new name. On error: revert + error toast."
+  ],
+  "responsive": {
+    "mobile": "Full-width field on tap; large hit-target ≥ 44px",
+    "tablet": "Inline width matches heading width",
+    "desktop": "Inline width matches heading width with subtle hover affordance"
+  },
+  "accessibility": [
+    "Edit affordance announced as 'Edit display name' (aria-label)",
+    "Field has label and describedby pointing to current error if any",
+    "Escape key cancels — must be discoverable via keyboard hint on focus",
+    "Color contrast on edit affordance ≥ 3:1 against background"
+  ],
+  "states": [
+    "View — name as heading with subtle pencil icon on hover/focus",
+    "Edit — text field with Save/Cancel hint, autofocus, value selected",
+    "Saving — field disabled, spinner inline",
+    "Error — field stays in edit, inline error message, retains user input"
+  ],
+  "copy": "Primary CTA: implicit (Enter saves). Hint: 'Press Enter to save, Esc to cancel'. Error: 'Couldn't save — try again.'"
+}
+```
+
+## Tips
+
+- Pair with the **Next.js Page Scaffolder** for the route shell, then **shadcn Component Builder** for the leaf components.
+- If your design references a Figma file, paste the URL in `design_link` — even though the model can't open it, the URL becomes a permanent link in the resulting story for reviewers.
+- Run the **User Story Generator — API** with the same requirement to get the matching backend ticket.

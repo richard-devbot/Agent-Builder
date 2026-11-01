@@ -1,0 +1,229 @@
+---
+title: "MongoDB Schema Designer"
+slug: "mongodb-schema-designer"
+description: "Design a denormalized MongoDB schema with proper indexes, embedded vs referenced choices, and validation rules."
+type: template
+phase: design
+category: database-design
+projectType: ["custom-app"]
+stack: ["mongodb"]
+tags: ["database", "nosql", "schema", "mongodb"]
+difficulty: intermediate
+estimatedTime: "20 min"
+author: "Platform Engineering"
+featured: false
+createdAt: 2026-04-26
+updatedAt: 2026-04-26
+inputs:
+  - name: domain_description
+    description: "Describe your domain (entities, relationships, key access patterns)"
+    required: true
+  - name: access_patterns
+    description: "Top read/write queries you expect (critical for NoSQL design)"
+    required: true
+  - name: scale
+    description: "Expected document counts and growth"
+    required: false
+output:
+  format: code
+relatedAssets:
+  - "rest-api-scaffolder-nodejs"
+  - "fastapi-scaffolder-python"
+---
+
+# MongoDB Schema Designer
+
+Design a MongoDB schema that's optimized for your access patterns — not just a translation of a relational schema. Includes embed-vs-reference decisions, indexes for the queries that matter, and validation rules to prevent bad data.
+
+## When to use
+
+- Starting a new project that's chosen MongoDB
+- Migrating from SQL to MongoDB and need to redesign (don't just translate tables)
+- Performance-tuning an existing schema where queries are slow
+
+## Prompt
+
+````text
+You are a senior MongoDB architect. Design a MongoDB schema optimized for the
+access patterns described below. NoSQL design is access-pattern-first; structure
+follows queries.
+
+## Input
+
+**Domain description:**
+{{domain_description}}
+
+**Top access patterns (CRITICAL):**
+{{access_patterns}}
+
+**Expected scale:**
+{{scale}}
+
+## Output
+
+Produce four sections.
+
+### 1. Access pattern analysis
+
+For each access pattern from the input:
+- Pattern: "Get all orders for a customer in the last 30 days"
+- Frequency: high / medium / low
+- Latency target: e.g., <50ms p95
+- Access type: read-heavy / write-heavy / mixed
+- Implication for schema: e.g., "embed recent orders into customer doc, archive old to separate collection"
+
+### 2. Schema rationale
+
+Explain key decisions:
+
+**Embed vs reference**
+For each relationship, decide:
+- **Embed** when:
+  - One-to-few (typically <100 children)
+  - Children are queried with the parent in the same request
+  - Children rarely change independently
+  - Total document size stays well under 16MB
+- **Reference** when:
+  - One-to-many or many-to-many (children >100)
+  - Children are queried independently
+  - Children change frequently
+  - Multiple parents share the same child (DRY)
+
+**Atomicity boundaries**
+- MongoDB is atomic at the document level
+- Group together what must be updated atomically
+- Multi-document transactions exist but are slower — design to avoid them
+
+**Read vs write trade-offs**
+- Denormalize for reads (duplicate data) when reads vastly outnumber writes
+- Reference when writes need consistency more than reads need speed
+
+**Schema flexibility**
+- Even though MongoDB is schemaless, USE schema validation
+- Document the expected shape — future engineers will thank you
+
+### 3. Collections
+
+For each collection produce:
+
+```
+## Collection: collection_name
+
+**Purpose:** [1-2 sentence description]
+**Estimated count:** [order of magnitude]
+**Average document size:** [estimate]
+**Sharding strategy (if applicable):** [shard key + rationale]
+
+### Document shape (example)
+
+```json
+{
+  "_id": ObjectId("..."),
+  "field": "value",
+  "nested": {
+    "subfield": "value"
+  },
+  "array_of_embedded": [
+    { "key": "value" }
+  ],
+  "reference": ObjectId("...")  // ref to other_collection
+}
+```
+
+### JSON schema validator
+
+```javascript
+db.createCollection("collection_name", {
+  validator: {
+    $jsonSchema: {
+      bsonType: "object",
+      required: ["field1", "field2"],
+      properties: {
+        field1: {
+          bsonType: "string",
+          minLength: 1,
+          maxLength: 200,
+          description: "..."
+        }
+        // ... all fields
+      }
+    }
+  },
+  validationLevel: "strict",
+  validationAction: "error"
+});
+```
+
+### Indexes
+
+```javascript
+// Why: supports access pattern "list X by Y"
+db.collection_name.createIndex({ "field": 1, "other": -1 });
+
+// Why: enforces uniqueness
+db.collection_name.createIndex({ "email": 1 }, { unique: true });
+
+// Why: TTL for session expiry
+db.collection_name.createIndex({ "expires_at": 1 }, { expireAfterSeconds: 0 });
+```
+
+For each index:
+- Comment explaining which access pattern it supports
+- Compound index field order matters: equality → sort → range
+- Use partial indexes (`partialFilterExpression`) when only some docs need indexing
+- Consider sparse indexes for optional fields
+```
+
+### 4. Migration script
+
+A single `mongosh` script that:
+- Creates all collections with validators
+- Creates all indexes
+- Seeds reference data if needed
+- Idempotent (safe to re-run)
+
+## Quality checklist
+
+- [ ] Every access pattern has at least one supporting index
+- [ ] No collection grows unbounded without a TTL or archive strategy
+- [ ] All `_id` fields explicitly typed (ObjectId or your custom type)
+- [ ] Money stored as Decimal128, not Double
+- [ ] Dates stored as Date type, not strings
+- [ ] No fields stored as Strings that are really Booleans/Numbers/Dates
+- [ ] Schema validator is set on every collection
+- [ ] Sharding strategy documented (or "not sharded; reason: ___")
+````
+
+## Example input
+
+```yaml
+domain_description: |
+  E-commerce platform. Customers place orders. Each order has line items
+  referencing products. Customers have shipping addresses (multiple).
+  Products have variants (size, color). Reviews on products.
+access_patterns: |
+  1. Get all orders for a customer (last 30 days), with line items - HIGH freq
+  2. Get product detail page (product + variants + recent 10 reviews) - HIGH
+  3. Search products by name/category - MEDIUM
+  4. Add review to product - MEDIUM
+  5. Update order status - LOW
+scale: |
+  ~500K customers, ~50K products, ~10M orders, ~5M reviews. 90% read.
+```
+
+## Tips
+
+- **Access patterns first, schema second.** This is the fundamental difference from SQL.
+- **Don't translate SQL schemas.** A `customers` + `orders` + `order_items` SQL schema usually becomes a `customers` collection with embedded recent orders + a separate `orders` collection for historical/searchable data.
+- **Test queries with `.explain('executionStats')`** before going to production. Look for `IXSCAN` (good) vs `COLLSCAN` (bad).
+- **Use Atlas search for full-text** — don't try to roll your own with regex on indexed fields.
+- For multi-tenant SaaS, include `tenant_id` as the first field in every compound index.
+
+## Common mistakes to avoid
+
+- Treating MongoDB like SQL (over-normalization, JOIN-style with `$lookup` everywhere)
+- Unbounded array growth (a `comments` array on a post can hit the 16MB limit)
+- No TTL on session/cache/log collections (they grow forever)
+- Indexing every field "just in case" (each index costs writes and storage)
+- Storing dates as strings (breaks range queries)
+- Storing money as Double (use Decimal128 for precision)

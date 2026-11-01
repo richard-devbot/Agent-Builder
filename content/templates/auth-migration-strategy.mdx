@@ -1,0 +1,335 @@
+---
+title: "Authentication Migration Strategy (.NET Forms Auth → JWT/OAuth)"
+slug: "auth-migration-strategy"
+description: "Migrate from legacy .NET authentication (Forms Auth, Windows Auth, custom) to modern JWT/OAuth without breaking existing users."
+type: template
+phase: design
+category: auth
+projectType: ["custom-app"]
+stack: ["dotnet"]
+tags: ["migration", "auth", "oauth", "jwt", "dotnet"]
+difficulty: advanced
+estimatedTime: "1 day"
+author: "Platform Engineering"
+featured: false
+createdAt: 2026-04-26
+updatedAt: 2026-04-26
+inputs:
+  - name: legacy_auth_type
+    description: "Current auth (Forms Auth / Windows Auth / WIF / custom / SAML / mix)"
+    required: true
+  - name: user_store
+    description: "Where users are stored (AD / SQL membership tables / custom / external IdP)"
+    required: true
+  - name: target_auth
+    description: "Target auth (JWT only, OAuth via Azure AD / Auth0, hybrid)"
+    required: true
+  - name: external_identities
+    description: "Federated identities used (Azure AD, Google Workspace, ADFS, etc.)"
+    required: false
+output:
+  format: markdown
+relatedAssets:
+  - "auth-setup-oauth-jwt"
+  - "coexistence-architecture-adr"
+---
+
+# Authentication Migration Strategy (.NET → Modern)
+
+Migrating .NET Forms Auth, Windows Auth, or custom auth to modern JWT/OAuth is one of the hardest migration tasks. Get it wrong and users get logged out, lose sessions, see double-logins, or worse — get authenticated as the wrong account.
+
+This template generates a comprehensive auth migration strategy specific to your starting point and target.
+
+## When to use
+
+- Migrating from ASP.NET WebForms, MVC 4-5, or older .NET to modern stack
+- Replacing custom membership tables with an Identity Provider
+- Consolidating multiple auth schemes into one
+- Adding SSO across legacy and new systems
+
+## Prompt
+
+````text
+You are a senior identity engineer who has done many .NET auth migrations.
+Generate a complete auth migration strategy.
+
+## Input
+
+**Legacy auth type:** {{legacy_auth_type}}
+**Where users are stored:** {{user_store}}
+**Target auth:** {{target_auth}}
+**External identities:** {{external_identities}}
+
+## Output structure
+
+### 1. Current state assessment
+
+For each legacy auth mechanism in use, document:
+
+- **How it works today:** session cookie, ticket format, expiry, sliding vs absolute
+- **Where credentials are stored:** AD, SQL membership tables, hashed passwords (with what algorithm)
+- **What protects what:** which routes/pages require auth, role-based authorization
+- **Session handling:** stateful (server-side session) or stateless?
+- **Federation in play:** SAML SSO, ADFS, Azure AD trust
+- **MFA:** if/how it's done today
+
+For .NET specifically, identify:
+- **Forms Authentication ticket configuration** (`<authentication mode="Forms">` settings)
+- **machineKey** (for ticket signing/encryption)
+- **Cookie settings** (HttpOnly, Secure, SameSite, domain)
+- **Roles provider** (SqlRoleProvider? Custom?)
+- **Membership provider** (SqlMembershipProvider? Custom?)
+- **`IPrincipal` / `IIdentity` usage** in the codebase
+- **Custom claims** added in `AuthenticateRequest`
+- **Anti-forgery token usage**
+
+### 2. Password storage migration
+
+If legacy stores passwords (vs federated to AD/IdP), this is the riskiest part.
+
+For each password format observed:
+
+| Legacy format | Target |
+|---------------|--------|
+| Plaintext | NOT MIGRATABLE — force password reset |
+| MD5 / SHA1 unsalted | Migrate to Argon2 / bcrypt; force reset on next login |
+| SHA256 with salt | Migrate to Argon2 / bcrypt at first login |
+| ASP.NET Membership PBKDF2 | Migrate to Argon2 at first login (legacy hash is acceptable) |
+| ASP.NET Identity v2/v3 | Compatible with new ASP.NET Identity; can keep |
+
+For the migration approach, choose:
+
+**A. Background migration on next login**
+- User logs in with legacy password
+- Verify against legacy hash
+- Re-hash with modern algorithm
+- Store new hash, mark migrated
+- Pros: no user-visible disruption
+- Cons: takes months; users who never log in stay on legacy hash
+
+**B. Forced password reset**
+- All users get password reset email at cutover
+- Reset flow forces them to set a new password (stored as modern hash)
+- Pros: clean break, faster
+- Cons: high user friction, support volume spike
+
+**C. Hybrid based on hash strength**
+- Strong legacy hashes: migrate at next login
+- Weak legacy hashes (MD5, SHA1): force reset
+- Pros: balances friction and security
+- Cons: more complex implementation
+
+Recommend ONE based on legacy hash quality.
+
+### 3. Session continuity strategy
+
+How users stay signed in across the migration period (often months).
+
+**Pattern A: Both old and new accept old auth tickets**
+- New app validates old Forms Auth tickets using same machineKey
+- Pros: zero re-login
+- Cons: new app inherits legacy ticket format and expiry
+
+**Pattern B: Both old and new accept new tokens**
+- Issue JWT on login; legacy app gets a small validator
+- Pros: clean target
+- Cons: requires legacy code change
+
+**Pattern C: IdP-fronted (recommended for permanence)**
+- Stand up an IdP (Azure AD B2C, Auth0, IdentityServer)
+- Both legacy and new authenticate through IdP
+- Pros: cleanest end-state, supports growth
+- Cons: most upfront work
+
+For each pattern, document:
+- Token / ticket format
+- How sessions persist when bouncing between legacy and new
+- Logout: must logout one log out both?
+- Session timeout: who enforces?
+- Token storage: cookie vs localStorage (always cookie for sensitive tokens)
+
+### 4. Authorization model translation
+
+Legacy authorization patterns to map to new system:
+
+- **`[Authorize]` attribute** → `requireAuth` middleware in new
+- **`[Authorize(Roles = "Admin")]`** → `requireRole('admin')` in new
+- **Custom `AuthorizeAttribute` overrides** → policy-based authz or custom middleware
+- **`HttpContext.User.IsInRole("X")`** in code → claims check on JWT
+- **Database-backed permissions** → still in DB or move to claims?
+- **Page-level vs action-level auth** → route-level auth in SPA + API
+
+If using ASP.NET Core Identity for the target:
+- Map roles → Identity Roles
+- Map custom user fields → Identity user claims or extension table
+
+### 5. Federation and SSO
+
+If users sign in via SAML/ADFS/Azure AD/Google:
+
+- **Same IdP for legacy and new:** preferred — both apps trust the same source
+- **Different IdPs during migration:** hard; usually requires fronting both with a single IdP
+- **Federation metadata:** entity IDs, certificates — must be configured for new system
+
+Document migration steps for each federated source.
+
+### 6. Specific .NET modernization patterns
+
+**ASP.NET Forms Auth → ASP.NET Core**
+
+```csharp
+// Legacy: Forms Auth ticket
+FormsAuthentication.SetAuthCookie(username, false);
+
+// Modern: Cookie auth in ASP.NET Core
+await HttpContext.SignInAsync(
+    CookieAuthenticationDefaults.AuthenticationScheme,
+    new ClaimsPrincipal(...)
+);
+```
+
+**Windows Auth → JWT (often the case for internal apps)**
+
+For internal apps where users currently sign in with Windows Auth:
+- Option A: Keep Windows Auth in target (works in IIS or via Kerberos middleware in ASP.NET Core)
+- Option B: Move to Azure AD with Windows Hello / SSO — same SSO experience, modern protocol
+- Option C: Hybrid: Windows Auth on internal, OAuth on external
+
+**WCF SOAP Auth → REST + JWT**
+
+If the legacy uses WCF with `wsHttpBinding` and message-level security:
+- Map WS-Security tokens to JWT bearer tokens
+- WCF auth headers → HTTP Authorization header
+- Document the migration for SOAP clients (they'll need updates)
+
+**Custom Membership / Roles → ASP.NET Core Identity OR external IdP**
+
+Consider:
+- ASP.NET Core Identity for fully internal user management
+- External IdP (Azure AD, Auth0) for federation, SSO, MFA out-of-the-box
+- Don't roll your own modern auth from scratch
+
+### 7. Data migration plan for users
+
+If migrating user records (vs. federation), document:
+
+- **Source:** SQL membership tables, AD users, custom tables
+- **Target:** ASP.NET Identity tables, IdP user store
+- **Field mapping:**
+  - UserId → User Id
+  - UserName → UserName / Email
+  - PasswordHash → PasswordHash (with format migration plan)
+  - Roles → Roles or Claims
+  - Custom profile fields → claims or extension table
+- **Validation:** unique emails, no orphaned roles
+- **Cutover:** what happens to users created during the migration window
+
+### 8. MFA migration
+
+If MFA is in scope:
+
+- **Legacy MFA:** none, soft tokens, SMS, custom
+- **Target MFA:** TOTP, WebAuthn, push, IdP-managed
+- **Enrollment:** opt-in or mandatory for new
+- **Recovery codes:** how regenerated
+- **Grandfathered users:** accounts created before MFA — when do they enroll?
+
+### 9. Session and token lifetimes
+
+Document and standardize:
+
+- **Access token (JWT):** 15-30 minute typical
+- **Refresh token:** 30-90 day with rotation
+- **Idle session timeout:** 30-60 min
+- **Absolute session timeout:** 8-24 hours
+- **Remember-me:** 30-90 days
+- **MFA cookie / device trust:** 30-60 days
+
+If legacy had different lifetimes, plan how to communicate or transition (e.g., users may notice they get logged out faster on new system).
+
+### 10. Logout and revocation
+
+- **Single logout:** clicking logout signs user out of all sessions
+- **Token revocation:** how to invalidate a JWT before expiry (refresh token revocation is the typical answer)
+- **Forced logout on password change:** revoke all refresh tokens on password change
+- **Forced logout on suspicious activity:** alert + revoke
+
+### 11. Audit and compliance
+
+For regulated industries:
+
+- **Audit log fields:** who, what, when, IP, success/failure
+- **Storage:** where audit logs live (immutable storage)
+- **Retention:** how long
+- **Continuity:** the audit log doesn't have a gap during migration
+
+### 12. Cutover plan
+
+Step-by-step:
+
+**Pre-cutover:**
+- New auth system stood up and tested
+- Token validation on legacy app deployed (if applicable)
+- Communication to users (no action required, or password reset coming)
+- DR / rollback plan ready
+
+**Cutover day:**
+- Stop new sessions on old auth (read-only mode)
+- Final user data sync
+- Switch DNS/proxy to route auth via new system
+- Verify sample users can sign in
+- Open new sessions on new auth
+- Monitor support volume spike
+
+**Post-cutover:**
+- 7-day monitoring window
+- Decommission legacy auth components
+- Archive legacy ticket signing keys (don't delete; archive)
+
+### 13. Risks specific to auth migration
+
+- **Lockout cascade:** misconfiguration locks out everyone. Mitigation: phased rollout with break-glass admin account
+- **Token theft:** new system's tokens compromised. Mitigation: short-lived access tokens, refresh rotation
+- **Session bleed:** users see other users' data due to cache key conflicts. Mitigation: thorough testing of multi-user concurrent flows
+- **MFA enrollment friction:** users stuck without recovery codes. Mitigation: mandatory enrollment with multiple recovery methods
+- **External IdP outage:** users can't sign in if IdP is down. Mitigation: break-glass local admin, status page
+- **Legacy machineKey leak:** old tickets forge-able. Mitigation: rotate machineKey before relying on legacy ticket validation
+
+### 14. Validation checklist
+
+Before declaring auth migration done:
+- [ ] All user roles preserved
+- [ ] All legacy sessions cleanly transitioned (or expired)
+- [ ] Password reset flow tested
+- [ ] MFA enrollment tested
+- [ ] Logout works across both systems
+- [ ] Token refresh works
+- [ ] Audit log unbroken
+- [ ] Compliance team sign-off
+- [ ] Support team trained on new auth flows
+
+## Style
+
+- Specific to the input legacy stack, not generic
+- Honest about which migrations are hard
+- Note when to use external IdP vs roll your own (heavily prefer IdP for any non-trivial setup)
+- Include actual .NET API examples where applicable
+````
+
+## Tips
+
+- **Strongly consider an external IdP** (Azure AD B2C, Auth0, IdentityServer) for non-trivial cases. Rolling your own auth in 2026 is rarely the right call.
+- **Don't migrate weak password hashes silently.** MD5 / SHA1 / unsalted hashes warrant a forced reset — explain to users why.
+- **Plan the break-glass.** A single admin account with hardware key MFA, separate from the main auth system, that lets you recover if the main system breaks.
+- **Test multi-user concurrent scenarios** specifically. Auth bugs that show only under load are the most embarrassing.
+- **Monitor login failure rates** during and after cutover. A spike means something broke for real users.
+
+## Common mistakes to avoid
+
+- Migrating to a custom JWT implementation instead of using a vetted IdP
+- Mixing session cookie auth (legacy) with bearer tokens (new) without clear strategy
+- Storing JWTs in localStorage (use httpOnly cookies)
+- Not rotating refresh tokens
+- Symmetric JWT signing (HS256) when distributing public keys safely needs RS256
+- Not testing the rollback path
+- Underestimating user-facing friction (everyone needs to re-login? plan the comms)

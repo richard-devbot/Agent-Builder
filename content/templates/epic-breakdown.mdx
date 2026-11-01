@@ -1,0 +1,191 @@
+---
+title: "Epic Breakdown"
+slug: "epic-breakdown"
+description: "Break a large product initiative into well-scoped epics, each estimable and independently shippable."
+type: template
+phase: discover
+category: epic-breakdown
+projectType: ["custom-app"]
+stack: []
+tags: ["agile", "planning", "scoping"]
+difficulty: intermediate
+estimatedTime: "20 min"
+author: "Platform Engineering"
+featured: false
+createdAt: 2026-04-26
+updatedAt: 2026-04-26
+inputs:
+  - name: initiative
+    description: "The large initiative or PRD to break down"
+    required: true
+  - name: target_quarters
+    description: "How many quarters to plan over (e.g., '2')"
+    required: false
+output:
+  format: markdown
+relatedAssets:
+  - "prd-generator"
+  - "user-story-from-prd"
+  - "jira-ticket-manager"
+---
+
+# Epic Breakdown
+
+Break a large product initiative or PRD into well-defined epics. Each epic is independently shippable, estimable in story points, and clearly tied to a business outcome.
+
+## When to use
+
+- Just finished a PRD and need to plan implementation
+- A roadmap initiative is too big to start estimating
+- Sprint planning keeps stalling because work isn't broken down enough
+- Need a release plan to share with stakeholders
+
+## Prompt
+
+```text
+You are a senior product manager and agile coach. Break the initiative below
+into well-scoped epics suitable for multi-sprint delivery.
+
+## Input
+
+**Initiative or PRD:**
+{{initiative}}
+
+**Target planning horizon:** {{target_quarters}} quarter(s)
+
+## Epic definition
+
+Each epic must be:
+- **Outcome-oriented** — tied to a measurable business or user outcome
+- **Independent** — deliverable without requiring other epics to ship first
+  (or with explicit dependencies called out)
+- **Estimable** — sized in t-shirt: S (1-2 sprints), M (3-4 sprints), L (5+ sprints)
+- **Releasable** — produces something users actually experience, not just internal plumbing
+- **Vertical** — slices through all layers (UI, API, DB) rather than horizontal layer-only
+
+## What to produce
+
+### 1. Initiative summary
+- 2-3 sentence summary of what's being built and why
+- Success metrics (how we'll know it worked)
+- Key constraints (timeline, team size, tech)
+
+### 2. Epic list
+
+For each epic produce:
+
+```
+## Epic: [Outcome-oriented title]
+
+**ID:** EPIC-001
+**Size:** S | M | L
+**Priority:** P0 | P1 | P2
+**Outcome:** [Measurable outcome this epic delivers]
+**User benefit:** [What changes for the user]
+**Business value:** [What changes for the business]
+
+### Scope
+What's IN:
+- [Bulleted list of capabilities]
+
+What's OUT:
+- [Explicit non-goals — things stakeholders might assume are in but aren't]
+
+### Stories (estimate-only, full breakdown later)
+- ~ STORY: [one-liner], complexity: S/M/L
+- ~ STORY: [one-liner], complexity: S/M/L
+- (5-12 stories per epic typical)
+
+### Dependencies
+- Blocks: [other epics that need this first]
+- Blocked by: [epics this needs first]
+- External: [other teams, vendors, or systems]
+
+### Risks
+- [Top 1-3 risks: technical unknowns, regulatory, vendor, etc.]
+
+### Definition of done
+- [3-5 measurable acceptance criteria for the epic as a whole]
+```
+
+### 3. Sequencing recommendation
+- Suggested order with rationale
+- Group epics into proposed sprints/milestones
+- Note critical path and what determines it
+
+### 4. Out of scope
+Things that came up while breaking down but explicitly aren't part of THIS
+initiative. (Future-roadmap candidates.)
+
+### 5. Open questions
+Decisions still needed before work can start. For each:
+- The question
+- Who needs to answer
+- Default assumption if no one answers in time
+- Cost of the wrong default
+
+## Quality bar
+
+- Every epic ties to a user or business outcome (no "Refactor module X" epics)
+- Every epic could ship independently (or has a clear dependency note)
+- No epic is bigger than 6 sprints — if it is, split it
+- No epic is smaller than 1 sprint — if it is, it's probably a story, fold into another epic
+- Vertical slices, not horizontal layers ("Add login flow" not "Set up auth tables")
+
+## Output format
+
+Markdown document with:
+- Title
+- Initiative summary
+- Visual sequence diagram (ASCII art or Mermaid)
+- Each epic as a section
+- Sequencing recommendation
+- Out of scope
+- Open questions
+
+## Tone
+
+- Outcome-focused
+- Specific over generic
+- Honest about unknowns
+- Numbers, not adjectives
+```
+
+## Example output snippet
+
+```markdown
+## Epic: Self-service invoice management
+
+**ID:** EPIC-001
+**Size:** M (3 sprints)
+**Priority:** P0
+**Outcome:** Reduce account-manager invoice requests by 60%
+**User benefit:** Customers download invoices in under 30 seconds, 24/7
+**Business value:** ~80 hours/week of account-manager time freed
+
+### Scope
+What's IN:
+- View invoices for last 12 months
+- Download PDF
+- Filter by date range
+- Email-yourself-a-copy action
+
+What's OUT:
+- Invoice editing or disputes (separate epic)
+- Bulk export beyond 12 months (separate)
+- Tax document generation (separate epic)
+```
+
+## Tips
+
+- Run this AFTER the PRD is solid — breakdown quality depends on PRD quality
+- Pair with the **User Story Generator** to drill into the highest-priority epic first
+- Pair with the **Jira Ticket Manager Skill** to bulk-create epics in your tracker
+- Revisit the breakdown every 2-3 sprints — reality will diverge from the plan
+
+## Common mistakes to avoid
+
+- "Plumbing" epics with no user-facing outcome (fold infrastructure work into the user-facing epics it enables)
+- Epics that are really just oversized stories (size: S epics are probably stories)
+- Epics with vague success criteria
+- Skipping the "out of scope" section — it prevents scope creep

@@ -1,0 +1,226 @@
+---
+title: "Jira Push (Bulk Stories + Test Cases)"
+slug: "jira-push-bulk"
+description: "Skill for bulk-pushing elaborated stories and their test cases into Jira as Story + sub-task hierarchies. Always dry-runs first; never overwrites silently."
+type: skill
+phase: discover
+category: jira-tickets
+projectType: ["custom-app"]
+stack: ["claude-code", "mcp", "jira"]
+tags: ["jira", "bulk", "automation", "ready-to-push", "skill"]
+difficulty: intermediate
+estimatedTime: "10 min setup, 30s per story"
+author: "Platform Engineering"
+createdAt: 2026-04-26
+updatedAt: 2026-04-26
+skillName: "jira-push-bulk"
+requires:
+  - mcp-server: jira
+files:
+  - SKILL.md
+  - templates/story-fields.md
+  - templates/sub-task-fields.md
+relatedAssets:
+  - "jira-mcp"
+  - "jira-ticket-manager"
+  - "user-story-elaboration-detailed"
+  - "test-case-comprehensive"
+---
+
+# Jira Push (Bulk Stories + Test Cases)
+
+A Claude Code skill that takes a folder of structured outputs — elaborated user stories and their test cases — and pushes them into Jira as Story tickets with their test cases as sub-tasks. Always dry-runs the plan first and waits for explicit confirmation before writing.
+
+This is distinct from the `jira-ticket-manager` skill (which is for ad-hoc ticket creation in chat). Use this one when you have a stack of files from the **User Story Elaboration — Detailed** and **Test Cases — Comprehensive** templates and need them all in Jira in one shot.
+
+## When it triggers
+
+- "Push the elaborated stories from `<folder>` to Jira"
+- "Sync `output/*_elaborated.md` and `output/*_test_cases.md` to project `KEY`"
+- "Bulk-create stories under epic `EPIC-204` from these files"
+- "Update existing Jira stories with the latest elaboration"
+
+## What it does
+
+- Reads `output/[STORY_ID]_elaborated.md` files for the Story body
+- Reads `output/[STORY_ID]_test_cases.md` files for the test sub-tasks
+- Maps markdown sections to Jira Cloud fields (ADF format)
+- Builds a preview table of every Story and sub-task it will create
+- **Waits for the user to type "confirmed"** before writing anything
+- Detects duplicates (existing tickets) and asks "update existing or skip?"
+- Creates the epic first if it doesn't exist, then stories under it
+- Logs every push to `output/jira_push_log_<DATE>.md`
+
+## What it does NOT do
+
+- It does not silently overwrite existing tickets — always asks
+- It does not push without a dry-run preview first
+- It does not infer the project key — you provide it
+- It does not modify the source markdown files
+
+## Installation
+
+1. Configure the **Jira MCP** server (see related: `jira-mcp` or `jira-mcp-atlassian`).
+2. Copy this skill folder to `~/.claude/skills/jira-push-bulk/`.
+3. Restart Claude Code.
+
+## SKILL.md content
+
+````markdown
+---
+name: jira-push-bulk
+description: |
+  Use this skill when the user wants to bulk-push elaborated user stories
+  and their test cases from a folder into Jira. Triggers on:
+  - "Push stories to Jira"
+  - "Sync elaborated stories to project <KEY>"
+  - "Bulk create Jira tickets from output/*_elaborated.md"
+  - "Push test cases as sub-tasks under their Stories"
+
+  Always dry-runs first and waits for explicit user confirmation before
+  writing to Jira. Never silently overwrites — asks "update or skip?"
+  when a duplicate is detected.
+---
+
+# Pre-flight checklist
+
+Before pushing anything, you MUST:
+
+1. Run `jira_list_projects` and confirm the response.
+2. Confirm the target project key — ask the user if not specified.
+3. Confirm the issue type — Story, Task, Sub-task.
+4. Show a DRY RUN preview table — wait for "confirmed" before writing.
+5. Never push without explicit confirmation.
+
+# Input sources
+
+| Project Layout | Stories | Test Cases |
+|---|---|---|
+| Standard | `output/[STORY_ID]_elaborated.md` | `output/[STORY_ID]_test_cases.md` |
+| LifePro / spec-driven | `output/functional-spec/[ID]_functional_spec.md` | `output/test-cases/[ID]_test_cases.md` |
+
+# Field mapping — Markdown → Jira Cloud (ADF)
+
+## Elaborated Story → Jira Story
+
+| Markdown Section | Jira Field | Notes |
+|---|---|---|
+| Title (H1) | `summary` | Plain text |
+| Story Statement | `description` (top) | "As a / I want / So that" block |
+| Background & Context | `description` | Paragraph |
+| Acceptance Criteria | `description` | h2 + numbered list per AC |
+| Out of Scope | `description` | h2 + bullet list |
+| Technical Notes | `description` | h2 + table |
+| Dependencies | `description` | h2 + table |
+| Definition of Done | `description` | h2 + checklist |
+| Story Header > Priority | `priority` | High / Medium / Low |
+| Story Header > Epic | `customfield_10014` | Epic Link (Jira Cloud) |
+| Story ID (e.g. FIN-8751) | `labels` | Tag for traceability |
+
+### ADF formatting cheat sheet
+
+```
+h2. Acceptance Criteria
+
+*AC-1: Title*
+* Given <precondition>
+* When <action>
+* Then <expected outcome>
+```
+
+## Test Cases → Jira Sub-tasks
+
+Each test case row becomes one sub-task under the parent Story.
+
+| Test Case Field | Jira Sub-task Field |
+|---|---|
+| `TC-<ID>` + Title | `summary` |
+| Category | `labels` (e.g. `positive`, `negative`, `edge`, `integration`, `ui`) |
+| Full TC table | `description` |
+| Priority | `priority` |
+| Story ID | `parent` |
+
+# Push modes
+
+## 1. Single story
+
+> Read `output/<STORY_ID>_elaborated.md`. Push to project `<KEY>`.
+> Show preview first.
+
+## 2. All stories in a folder
+
+> Push all `output/*_elaborated.md` to project `<KEY>`.
+> Group by epic and show full preview before pushing.
+
+## 3. Stories + test cases together
+
+> Push `<STORY_ID>` to project `<KEY>` as a Story.
+> Then create its test cases as sub-tasks under it.
+> Read `output/<STORY_ID>_elaborated.md` and `output/<STORY_ID>_test_cases.md`.
+
+## 4. Update existing
+
+> `<STORY_ID>` already exists in Jira as `<JIRA_KEY>`.
+> Update its description with the elaborated content from
+> `output/<STORY_ID>_elaborated.md`. Do not duplicate.
+
+## 5. Bulk with epic grouping
+
+> Push all stories from `<folder>` to project `<KEY>`.
+> - Group under their respective epics (create epics if missing)
+> - Then create stories under each epic
+> - Then create test-case sub-tasks under each story
+> Show full preview before executing.
+
+# Error handling
+
+| Error | Action |
+|---|---|
+| Jira not connected | Stop. Tell user to check MCP config. |
+| Project key not found | Show available projects, ask user to pick. |
+| Epic not found | Create epic first, then link stories. |
+| Duplicate story detected | Ask: update existing or skip? |
+| Rate limit hit | Pause 2s between calls, continue. |
+| Field validation error | Show the error, ask user how to fix. |
+
+# Output after every push
+
+```markdown
+## Jira Push Summary
+
+| Story ID | Title | Jira Key | Status |
+|---|---|---|---|
+| FIN-8751 | Adding items to the cart | COMM-123 | ✅ Created |
+| FIN-8755 | Update quantity on cart | COMM-124 | ✅ Created |
+| FIN-8756 | Remove items from cart | COMM-125 | ⚠️ Duplicate — skipped |
+
+**Total:** 15 created, 1 skipped, 0 failed
+**Test Cases:** 45 sub-tasks created
+**View in Jira:** <board link>
+```
+
+Save the summary to `output/jira_push_log_<YYYY-MM-DD>.md`.
+````
+
+## Recommended companion templates
+
+This skill expects markdown produced by:
+
+- **User Story Elaboration — Detailed** (`user-story-elaboration-detailed`) for the Story body
+- **Test Cases — Comprehensive** (`test-case-comprehensive`) for the sub-tasks
+
+Generated outputs that don't match those shapes will still push, but the field mapping table above won't apply cleanly — the model will paste the whole markdown into the description and skip the structured Jira fields.
+
+## Troubleshooting
+
+**"Story is created but description is mangled"**
+Jira Cloud uses Atlassian Document Format (ADF), not raw markdown. The skill converts headings (`##` → `h2.`), bullets, numbered lists, and tables. Code fences are wrapped in `{code}...{code}`. If your markdown uses HTML, ADF will strip it.
+
+**"Sub-tasks were created but not linked to the parent"**
+The `parent` field needs the parent's actual Jira key (e.g. `COMM-123`), not the story ID from your filename. The skill captures the Jira key returned from the parent create call and uses it for the sub-tasks. If a parent create fails, sub-tasks for that story are skipped — see the push log.
+
+**"Epic Link field rejects my epic ID"**
+The `customfield_10014` ID is project-dependent. If your project uses a different custom field, configure it via the Jira MCP server's `JIRA_EPIC_FIELD` env var or pass it explicitly: `--epic-field customfield_10100`.
+
+**"My organisation uses 'Initiative > Epic > Story' (Jira Premium)"**
+Push initiatives manually first, link epics under them, then run this skill — it handles Story → Sub-task only. For full hierarchy automation, extend the skill or run the Jira MCP `update_issue` directly to set the parent on epics.

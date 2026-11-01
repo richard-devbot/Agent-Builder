@@ -1,0 +1,128 @@
+---
+title: "Vibe-Coding Guardrails Policy"
+slug: "vibe-coding-guardrails-policy"
+description: "Generate a hard & soft guardrail policy for AI/vibe-coding: what's blocked, what's advised, and how each rule is enforced across the SDLC."
+type: template
+phase: design
+category: governance
+projectType: ["custom-app", "etl"]
+stack: []
+tags: ["governance", "guardrails", "vibe-coding", "responsible-ai", "policy", "enterprise"]
+difficulty: intermediate
+estimatedTime: "25 min"
+author: "Platform Engineering"
+featured: true
+createdAt: 2026-06-03
+updatedAt: 2026-06-03
+inputs:
+  - name: org_context
+    description: "Who codes with AI (pro/citizen devs), in what environments, and the risk appetite"
+    required: true
+  - name: regulatory_context
+    description: "Compliance regimes and confidentiality constraints (e.g. GDPR, client privilege, SOC 2)"
+    required: false
+  - name: tooling
+    description: "AI tools and enforcement points available (Claude Code skills, MCP, CI gates, IdP)"
+    required: false
+output:
+  format: markdown
+relatedAssets:
+  - "security-persona-rbac-matrix"
+  - "secure-coding-guardrails-skill"
+  - "pr-governance-gate-skill"
+---
+
+# Vibe-Coding Guardrails Policy
+
+Agenda item #1 made concrete: **AI Governance Framework & Vibe-Coding Guardrails**. This template generates a guardrail policy that distinguishes **hard guardrails** (blocking, enforced by a system) from **soft guardrails** (advisory, enforced by guidance), maps each rule to an SDLC phase, and names the exact enforcement point. It's the policy that the [secure-coding skill](/asset/skill/secure-coding-guardrails-skill) and [PR governance gate](/asset/skill/pr-governance-gate-skill) implement.
+
+## When to use
+
+- Authoring the governing policy for an enterprise AI/vibe-coding program.
+- Enabling citizen developers safely — the policy is what makes "let anyone build" defensible.
+- Producing the responsible-AI / governance artifact stakeholders sign off on.
+
+## Prompt
+
+````text
+You are an AI governance lead authoring a guardrail policy for AI-assisted and
+"vibe-coding" development. Distinguish HARD guardrails (blocking, machine-
+enforced) from SOFT guardrails (advisory, guidance-enforced). Make every rule
+specific, phase-mapped, and tied to a concrete enforcement point. Avoid vague
+principles — each rule must be checkable.
+
+## Organization context
+{{org_context}}
+
+## Regulatory & confidentiality context
+{{regulatory_context}}
+
+## Available tooling & enforcement points
+{{tooling}}
+
+## Method
+
+### 1. Set the guiding principles (brief)
+3-5 responsible-AI principles this policy operationalizes (e.g. human
+accountability, least privilege, data minimization, auditability, secure-by-
+default). Keep to one line each.
+
+### 2. Define HARD guardrails (blocking)
+Rules a system enforces and a violation cannot bypass. For each:
+- **Rule** (specific, checkable).
+- **Why** (risk it prevents).
+- **Enforcement point** (e.g. PR governance gate, MCP allowlist, secret
+  scanner, branch protection, sandbox isolation).
+- **SDLC phase** it applies in.
+Examples to consider: no secrets committed; no real production/PII data in
+prompts or sandboxes; no merge to protected branches without the governance
+gate; no unreviewed AI code to production; no disabling of security controls;
+no use of unapproved models/connectors for confidential data.
+
+### 3. Define SOFT guardrails (advisory)
+Good-practice rules enforced by guidance/skills, not blocking. For each: rule,
+why, and how it's surfaced (e.g. secure-coding skill notes, review checklist,
+PR template). Examples: prefer parameterized queries; disclose AI-generated
+code; add tests for changed behavior; cite sources for generated logic.
+
+### 4. Map to the SDLC
+A table showing which guardrails fire in each phase: Discover, Design, Build,
+Test, Deploy. Note the enforcing agent/hook per phase.
+
+### 5. Handling, exceptions, and accountability
+- Waiver process for hard guardrails (who approves, time-bound, logged).
+- What happens on violation (block + remediation guidance, not punishment).
+- Human accountability: a named human owns every AI-produced change merged.
+- Audit: what is logged and where, and the review cadence for the policy.
+
+## Output (Markdown)
+
+### 1. Principles
+### 2. Hard guardrails (table: Rule | Why | Enforcement point | Phase)
+### 3. Soft guardrails (table: Rule | Why | How surfaced | Phase)
+### 4. SDLC guardrail map (table: Phase | Hard | Soft | Enforcing hook/agent)
+### 5. Exceptions, accountability & audit
+### 6. Rollout notes — how each rule becomes real with the available tooling
+
+## Rules
+- Every hard guardrail names a system that enforces it. If nothing enforces it,
+  it's a soft guardrail — be honest about which is which.
+- Default secure: where a rule could be hard or soft, prefer hard for anything
+  touching secrets, production, or regulated data.
+- No rule that can't be checked. "Write secure code" is not a guardrail;
+  "no string-concatenated SQL (flagged by secure-coding skill, blocked by gate
+  on 🔴)" is.
+- A human is accountable for every merged AI change. State it explicitly.
+````
+
+## Tips
+
+- Be explicit about **hard vs. soft** — it's the distinction Hari demonstrated and the one stakeholders care about. A policy where everything is "recommended" governs nothing.
+- Pair every hard guardrail with its enforcement asset from this library so the policy is demonstrably *implemented*, not just written.
+- Keep the SDLC guardrail map on one slide — it's the single best artifact for the governance conversation.
+
+## Reading the output
+
+- The hard-guardrail table is your control list — each row should trace to a real enforcement point (gate, scanner, allowlist) before you call it "hard".
+- Use the SDLC map alongside [`AGENTS.md`](/contribute) so each phase's guardrails line up with the agent/hook that enforces them.
+- Review the policy on a fixed cadence; guardrails that aren't revisited become either ignored or obstructive.

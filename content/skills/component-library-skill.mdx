@@ -1,0 +1,263 @@
+---
+title: "Component Library Skill"
+slug: "component-library-skill"
+description: "Claude Code skill that generates accessible React components matching the project's design system, tokens, and naming conventions."
+type: skill
+phase: build
+category: frontend-development
+projectType: ["custom-app"]
+stack: ["claude-code", "react", "tailwind", "shadcn-ui"]
+tags: ["frontend", "components", "design-system"]
+difficulty: intermediate
+estimatedTime: "5 min setup"
+author: "Platform Engineering"
+featured: false
+createdAt: 2026-04-26
+updatedAt: 2026-04-26
+skillName: "component-library"
+requires: []
+files:
+  - SKILL.md
+relatedAssets:
+  - "shadcn-component-builder"
+  - "react-form-builder"
+---
+
+# Component Library Skill
+
+Activates when a developer asks for a UI component. Inspects the project's existing components for conventions (folder structure, naming, design tokens, primitives used), then generates a new component that fits in seamlessly.
+
+## When it triggers
+
+- "Build a [component type] that does [X]"
+- "Create a [Modal/Dropdown/Card/etc.]"
+- "I need a UI component for [Y]"
+- "Make me a custom [component name]"
+- After receiving wireframes or screenshots and being asked to implement
+
+## Why a skill
+
+Components written without project context end up looking foreign — wrong color tokens, wrong spacing scale, wrong naming convention. This skill matches the existing codebase's patterns rather than imposing generic ones.
+
+## Installation
+
+1. Copy this skill folder to `~/.claude/skills/component-library/`
+2. Restart Claude Code
+3. Try: "Build a stats card that shows a metric, label, and trend arrow"
+
+## SKILL.md content
+
+```markdown
+---
+name: component-library
+description: |
+  Use this skill when the user asks to build, create, or generate any UI
+  component. Triggers on: "build a [component]", "create a [Modal/Card/etc.]",
+  "I need a [component type]", "make me a custom [component]".
+
+  Specifically for component-level work, not full page scaffolding (different
+  skill: spec-driven-builder for that).
+
+  Adapts to the project's existing design system and conventions.
+---
+
+# Component Library
+
+You build accessible, type-safe React components that fit the project's
+existing design system. You inspect what's already there before you write
+anything new.
+
+## Process when activated
+
+### Step 1: Inspect the project
+
+Before writing code, quickly read:
+
+1. **Existing component folder.** Look for `components/`, `src/components/`,
+   `app/_components/`. Pick 1-2 components similar in nature to what's being
+   asked (e.g., another card if asked for a card). Note:
+   - File structure (single file vs folder per component)
+   - Naming convention (PascalCase, kebab-case)
+   - Default export vs named export
+   - Use of `forwardRef`, `displayName`
+   - Props pattern (interface vs type, optional fields)
+
+2. **Styling approach.** Check for:
+   - Tailwind config (`tailwind.config.ts`) for design tokens
+   - shadcn/ui components in `components/ui/`
+   - CSS modules / vanilla-extract / styled-components / etc.
+   - Theme variables / CSS custom properties
+
+3. **Utility helpers.** Look for:
+   - `lib/utils.ts` with `cn()` for className merging
+   - Custom hooks (e.g., `useMediaQuery`, `useDebounce`)
+   - Icon library (lucide-react, heroicons, custom)
+
+4. **Test patterns.** Look at one existing test to match:
+   - Vitest vs Jest
+   - React Testing Library
+   - Test file naming (`.test.tsx` vs `__tests__/`)
+
+If the project structure is unfamiliar or empty, ask:
+> "I'd like to match your existing patterns. Could you point me at one or two
+> components similar to what you want, or tell me which component library
+> you're using?"
+
+### Step 2: Clarify the component spec
+
+Ask 1-3 questions ONLY if needed:
+
+- **Variants:** "Should this support [common variants like size, intent,
+  emphasis]?"
+- **State:** "Is this controlled (parent passes state) or uncontrolled (manages
+  its own)? Or both?"
+- **Polymorphic:** "Should it render as different elements via `as` prop?"
+
+For simple components (a Card, a Badge), skip questions and proceed.
+
+### Step 3: Generate the component
+
+Files to produce (match project structure):
+
+**`components/[ComponentName].tsx`** (or `components/[component-name]/index.tsx`)
+- TypeScript strict
+- Export pattern matches project (default vs named)
+- Use `forwardRef` if it could ever need a ref
+- `displayName` set
+- `className` prop accepted and merged with `cn()`
+- Use existing primitives where possible (shadcn/ui Button, Input, etc.)
+- Match the project's icon library — don't introduce a new one
+
+**`components/[ComponentName].test.tsx`** (matching project's test convention)
+- Renders without crashing
+- Renders all required props correctly
+- Accessibility: has expected ARIA attributes
+- Interactions: 2-3 user-event tests for interactive components
+- Variants: snapshot or assertion per variant
+
+**`components/[ComponentName].stories.tsx`** (only if Storybook present in project)
+- One default story
+- Story per variant
+- Story per interactive state
+
+### Step 4: Accessibility (non-negotiable)
+
+Every component must:
+
+- **Semantic HTML.** `<button>` for buttons, not `<div onClick>`. `<nav>`,
+  `<main>`, `<section>` where appropriate.
+- **ARIA only when needed.** Native semantics first. Add `aria-*` only when
+  the native element doesn't convey the right meaning.
+- **Keyboard navigation.** Tab order works, focus visible, Escape closes modals
+  and dismisses popovers, Enter/Space activate buttons.
+- **Focus management.** Focus moves into modals on open, returns to trigger on
+  close. Focus visible with `:focus-visible` styling.
+- **Color contrast.** Use design tokens (which presumably meet WCAG); never
+  hardcode colors.
+- **Screen reader labels.** Every icon-only button has an `aria-label`. Loading
+  states have `aria-live="polite"` or `role="status"`.
+- **Reduced motion.** Respect `prefers-reduced-motion` for non-essential
+  animations.
+
+### Step 5: Output format
+
+For each file:
+1. Full file path (matching project convention)
+2. Complete code in fenced code block
+
+After the files:
+- **"## Used these primitives"** — list of shadcn/ui or library components used
+- **"## Accessibility checklist"** — bullet list of what was implemented
+- **"## Variants supported"** — list of supported props/variants
+- **"## What's NOT included"** — explicit non-features (e.g., "no animation",
+  "no async loading state")
+- **"## Future improvements"** — 2-3 enhancements the user might want later
+
+## Component patterns by type
+
+### Display components (Card, Badge, Avatar, Stat)
+- Compose primitives, minimal logic
+- All variants via props with discriminated unions if mutually exclusive
+- No state unless polymorphic
+
+### Form components (Input, Select, Checkbox, etc.)
+- Always pair with shadcn/ui Form components if project uses react-hook-form
+- Forwarded ref to the underlying input
+- Support `value` + `onChange` (controlled) and `defaultValue` (uncontrolled)
+- Forward all native HTML attributes via `...props`
+- Wrapper provides FormLabel + FormMessage hooks
+
+### Overlay components (Modal, Drawer, Popover, Tooltip)
+- Use Radix primitives via shadcn (Dialog, Popover, etc.) — don't reinvent
+- Open/close controlled OR uncontrolled (both supported)
+- Focus trap inside, return focus on close
+- Escape key closes
+- Click outside closes (configurable)
+- Portaled to body to avoid z-index issues
+
+### Layout components (Stack, Grid, Container)
+- Polymorphic via `as` prop (HTML element passed in)
+- Spacing via design tokens (no arbitrary px values)
+- Responsive props where appropriate (`gap={{ base: 2, md: 4 }}`)
+
+### Data components (Table, List, EmptyState)
+- Take generic `T` for the row data type
+- Render-prop pattern for cell rendering when columns are dynamic
+- Empty / loading / error states all defined
+
+## Anti-patterns to avoid
+
+- **Inline styles.** Use Tailwind classes or design tokens.
+- **Magic colors.** No `#3b82f6` in code; use `text-primary` / `bg-accent`.
+- **Hardcoded breakpoints.** Use Tailwind's responsive prefixes.
+- **className concatenation with `+`.** Always use `cn()`.
+- **Conditional rendering of attributes that should be undefined.**
+  Use `aria-hidden={isHidden || undefined}` not `aria-hidden={isHidden}` —
+  the latter renders `aria-hidden="false"` which is semantically different.
+- **Reinventing shadcn/ui primitives.** If shadcn has a Button, use it.
+- **Missing TypeScript types on event handlers.** `onClick: (e:
+  React.MouseEvent<HTMLButtonElement>) => void`, not `onClick: any`.
+- **Components that do too much.** A "DashboardCard" that handles loading,
+  empty, error, and 5 variants is probably 5 components masquerading as one.
+
+## Matching design tokens
+
+When the user has a `tailwind.config.ts` with custom theme, ALWAYS reference
+its tokens:
+
+- Colors: `bg-primary`, `text-foreground`, `border-border`
+- Spacing: `p-4`, `gap-2` (don't invent `p-3.5` if 4 isn't enough — pick
+  another standard)
+- Typography: `text-sm`, `font-medium`
+- Radius: `rounded-md` from theme
+
+If the user has shadcn/ui set up, the CSS variables are the source of truth.
+Use semantic tokens (primary, secondary, muted, accent, destructive) not raw
+colors.
+
+## Tips for the developer
+
+- Test the component manually with keyboard only (Tab, Shift+Tab, Enter)
+- Test with a screen reader if possible (VoiceOver on Mac is built in)
+- Test in dark mode if the project supports it (most shadcn projects do)
+- Check the component renders correctly at multiple widths (320px, 768px,
+  1280px)
+```
+
+## Pairing with other skills
+
+- **Spec-Driven Builder** generates whole pages — this skill handles individual components
+- **Code Reviewer** can review generated components against accessibility rules
+- **Test Generator** can add deeper test coverage if the basic tests aren't enough
+
+## Tips
+
+- For teams with strict design systems (custom tokens, no shadcn), the skill adapts based on what it finds in the project — you don't need to configure it explicitly
+- For teams using Storybook heavily, the skill auto-detects and generates stories
+- The skill is conservative on visual design — it produces functional components, not opinionated visual flourishes. Add visual polish manually after.
+
+## Limitations
+
+- Doesn't generate animations or motion design (that's a separate concern; use Framer Motion / GSAP manually)
+- Doesn't infer design intent from screenshots — describe the component or paste a Figma link
+- Won't restructure your existing component library — only adds new components in the existing pattern

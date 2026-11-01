@@ -1,0 +1,90 @@
+name: Dev Backend — Validate & Deploy
+
+# POC: validate backend Lambdas on the dev branch (only when backend code
+# changes), then deploy to the same sdlc-playbook-<fn> functions main uses.
+# dev and main share the functions — last push wins. No VPC config here.
+on:
+  push:
+    branches: [dev]
+    paths:
+      - "backend/**"
+      - ".github/workflows/dev-backend.yml"
+  workflow_dispatch:
+
+jobs:
+  backend:
+    name: Backend — ${{ matrix.function }} Lambda
+    runs-on: ubuntu-latest
+    # Secrets live in the "dev" GitHub Environment — the job must opt in to see them.
+    environment: dev
+    strategy:
+      fail-fast: false
+      matrix:
+        function: [author-skill, repo-discovery, kit-advisor]
+    env:
+      AWS_REGION: ${{ vars.AWS_REGION || 'us-east-1' }}
+      FUNCTION_NAME: sdlc-playbook-${{ matrix.function }}
+    defaults:
+      run:
+        working-directory: backend/${{ matrix.function }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: backend/${{ matrix.function }}/package-lock.json
+      # Root deps too — the shared contracts/ schemas resolve zod from the repo root.
+      - run: npm ci
+        working-directory: .
+      - run: npm ci
+      - run: npm run typecheck
+      - run: npm run build
+
+      # ── Deploy (validation above must pass first) ──
+      - name: Zip bundle
+        run: cd dist && zip -q function.zip index.mjs
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      # Creates the function on first run (execution role sdlc-playbook-lambda-role,
+      # ARN built from the account id), updates it on every run after.
+      # Deploy user needs lambda:CreateFunction + iam:PassRole on that role.
+      - name: Create or update function code
+        run: |
+          if aws lambda get-function --function-name "$FUNCTION_NAME" >/dev/null 2>&1; then
+            echo "Updating existing function $FUNCTION_NAME"
+            aws lambda update-function-code \
+              --function-name "$FUNCTION_NAME" \
+              --zip-file fileb://dist/function.zip \
+              --publish
+            aws lambda wait function-updated --function-name "$FUNCTION_NAME"
+          else
+            ROLE_NAME="${{ vars.LAMBDA_ROLE_NAME || 'sdlc-playbook-lambda-role' }}"
+            ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text)
+            ROLE_ARN="arn:aws:iam::${ACCOUNT_ID}:role/${ROLE_NAME}"
+            echo "Creating function $FUNCTION_NAME with role $ROLE_ARN"
+            aws lambda create-function \
+              --function-name "$FUNCTION_NAME" \
+              --runtime nodejs22.x \
+              --handler index.handler \
+              --role "$ROLE_ARN" \
+              --timeout 60 \
+              --memory-size 512 \
+              --zip-file fileb://dist/function.zip \
+              --publish
+            aws lambda wait function-active --function-name "$FUNCTION_NAME"
+          fi
+
+      - name: Update runtime configuration
+        run: |
+          aws lambda update-function-configuration \
+            --function-name "$FUNCTION_NAME" \
+            --handler index.handler \
+            --environment "Variables={BEDROCK_MODEL_ID=${{ vars.BEDROCK_MODEL_ID || 'us.amazon.nova-pro-v1:0' }},BEDROCK_REGION=${{ vars.BEDROCK_REGION || vars.AWS_REGION || 'us-east-1' }},ALLOWED_ORIGIN=${{ vars.ALLOWED_ORIGIN || '*' }}}"
+          aws lambda wait function-updated --function-name "$FUNCTION_NAME"

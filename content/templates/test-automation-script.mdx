@@ -1,0 +1,157 @@
+---
+title: "Test Automation Script from a Test Case"
+slug: "test-automation-script"
+description: "Convert a single test case into a maintainable automated test in the language and framework you choose."
+type: template
+phase: test
+category: e2e-testing
+projectType: ["custom-app"]
+stack: ["playwright", "cypress", "jest", "vitest", "pytest"]
+tags: ["qa", "automation", "e2e", "test-design"]
+difficulty: intermediate
+estimatedTime: "10 min"
+author: "Platform Engineering"
+createdAt: 2026-04-26
+updatedAt: 2026-04-26
+inputs:
+  - name: test_case
+    description: "The single test case to automate (paste the TC-NNN block from the test-cases template)"
+    required: true
+  - name: language
+    description: "Target language — typescript | javascript | python | java"
+    required: true
+  - name: framework
+    description: "Target framework — playwright | cypress | vitest | jest | pytest | behave"
+    required: true
+  - name: existing_helpers
+    description: "Existing helpers / page objects / fixtures to reuse (optional)"
+    required: false
+output:
+  format: code
+relatedAssets:
+  - "test-cases-from-user-story"
+  - "user-story-gherkin"
+  - "code-review-comprehensive"
+---
+
+# Test Automation Script from a Test Case
+
+Convert a single test case into an automated test that fits the language and framework you actually use. Output is one runnable file with arrange / act / assert sections clearly marked, comments only where the WHY is non-obvious, and reuse of existing helpers when listed.
+
+## When to use
+
+- A test case from the **Test Cases from a User Story** template needs to land in CI
+- You want every automated test to follow the same arrange/act/assert structure
+- You're onboarding a new framework and want a clean reference to copy from
+
+## Prompt
+
+```text
+You are an expert test automation engineer. Convert the following test case
+into a clean, maintainable automated test in the requested language and
+framework.
+
+## Test case
+
+{{test_case}}
+
+## Language
+
+{{language}}
+
+## Framework
+
+{{framework}}
+
+## Existing helpers / page objects / fixtures available for reuse
+
+{{existing_helpers}}
+
+## Output requirements
+
+Return a single fenced code block containing the complete test file. The
+block should include:
+
+1. The minimum imports needed for the chosen framework.
+2. Any new fixture / helper / page-object stubs at the TOP of the file (or
+   noted in a comment if they belong elsewhere).
+3. ONE test that maps 1:1 to the supplied test case — do not roll multiple
+   cases into one.
+4. Clear arrange / act / assert sections, separated by blank lines, with
+   short section comments only when the WHY is non-obvious.
+5. Selectors that prefer accessible roles / labels / test-ids over CSS / XPath.
+6. Explicit waits tied to user-visible state — never `sleep`.
+7. Cleanup if the test creates state (afterEach / fixture teardown).
+
+Do NOT:
+
+- Write commentary outside the code block.
+- Add framework boilerplate that doesn't apply to this single test
+  (e.g. no global config files).
+- Hard-code timeouts longer than 30s.
+- Use `console.log` / `print` in the final code unless they fail the test.
+- Re-implement helpers listed in `existing_helpers` — call them.
+
+Style guide:
+
+- Test name: a sentence describing the behavior, not the implementation
+  ("can request a reset email", not "POST /reset endpoint test").
+- Variable names: `expectedX`, `actualX` so assertions read naturally.
+- One assertion concept per assertion line — chain only when the framework
+  requires it.
+- For UI flows: prefer `getByRole` / `getByLabel` / `data-testid` selectors.
+- For API flows: assert status code AND a representative subset of the body
+  (don't snapshot the whole response).
+
+After the code block, return a single short paragraph (no header) listing:
+
+- Any helpers / fixtures the file assumes that don't exist yet (so the
+  reviewer knows what to create).
+- Any environment variables or test accounts the test requires.
+- Whether the test is safe to run in parallel with itself.
+```
+
+## Example output
+
+```typescript
+// tests/auth/password-reset.request.spec.ts
+import { test, expect } from "@playwright/test";
+import { signedOut } from "../fixtures/auth";
+import { mailbox } from "../fixtures/mailbox";
+
+test.describe("Password reset", () => {
+  test("can request a reset email with a registered address", async ({ page }) => {
+    // ── arrange ───────────────────────────────────────────────────────
+    await signedOut(page);
+    const email = "qa+pwreset@example.com";
+    await mailbox.empty(email);
+
+    // ── act ───────────────────────────────────────────────────────────
+    await page.goto("/sign-in");
+    await page.getByRole("link", { name: "Forgot password" }).click();
+    await page.getByLabel("Email").fill(email);
+    await page.getByRole("button", { name: "Send reset link" }).click();
+
+    // ── assert ────────────────────────────────────────────────────────
+    await expect(
+      page.getByText("If that email exists, a reset link is on its way."),
+    ).toBeVisible();
+
+    // ── assert (out of band) ──────────────────────────────────────────
+    const message = await mailbox.waitFor(email, {
+      subject: /Reset your password/i,
+      timeoutMs: 30_000,
+    });
+    expect(message.links.find((l) => /\/reset\?token=[A-Za-z0-9_-]{32,}/.test(l)))
+      .toBeTruthy();
+  });
+});
+```
+
+Helpers used (assumed to exist): `fixtures/auth#signedOut(page)` and `fixtures/mailbox#{empty,waitFor}` — create these if not already present. Requires `MAILBOX_API_URL` env var. Safe to run in parallel with itself when each invocation uses a unique `email` — keep the qa+timestamp pattern when forking this test.
+
+## Tips
+
+- Always pass `existing_helpers` if you have any — the model will call them rather than reinventing.
+- For pytest + behave, point the model at your `environment.py` patterns by pasting them into `existing_helpers`.
+- If you want a parameterized version of one test (multiple data rows), regenerate the test case via the Gherkin template's Scenario Outline, then run this prompt again.

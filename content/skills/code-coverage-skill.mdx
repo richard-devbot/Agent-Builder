@@ -1,0 +1,606 @@
+---
+title: "Code Coverage Skill"
+slug: "code-coverage-skill"
+description: "Configure and enforce test coverage with Vitest's v8 provider — 80% thresholds, per-directory overrides, CI reporting, uncovered-code triage, and coverage-driven test prioritization."
+type: skill
+phase: test
+category: unit-testing
+projectType: ["custom-app"]
+stack: ["typescript", "react", "jest"]
+tags: ["testing", "coverage", "vitest", "ci", "quality"]
+difficulty: intermediate
+estimatedTime: "10 min setup"
+author: "Platform Engineering"
+featured: false
+createdAt: 2026-06-09
+updatedAt: 2026-06-09
+skillName: "code-coverage"
+requires: []
+files:
+  - SKILL.md
+relatedAssets:
+  - "vitest-unit-test-generator"
+  - "test-generator-skill"
+  - "pr-governance-gate-skill"
+---
+
+# Code Coverage Skill
+
+Sets up and enforces test coverage with Vitest's v8 provider: threshold configuration, per-directory overrides, CI reporting with GitHub Actions, uncovered-code identification, per-feature tracking, and coverage-driven test prioritization. Use it when configuring coverage, investigating uncovered code, or enforcing thresholds.
+
+## When to use
+
+- Standing up coverage configuration for a TypeScript/React (Vitest) project.
+- Enforcing minimum coverage in CI and surfacing it on pull requests.
+- Triaging uncovered lines and prioritizing the highest-impact tests to write.
+
+## Installation
+
+1. Copy this skill to `~/.claude/skills/code-coverage/`, or commit it to the repo's `.claude/skills/`.
+2. Restart Claude Code.
+3. Ask it to set up or check coverage — it follows these patterns.
+
+## SKILL.md content
+
+````markdown
+---
+name: code-coverage
+description: Code coverage configuration and enforcement for RAISE migration. Vitest v8 coverage provider setup, threshold enforcement (80% branches/statements/functions/lines), coverage reporting in CI with GitHub Actions, uncovered code identification, per-feature coverage tracking, and coverage-driven testing prioritization. Use when configuring coverage, investigating uncovered code, or enforcing coverage thresholds.
+---
+
+# Code Coverage Patterns
+
+## RAISE Coverage Requirements
+
+Every migrated module must achieve minimum 80% coverage across branches, statements, functions, and lines before it is approved. Coverage is measured with Vitest's v8 provider and enforced in CI.
+
+## Vitest Coverage Configuration
+
+### vitest.config.ts
+
+```typescript
+// vitest.config.ts (or test section in vite.config.ts)
+import { defineConfig } from 'vitest/config';
+import react from '@vitejs/plugin-react';
+import { resolve } from 'path';
+
+export default defineConfig({
+  plugins: [react()],
+  resolve: {
+    alias: {
+      '@': resolve(__dirname, 'src'),
+    },
+  },
+  test: {
+    globals: true,
+    environment: 'jsdom',
+    setupFiles: ['./src/test/setup.ts'],
+    include: ['src/**/*.{test,spec}.{ts,tsx}'],
+    coverage: {
+      provider: 'v8',
+      reporter: ['text', 'text-summary', 'lcov', 'html', 'json-summary'],
+      reportsDirectory: './coverage',
+      include: ['src/**/*.{ts,tsx}'],
+      exclude: [
+        'src/**/*.d.ts',
+        'src/**/*.test.{ts,tsx}',
+        'src/**/*.spec.{ts,tsx}',
+        'src/**/__tests__/**',
+        'src/**/__mocks__/**',
+        'src/**/test/**',
+        'src/test/**',
+        'src/vite-env.d.ts',
+        'src/main.tsx',
+        'src/App.tsx',           // Thin shell -- tested via E2E
+        'src/app/router.tsx',    // Route config -- tested via E2E
+      ],
+      thresholds: {
+        branches: 80,
+        functions: 80,
+        lines: 80,
+        statements: 80,
+      },
+    },
+  },
+});
+```
+
+### Package.json Scripts
+
+```json
+{
+  "scripts": {
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "test:coverage": "vitest run --coverage",
+    "test:coverage:open": "vitest run --coverage && open-cli coverage/index.html",
+    "test:coverage:check": "vitest run --coverage --coverage.thresholds.100"
+  }
+}
+```
+
+## Coverage Thresholds
+
+### Global Thresholds
+
+```typescript
+// Default thresholds for the entire codebase
+coverage: {
+  thresholds: {
+    branches: 80,
+    functions: 80,
+    lines: 80,
+    statements: 80,
+  },
+}
+```
+
+### Per-Directory Thresholds
+
+```typescript
+// Higher thresholds for critical modules
+coverage: {
+  thresholds: {
+    // Global defaults
+    branches: 80,
+    functions: 80,
+    lines: 80,
+    statements: 80,
+
+    // Per-directory overrides (stricter for critical paths)
+    'src/features/action-items/**': {
+      branches: 90,
+      functions: 90,
+      lines: 90,
+      statements: 90,
+    },
+    'src/features/pdr/**': {
+      branches: 90,
+      functions: 90,
+      lines: 90,
+      statements: 90,
+    },
+    'src/api/**': {
+      branches: 95,
+      functions: 95,
+      lines: 95,
+      statements: 95,
+    },
+    // Lower for generated or thin layers
+    'src/stores/**': {
+      branches: 70,
+      functions: 70,
+      lines: 70,
+      statements: 70,
+    },
+  },
+}
+```
+
+## Coverage Reporting in CI
+
+### GitHub Actions Workflow
+
+```yaml
+# .github/workflows/coverage.yml
+name: Test Coverage
+
+on:
+  pull_request:
+    branches: [main, RaiseReactApp]
+  push:
+    branches: [main]
+
+jobs:
+  coverage:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: raiseapp/package-lock.json
+
+      - name: Install dependencies
+        working-directory: raiseapp
+        run: npm ci
+
+      - name: Run tests with coverage
+        working-directory: raiseapp
+        run: npm run test:coverage
+
+      - name: Upload coverage to artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage-report
+          path: raiseapp/coverage/
+          retention-days: 14
+
+      - name: Coverage summary comment
+        if: github.event_name == 'pull_request'
+        uses: davelosert/vitest-coverage-report-action@v2
+        with:
+          working-directory: raiseapp
+          json-summary-path: coverage/coverage-summary.json
+          json-final-path: coverage/coverage-final.json
+          vite-config-path: vitest.config.ts
+
+      - name: Enforce coverage thresholds
+        working-directory: raiseapp
+        run: |
+          node -e "
+            const summary = require('./coverage/coverage-summary.json');
+            const total = summary.total;
+            const thresholds = { branches: 80, functions: 80, lines: 80, statements: 80 };
+            let failed = false;
+            for (const [key, min] of Object.entries(thresholds)) {
+              const actual = total[key].pct;
+              if (actual < min) {
+                console.error('FAIL: ' + key + ' coverage ' + actual + '% < ' + min + '%');
+                failed = true;
+              } else {
+                console.log('PASS: ' + key + ' coverage ' + actual + '% >= ' + min + '%');
+              }
+            }
+            if (failed) process.exit(1);
+          "
+```
+
+### PR Comment Format
+
+The `vitest-coverage-report-action` generates a PR comment like:
+
+```
+## Coverage Report
+
+| Category   | Covered | Total | Percentage |
+|------------|---------|-------|------------|
+| Statements | 1,234   | 1,400 | 88.14%     |
+| Branches   | 456     | 520   | 87.69%     |
+| Functions  | 234     | 280   | 83.57%     |
+| Lines      | 1,180   | 1,350 | 87.41%     |
+
+### Changed Files
+
+| File | Statements | Branches | Functions | Lines |
+|------|------------|----------|-----------|-------|
+| src/features/pdr/PdrGrid.tsx | 92% | 88% | 100% | 91% |
+| src/hooks/usePdr.ts | 85% | 80% | 90% | 84% |
+```
+
+## Branch / Statement / Function Coverage
+
+### Understanding Coverage Types
+
+```typescript
+// STATEMENT coverage -- every line executed at least once
+function calculate(a: number, b: number): number {
+  const sum = a + b;      // Statement 1
+  const product = a * b;  // Statement 2
+  return sum + product;   // Statement 3
+}
+
+// BRANCH coverage -- every if/else path taken
+function getStatus(score: number): string {
+  if (score >= 80) {        // Branch 1: true path
+    return 'pass';          // Branch 1a
+  } else if (score >= 60) { // Branch 2: true path
+    return 'marginal';      // Branch 2a
+  } else {                  // Branch 3: else path
+    return 'fail';          // Branch 3a
+  }
+}
+// To get 100% branch: test score=90, score=70, score=40
+
+// FUNCTION coverage -- every function called at least once
+export function fetchData() { /* ... */ }     // Function 1
+export function transformData() { /* ... */ } // Function 2
+export function validateData() { /* ... */ }  // Function 3
+// To get 100%: call all three functions
+```
+
+### Testing All Branches
+
+```typescript
+// src/utils/getStatusColor.ts
+export function getStatusColor(status: string): string {
+  switch (status) {
+    case 'ACTIVE': return '#4caf50';
+    case 'PENDING': return '#ff9800';
+    case 'REJECTED': return '#f44336';
+    case 'INACTIVE': return '#9e9e9e';
+    default: return '#000000';
+  }
+}
+
+// src/utils/__tests__/getStatusColor.test.ts
+import { describe, it, expect } from 'vitest';
+import { getStatusColor } from '../getStatusColor';
+
+describe('getStatusColor', () => {
+  // Test EVERY branch for 100% branch coverage
+  it.each([
+    ['ACTIVE', '#4caf50'],
+    ['PENDING', '#ff9800'],
+    ['REJECTED', '#f44336'],
+    ['INACTIVE', '#9e9e9e'],
+    ['UNKNOWN', '#000000'],  // default branch
+  ])('returns correct color for %s', (status, expectedColor) => {
+    expect(getStatusColor(status)).toBe(expectedColor);
+  });
+});
+```
+
+## Uncovered Code Identification
+
+### Finding Uncovered Lines
+
+```bash
+# Run coverage and open HTML report
+npm run test:coverage
+# Open coverage/index.html in browser
+
+# Or use text reporter to see uncovered lines in terminal
+npx vitest run --coverage --reporter=verbose
+```
+
+### Coverage Report Interpretation
+
+```
+File                        | % Stmts | % Branch | % Funcs | % Lines | Uncovered Line #s
+----------------------------|---------|----------|---------|---------|-------------------
+src/features/pdr/           |         |          |         |         |
+  PdrGrid.tsx               |   92.3  |   83.3   |  100.0  |   91.7  | 45-48, 72
+  usePdr.ts                 |   85.7  |   80.0   |   90.0  |   84.2  | 23, 56-60
+  pdrService.ts             |   78.9  |   66.7   |   80.0  |   77.8  | 34-42, 67-70
+```
+
+Interpretation:
+- Lines 45-48 in PdrGrid.tsx are not covered (likely an error handling branch)
+- Lines 56-60 in usePdr.ts are not covered (likely an edge case)
+- pdrService.ts at 78.9% is below the 80% threshold and will fail CI
+
+### Targeted Coverage Improvement
+
+```typescript
+// When coverage report shows uncovered error handling:
+// PdrGrid.tsx lines 45-48 (error state branch)
+
+// Add test specifically for that branch:
+it('renders error state when PDR fetch fails', () => {
+  mockUsePdr.mockReturnValue({
+    isLoading: false,
+    data: undefined,
+    error: new Error('Network error'),
+  });
+
+  render(<PdrGrid />);
+  expect(screen.getByRole('alert')).toHaveTextContent(/failed to load/i);
+  // This covers lines 45-48
+});
+```
+
+## Per-Feature Coverage Tracking
+
+### Coverage by Feature Module
+
+```bash
+# Check coverage for a specific feature
+npx vitest run --coverage src/features/action-items/
+
+# Check coverage for API layer
+npx vitest run --coverage src/api/
+
+# Check coverage for hooks
+npx vitest run --coverage src/hooks/
+```
+
+### Feature Coverage Dashboard Script
+
+```typescript
+// scripts/coverage-dashboard.ts
+import { readFileSync } from 'fs';
+
+interface CoverageSummary {
+  [key: string]: {
+    statements: { pct: number };
+    branches: { pct: number };
+    functions: { pct: number };
+    lines: { pct: number };
+  };
+}
+
+const summary: CoverageSummary = JSON.parse(
+  readFileSync('coverage/coverage-summary.json', 'utf-8')
+);
+
+const features = new Map<string, {
+  stmts: number[];
+  branches: number[];
+  funcs: number[];
+  lines: number[];
+}>();
+
+for (const [filePath, metrics] of Object.entries(summary)) {
+  if (filePath === 'total') continue;
+
+  const match = filePath.match(/src\/features\/([^/]+)/);
+  const feature = match ? match[1] : 'other';
+
+  if (!features.has(feature)) {
+    features.set(feature, { stmts: [], branches: [], funcs: [], lines: [] });
+  }
+
+  const f = features.get(feature)!;
+  f.stmts.push(metrics.statements.pct);
+  f.branches.push(metrics.branches.pct);
+  f.funcs.push(metrics.functions.pct);
+  f.lines.push(metrics.lines.pct);
+}
+
+console.log('\n=== Coverage by Feature ===\n');
+console.log(
+  'Feature'.padEnd(25) + 'Stmts'.padEnd(10) +
+  'Branch'.padEnd(10) + 'Funcs'.padEnd(10) + 'Lines'
+);
+console.log('-'.repeat(65));
+
+const avg = (arr: number[]) =>
+  arr.length
+    ? (arr.reduce((a, b) => a + b, 0) / arr.length).toFixed(1)
+    : 'N/A';
+
+for (const [feature, metrics] of features) {
+  const stmts = avg(metrics.stmts);
+  const branches = avg(metrics.branches);
+  const funcs = avg(metrics.funcs);
+  const lines = avg(metrics.lines);
+
+  const status = [stmts, branches, funcs, lines].every(
+    (v) => v !== 'N/A' && parseFloat(v) >= 80
+  ) ? 'PASS' : 'FAIL';
+
+  console.log(
+    `${status === 'FAIL' ? '[!] ' : '    '}` +
+    `${feature.padEnd(21)}${stmts.padEnd(10)}` +
+    `${branches.padEnd(10)}${funcs.padEnd(10)}${lines}`
+  );
+}
+```
+
+## Coverage-Driven Testing Prioritization
+
+### Finding High-Impact Uncovered Code
+
+```bash
+# Find files with lowest coverage (most impactful to test)
+npx vitest run --coverage --reporter=json > /dev/null 2>&1
+node -e "
+  const summary = require('./coverage/coverage-summary.json');
+  const files = Object.entries(summary)
+    .filter(([k]) => k !== 'total')
+    .map(([file, m]) => ({
+      file: file.replace(process.cwd() + '/', ''),
+      avg: (m.statements.pct + m.branches.pct + m.functions.pct + m.lines.pct) / 4,
+      uncovered: m.statements.total - m.statements.covered,
+    }))
+    .sort((a, b) => a.avg - b.avg)
+    .slice(0, 10);
+
+  console.log('\nTop 10 files needing tests:\n');
+  files.forEach((f, i) => {
+    console.log(
+      (i+1) + '. ' + f.file +
+      ' (' + f.avg.toFixed(1) + '% avg, ' +
+      f.uncovered + ' uncovered stmts)'
+    );
+  });
+"
+```
+
+### Ignoring Intentionally Uncovered Code
+
+```typescript
+// Use v8 ignore comments sparingly and only with justification
+
+/* v8 ignore start -- dev-only debugging utility */
+export function debugLog(msg: string): void {
+  if (import.meta.env.DEV) {
+    console.log(`[DEBUG] ${msg}`);
+  }
+}
+/* v8 ignore stop */
+
+// Single line ignore
+const result = condition
+  ? valueA
+  : /* v8 ignore next */ valueB; // Defensive fallback, never reached in normal flow
+```
+
+## Test Setup File
+
+```typescript
+// src/test/setup.ts
+import '@testing-library/jest-dom/vitest';
+import { cleanup } from '@testing-library/react';
+import { afterEach, vi } from 'vitest';
+
+// Cleanup after each test
+afterEach(() => {
+  cleanup();
+  vi.restoreAllMocks();
+});
+
+// Mock IntersectionObserver
+const mockIntersectionObserver = vi.fn();
+mockIntersectionObserver.mockReturnValue({
+  observe: vi.fn(),
+  unobserve: vi.fn(),
+  disconnect: vi.fn(),
+});
+window.IntersectionObserver = mockIntersectionObserver;
+
+// Mock ResizeObserver (needed for AG Grid)
+window.ResizeObserver = vi.fn().mockImplementation(() => ({
+  observe: vi.fn(),
+  unobserve: vi.fn(),
+  disconnect: vi.fn(),
+}));
+
+// Mock matchMedia
+Object.defineProperty(window, 'matchMedia', {
+  writable: true,
+  value: vi.fn().mockImplementation((query: string) => ({
+    matches: false,
+    media: query,
+    onchange: null,
+    addListener: vi.fn(),
+    removeListener: vi.fn(),
+    addEventListener: vi.fn(),
+    removeEventListener: vi.fn(),
+    dispatchEvent: vi.fn(),
+  })),
+});
+```
+
+## Anti-Patterns
+
+```typescript
+// NEVER: Write tests just to hit coverage numbers
+it('covers line 42', () => {
+  const result = someFunction(); // Bad -- no assertion, just execution
+});
+
+// ALWAYS: Write meaningful assertions
+it('returns formatted date for valid input', () => {
+  expect(formatDate('2026-01-15')).toBe('Jan 15, 2026');
+});
+
+// NEVER: Use v8 ignore to hide poor test coverage
+/* v8 ignore start */
+export function criticalBusinessLogic() { /* ... */ } // Bad
+/* v8 ignore stop */
+
+// NEVER: Set coverage thresholds to 0 to "fix" CI
+coverage: { thresholds: { branches: 0 } } // Bad
+
+// ALWAYS: Address coverage gaps with real tests
+
+// NEVER: Count E2E coverage toward unit coverage thresholds
+// E2E and unit coverage serve different purposes
+```
+
+## Integration with Other Skills
+
+- **testing-patterns**: Factory functions and test structure feed into coverage
+- **playwright-e2e**: E2E tests provide integration coverage (separate from unit)
+- **performance-testing**: Coverage runs should not be included in performance benchmarks
+- **react-ui-patterns**: All 4 UI states (error, loading, empty, data) must be covered
+- **accessibility-testing**: a11y unit tests (jest-axe) contribute to coverage
+````
+
+## Note
+
+The embedded skill references a specific "RAISE migration" project and branch names (`RaiseReactApp`, `raiseapp/`). Treat those as examples — adjust working directories, branch filters, and per-directory thresholds to your repo. Pairs naturally with the **coverage gate** (hard CI block) described in the engineering-standards plan.

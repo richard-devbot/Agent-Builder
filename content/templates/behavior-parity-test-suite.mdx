@@ -1,0 +1,244 @@
+---
+title: "Behavior Parity Test Suite"
+slug: "behavior-parity-test-suite"
+description: "Generate tests that lock down current legacy behavior so the new system doesn't accidentally change it during migration."
+type: template
+phase: test
+category: e2e-testing
+projectType: ["custom-app"]
+stack: []
+tags: ["migration", "testing", "parity", "regression"]
+difficulty: intermediate
+estimatedTime: "1-2 days"
+author: "Platform Engineering"
+featured: true
+createdAt: 2026-04-26
+updatedAt: 2026-04-26
+inputs:
+  - name: legacy_capability
+    description: "The capability/feature being migrated (e.g., 'order checkout flow')"
+    required: true
+  - name: legacy_app_url_or_endpoint
+    description: "URL or API endpoint of the legacy system"
+    required: true
+  - name: known_inputs
+    description: "Range of inputs the system handles (sample data, edge cases, error inputs)"
+    required: true
+output:
+  format: code
+relatedAssets:
+  - "legacy-system-audit"
+  - "strangler-fig-migration-plan"
+  - "playwright-e2e-generator"
+---
+
+# Behavior Parity Test Suite
+
+When migrating a legacy system, the most dangerous bug is one users notice and you don't. A "small UI tweak" or "more accurate calculation" in the new system might be a regression to a user who depended on the old behavior — including the bugs.
+
+This template generates a parity test suite that captures current behavior as ground truth, then verifies the new system matches it.
+
+## When to use
+
+- Before you start migrating a capability
+- After Legacy System Audit, alongside Strangler Fig Plan
+- For every slice in the migration sequence
+- For any feature where stakeholder sign-off requires "no behavior changes"
+
+## Prompt
+
+````text
+You are a senior QA engineer who has saved many migrations from regression
+disasters. Generate a behavior parity test suite for the legacy capability
+below.
+
+## Input
+
+**Capability:** {{legacy_capability}}
+**Legacy app URL/endpoint:** {{legacy_app_url_or_endpoint}}
+**Known input range:** {{known_inputs}}
+
+## Output
+
+Produce a parity test framework that:
+
+### 1. Captures current behavior (golden master testing)
+
+For each test case, the framework:
+- Sends a defined input to the legacy system
+- Records the response (HTTP body, status, headers, side effects)
+- Stores it as a "golden" reference
+
+This is run against the legacy system to build the corpus of expected behavior.
+
+### 2. Validates new system matches
+
+For each test case, run the same input against the new system, compare to the golden response, report differences.
+
+### 3. Test types to include
+
+Generate test cases across all of these categories:
+
+#### Happy paths (canonical inputs)
+The "obvious" cases that should work. Cover all major variations of the
+capability.
+
+#### Edge cases (known boundaries)
+- Empty inputs, null fields
+- Maximum-length strings
+- Boundary numbers (0, -1, max int)
+- Unicode and special characters
+- Various date formats and time zones
+- Currency values with edge precision (.005 rounding)
+
+#### Error inputs (what currently produces errors)
+The current error responses ARE part of the contract. The new system must
+produce the same errors for the same inputs.
+- Validation failures
+- Unauthorized requests
+- Not found cases
+- Conflict cases
+
+#### Quirks and bugs (the hardest part)
+Things the legacy system does "wrong" but consistently. Examples from real
+migrations:
+- Phone numbers stored with whitespace ("(555) 123-4567" vs "5551234567")
+- Email comparison case-sensitive (so "User@example.com" ≠ "user@example.com")
+- Trailing whitespace in names that downstream systems depend on
+- A specific error message text that's parsed by another system
+- Date displayed as "MM/dd/yyyy" but stored as "yyyy-MM-dd"
+- Sort order that's stable due to clustered index, not explicit ORDER BY
+
+If the new system "fixes" these, it breaks downstream consumers and trains
+support tickets. Capture them as expected behavior.
+
+#### Performance characteristics
+- Response time on typical inputs (so we don't ship a much slower system unknowingly)
+- Memory or DB load patterns
+
+#### Side effects (the easily missed ones)
+- Audit log entries created
+- Email notifications sent
+- Database rows updated in OTHER tables (cascading triggers!)
+- Cache invalidations
+- Files written
+- Webhooks fired
+
+### 4. Test framework code
+
+Generate a complete test framework that:
+
+**For HTTP-based legacy systems:**
+
+```typescript
+// tests/parity/framework.ts
+- A function to run an HTTP request and capture the response
+- A function to compare two responses (with configurable tolerance)
+- A function to "snapshot" a golden response to a file
+- A test runner that runs all golden cases against legacy + new
+- Reporting: pass / fail / divergent
+```
+
+**For UI-based legacy systems (WebForms etc.):**
+
+Use Playwright with both legacy and new URLs. Compare:
+- Page text content
+- Form behavior (which fields are present, what validation runs)
+- Navigation flow (clicking X goes to Y)
+- Error messages displayed
+
+**For DB-mediated systems:**
+
+Test cases capture DB state changes:
+- INSERT/UPDATE the same data via legacy and new code
+- Compare resulting DB rows for parity (excluding timestamps)
+
+### 5. Tolerance configuration
+
+Not all differences are bugs. Configure tolerance:
+
+- **Ignore:** timestamp fields, request IDs, server hostnames
+- **Allow but warn:** whitespace differences, ordering of arrays
+- **Strict match:** all business-meaningful values
+
+Make this configurable per test case.
+
+### 6. Generate 30-50 test cases
+
+Produce concrete test cases for the capability. Mix:
+- 10-15 happy paths (variations of canonical use)
+- 10-15 edge cases (boundaries)
+- 5-10 error cases
+- 5-10 known quirks (you'll need to discover these by testing legacy)
+
+Each test case has:
+- Name (descriptive)
+- Input
+- Expected golden response (or "capture from legacy first")
+- Tolerance config
+- Why it matters
+
+### 7. Recording vs verifying modes
+
+The same test runs in two modes:
+
+**Record mode** (`PARITY_MODE=record`):
+- Hits legacy system
+- Saves response as golden file under `tests/parity/golden/`
+- Used once to build the corpus
+
+**Verify mode** (`PARITY_MODE=verify`):
+- Hits new system
+- Compares against golden file
+- Fails the test if response diverges beyond tolerance
+
+CI runs in verify mode against the new system on every PR.
+
+### 8. Output files to generate
+
+- `tests/parity/framework.ts` — the framework
+- `tests/parity/cases/{{capability}}.spec.ts` — the actual test cases
+- `tests/parity/golden/.gitkeep` — folder for captured responses
+- `tests/parity/README.md` — how to use, record, verify
+- `package.json` updates — test scripts for record and verify modes
+
+## Quality bar
+
+- Every test case has a descriptive name (not "test_1")
+- Every quirk test case has a comment explaining why the quirk exists
+- Golden files are checked into git (they're the contract)
+- Tests are deterministic (same input → same output, no flakiness)
+- Performance assertions are loose (±50% to avoid CI flakiness, but catch 10x regressions)
+
+## What NOT to do
+
+- Don't use the parity tests to test new functionality (use regular tests)
+- Don't update golden files casually — every change is a behavior change
+- Don't skip quirks because "we should fix that anyway" (fix it AFTER the migration completes)
+- Don't run record mode in CI (it captures whatever it finds, defeating the point)
+````
+
+## How to use the output
+
+1. **Build the framework first.** Get record + verify modes working before writing many test cases.
+2. **Run record mode against the legacy system** to capture golden responses. This is one-time work per capability.
+3. **Review the captured responses.** Some quirks are accidental; flag them for explicit decisions.
+4. **Run verify mode against the new system** as you develop it. Fail loudly on divergence.
+5. **Commit golden files to git.** They're the migration contract.
+6. **Treat changes to golden files as changes to behavior** — require explicit review.
+
+## Tips
+
+- For UI parity, screenshots help but generate too much noise. Prefer behavioral tests (text content, interactive behavior) over pixel diffs.
+- For API parity, sort JSON keys and arrays before comparing (unless ordering is meaningful).
+- Some quirks are bugs that need fixing — but fix them in a *separate* migration after parity is achieved, with explicit communication to users.
+- Performance parity is the trickiest. Use percentile-based assertions (p95 < 1.5x legacy p95) not absolute numbers.
+
+## Common mistakes to avoid
+
+- "Improving" behavior during migration (every change must be intentional)
+- Pixel-perfect screenshot diffs (too brittle)
+- Skipping side effects (the email that no longer sends; the audit log that's missing)
+- Tests that depend on shared state from previous tests
+- Not committing golden files
+- Running record mode in CI

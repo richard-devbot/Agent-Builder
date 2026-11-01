@@ -1,0 +1,151 @@
+---
+title: "PostgreSQL Schema Designer"
+slug: "postgres-schema-designer"
+description: "Design a normalized PostgreSQL schema with indexes, constraints, and migration files."
+type: template
+phase: design
+category: database-design
+projectType: ["custom-app"]
+stack: ["postgres", "sql"]
+tags: ["database", "schema", "migrations"]
+difficulty: intermediate
+estimatedTime: "20 min"
+author: "Platform Engineering"
+featured: true
+createdAt: 2026-04-26
+updatedAt: 2026-04-26
+inputs:
+  - name: domain_description
+    description: "Describe your domain in plain English (entities, relationships, key behaviors)"
+    required: true
+  - name: scale
+    description: "Expected scale (rows per table, read/write ratio)"
+    required: false
+output:
+  format: code
+relatedAssets:
+  - "rest-api-scaffolder-nodejs"
+  - "migration-script-generator"
+---
+
+# PostgreSQL Schema Designer
+
+Design a normalized PostgreSQL schema for your domain, including tables, relationships, indexes, constraints, and a migration file ready to run.
+
+## When to use
+
+- Starting a new project and need to model the database
+- Adding a new feature area with multiple new tables
+- Want a sanity check on your schema design
+
+## Prompt
+
+````text
+You are a senior database architect. Design a PostgreSQL schema for the
+following domain.
+
+## Input
+
+**Domain description:**
+{{domain_description}}
+
+**Expected scale:**
+{{scale}}
+
+## Output
+
+Produce four sections:
+
+### 1. Entity Relationship Summary
+
+A bulleted overview:
+- List every entity (table)
+- For each: 2-3 sentence description, expected row count, key relationships
+
+### 2. Schema rationale
+
+Explain key design choices:
+- Normalization level (3NF unless you justify denormalizing)
+- UUIDs vs serial IDs
+- Soft delete vs hard delete
+- Audit columns (created_at, updated_at, created_by)
+- Any denormalization for read performance
+- Where you considered partitioning
+
+### 3. SQL DDL
+
+A single SQL file with:
+- All CREATE TABLE statements in dependency order
+- All foreign keys with ON DELETE/UPDATE specified
+- All indexes (with comments explaining why each exists)
+- All CHECK constraints
+- All UNIQUE constraints
+- Triggers for `updated_at` automation
+- ENUMs as PostgreSQL ENUM types or CHECK-constrained text
+- Comments on tables and key columns
+
+Use these conventions:
+- Lowercase, snake_case identifiers
+- Plural table names (`users`, not `user`)
+- Foreign keys named `<referenced_table>_id`
+- Index names: `idx_<table>_<columns>`
+- Junction tables: `<a>_<b>` alphabetical
+
+### 4. Migration file
+
+Format the DDL as a numbered migration file: `migrations/0001_initial_schema.sql`
+With matching `migrations/0001_initial_schema.down.sql` (drop in reverse order).
+
+## Quality checklist
+
+Before output, verify:
+- [ ] No circular foreign keys
+- [ ] Every table has a primary key
+- [ ] Every foreign key has a matching index (Postgres doesn't auto-index FKs)
+- [ ] Timestamps are TIMESTAMPTZ (timezone-aware), not TIMESTAMP
+- [ ] Money columns use NUMERIC(precision, scale), not FLOAT
+- [ ] Strings have explicit max lengths or use TEXT with CHECK
+- [ ] Soft-delete columns (if any) have partial indexes excluding deleted rows
+- [ ] Junction tables have composite primary keys
+````
+
+## Example input
+
+```text
+domain_description: |
+  Multi-tenant SaaS for project management. Customers (organizations)
+  have users with roles (owner, admin, member). Each org has projects.
+  Projects have tasks. Tasks have assignees, due dates, and statuses.
+  Users can comment on tasks. Soft-delete projects and tasks.
+scale: |
+  ~500 orgs, ~10K users, ~100K projects, ~5M tasks. 80% read.
+```
+
+## Example output snippet
+
+```sql
+-- migrations/0001_initial_schema.sql
+
+CREATE EXTENSION IF NOT EXISTS "pgcrypto";
+
+CREATE TYPE user_role AS ENUM ('owner', 'admin', 'member');
+CREATE TYPE task_status AS ENUM ('todo', 'in_progress', 'blocked', 'done');
+
+CREATE TABLE organizations (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  name TEXT NOT NULL CHECK (length(name) BETWEEN 1 AND 200),
+  slug TEXT NOT NULL UNIQUE CHECK (slug ~ '^[a-z0-9-]+$'),
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+COMMENT ON TABLE organizations IS 'Top-level tenant in the multi-tenant model';
+-- ...
+```
+
+## Tips
+
+- For multi-tenant apps, decide row-level vs schema-level isolation up front and document it
+- Always plan for soft-delete from day one — it's painful to retrofit
+- Index foreign keys explicitly (Postgres doesn't do this automatically)
+- Use `EXPLAIN ANALYZE` on your top 5 expected queries before shipping

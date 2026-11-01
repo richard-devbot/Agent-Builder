@@ -1,0 +1,450 @@
+---
+title: "DB2 for i to Relational Database Mapping"
+slug: "db2-for-i-to-relational-mapping"
+description: "Map DB2 for i schemas (with multi-member files, logical files, journaling, DDS extensions) to a modern relational database — Postgres, SQL Server, or Azure SQL."
+type: template
+phase: design
+category: database-design
+projectType: ["custom-app", "etl"]
+stack: ["ibm-i", "rpg", "postgres", "sql"]
+tags: ["migration", "rpg", "as400", "ibm-i", "db2", "data"]
+difficulty: advanced
+estimatedTime: "1-2 days per major schema"
+author: "Platform Engineering"
+featured: false
+createdAt: 2026-04-26
+updatedAt: 2026-04-26
+inputs:
+  - name: source_description
+    description: "DB2 for i schema description (libraries, files in scope, total tables/files)"
+    required: true
+  - name: dds_or_ddl
+    description: "DDS source for files OR DDL output from DSPFD/extracted SQL DDL"
+    required: true
+  - name: access_patterns
+    description: "How data is currently accessed (native I/O via RPG CHAIN/READ, embedded SQL, RUNSQL, ODBC)"
+    required: true
+  - name: target_engine
+    description: "Target relational engine (Postgres / SQL Server / Azure SQL / Oracle)"
+    required: true
+  - name: data_volume
+    description: "Approximate record count and growth rate"
+    required: false
+output:
+  format: code
+relatedAssets:
+  - "rpg-modernization-playbook"
+  - "data-migration-plan"
+  - "sql-server-schema-translator"
+---
+
+# DB2 for i to Relational Database Mapping
+
+DB2 for i is integrated into IBM i — every AS/400 / iSeries / IBM i system has it. Unlike VSAM (alien to most engineers), DB2 for i is closer to a standard relational database. **But** it has IBM i-specific quirks that don't translate directly: multi-member physical files, logical files used as views/indexes, DDS-defined columns, journaling, commitment control, and integrated security.
+
+This template handles the translation: from DB2 for i specifics to a clean modern schema.
+
+## When to use
+
+- Migrating data from IBM i to cloud / on-prem relational DB
+- The new application uses standard SQL access patterns
+- You need a clean schema, not a literal port of DB2 for i quirks
+
+## How DB2 for i differs from "regular" DB2 / SQL Server / Postgres
+
+If you're a modern engineer who hasn't worked with IBM i:
+
+| Concept | DB2 for i | Standard relational |
+|---------|-----------|---------------------|
+| Tables | Physical files (PF) — DDS or SQL-defined | CREATE TABLE |
+| Multiple members per file | Yes — same schema, different data sets | No equivalent (use partitioning or separate tables) |
+| Logical files (LF) | Views with SELECT/OMIT, key paths, joins | Views, materialized views, indexes |
+| DDS columns | Field-level extensions (text, headings, edit codes) | Column-level metadata mostly absent |
+| Journaling | Built-in journal receivers | Transaction log (separate concept) |
+| Commitment control | Per-job, can span files | Transactions per connection |
+| Authority | Object-level permissions, library lists | GRANT/REVOKE on tables |
+| Identity columns | IDENTITY (modern) or unique keys via RPG counter | IDENTITY / SERIAL / GENERATED |
+| Triggers | Native triggers (added later); program triggers (older) | Standard triggers |
+| Stored procedures | SQL procedures (modern) or external programs (RPG/CL) | Standard procedures |
+| Date/time types | DATE, TIME, TIMESTAMP (standard) | Same |
+| Numeric types | DECIMAL, NUMERIC, INTEGER (standard) — but RPG often uses zoned/packed | Standard |
+
+**Compared to VSAM/IMS, DB2 for i migrations are easier.** It's mostly relational already. The challenges are around IBM i-specific features (multi-member, logical files, journaling) and the access patterns built around RPG native I/O.
+
+## Prompt
+
+````text
+You are a senior database architect with deep IBM i and modern database
+expertise. Translate the DB2 for i schema to the target engine, handling
+IBM i-specific features explicitly.
+
+## Input
+
+**Source description:**
+{{source_description}}
+
+**DDS / DDL source:**
+```
+{{dds_or_ddl}}
+```
+
+**Access patterns:**
+{{access_patterns}}
+
+**Target engine:** {{target_engine}}
+**Data volume:** {{data_volume}}
+
+## Output
+
+A multi-section deliverable:
+
+### 1. File / table inventory
+
+For each physical file (PF), document:
+
+| Source file | Library | Type | DDS/DDL | Members | Records | Target table |
+|-------------|---------|------|---------|---------|---------|---------------|
+| CUSTMAST | PRODLIB | PF | DDS | 1 | 250K | customers |
+| ORDHDR | PRODLIB | PF | DDS | 1 | 5M | order_headers |
+| ORDARC | PRODLIB | PF | DDS | 12 (one per month) | 60M | order_archive (partitioned by month) |
+| TXNLOG | PRODLIB | PF | SQL | 1 | 200M | transaction_log |
+
+For each, note:
+- **Type:** PF (physical file = table) or LF (logical file = view/index)
+- **DDS or SQL-defined:** different translation paths
+- **Member count:** files with multiple members need migration strategy decision
+- **Record format:** does it use multiple record formats? (rare, but exists)
+
+### 2. Multi-member physical files
+
+DB2 for i allows multiple members in one PF — same schema, separate data sets. RPG and CL can switch members at runtime via OVRDBF.
+
+For each multi-member file, decide migration strategy:
+
+**Option A: Partitioned table** (recommended for time-based partitioning)
+```sql
+-- DB2 for i: ORDARC with members M202401, M202402, ... M202412
+-- Postgres equivalent:
+CREATE TABLE order_archive (
+    order_id BIGINT,
+    customer_id BIGINT,
+    order_date DATE,
+    -- ... other fields
+    archive_period DATE GENERATED ALWAYS AS (DATE_TRUNC('month', order_date)) STORED
+) PARTITION BY RANGE (archive_period);
+
+CREATE TABLE order_archive_2024_01 PARTITION OF order_archive
+    FOR VALUES FROM ('2024-01-01') TO ('2024-02-01');
+-- ... etc
+```
+
+**Option B: Separate tables** (if members were genuinely independent)
+- Each member becomes its own table
+- Application code must select which table
+
+**Option C: Single table with discriminator column** (if members were a workaround for size limits)
+- Add a "member" column
+- Combine all members into one table
+- Filter queries by member column where needed
+
+Document the rationale for each choice.
+
+### 3. Logical files
+
+Logical files (LFs) in DB2 for i serve multiple purposes:
+- **Indexes** (key access path)
+- **Views** (SELECT/OMIT for filtering)
+- **Joins** (multi-PF logical files)
+- **Format adapter** (different field selection from same PF)
+
+For each LF, classify and translate:
+
+| Logical file | Purpose | Source PF | Target equivalent |
+|--------------|---------|-----------|--------------------|
+| CUSTMASTL1 | Index by CUSTNO | CUSTMAST | CREATE INDEX |
+| ACTCUST | View: only active customers | CUSTMAST WHERE STATUS='A' | CREATE VIEW (or partial index) |
+| CUSTORD | Join: customers + their orders | CUSTMAST + ORDHDR | CREATE VIEW with JOIN |
+| CUSTSUB | Subset of fields from CUSTMAST | CUSTMAST | Often unnecessary in modern (just SELECT subset) |
+
+For multi-PF logical files (joins):
+- These were performance optimizations on IBM i
+- Modern equivalents: CREATE VIEW with proper indexes on underlying tables
+- Materialized view if query is expensive and data updates infrequently
+
+### 4. DDS field extensions
+
+DDS captures column-level metadata that pure SQL doesn't:
+
+| DDS keyword | Purpose | Modern equivalent |
+|-------------|---------|--------------------|
+| TEXT | Field description | COMMENT ON COLUMN |
+| COLHDG | Column heading for queries | COMMENT or naming |
+| EDTCDE / EDTWRD | Display formatting | Application-layer concern (drop) |
+| CHECK | Validation rules | CHECK constraint |
+| RANGE | Numeric range | CHECK constraint |
+| VALUES | Enum-like list | CHECK constraint or domain |
+| DFT | Default value | DEFAULT |
+| ALWNULL | Allow null | NULL/NOT NULL |
+| REFFLD | Reference field for inheritance | (Drop; not portable) |
+
+For migration, preserve TEXT and COLHDG as comments on the target columns. Translate CHECK / RANGE / VALUES as proper SQL constraints. Drop EDTCDE (it's display formatting, not data validation).
+
+### 5. Field-by-field type mapping
+
+For each column in DDS/DDL, map to target type:
+
+| DDS / DB2i type | DB2 for i internal | Modern (Postgres) | Modern (SQL Server) |
+|------------------|---------------------|---------------------|----------------------|
+| `S 7 0` (signed numeric, 7 digits) | NUMERIC(7,0) | INTEGER or NUMERIC(7) | INT or NUMERIC(7) |
+| `P 9 2` (packed decimal, 9 digits, 2 decimal) | DECIMAL(9,2) | NUMERIC(9,2) | DECIMAL(9,2) |
+| `B 9 0` (binary) | INTEGER or BIGINT | INTEGER / BIGINT | INT / BIGINT |
+| `A 50` (alpha 50) | CHAR(50) | VARCHAR(50) | VARCHAR(50) |
+| `A 50 VARLEN` | VARCHAR(50) | VARCHAR(50) | VARCHAR(50) |
+| `L` (date) | DATE | DATE | DATE |
+| `T` (time) | TIME | TIME | TIME |
+| `Z` (timestamp) | TIMESTAMP | TIMESTAMP | DATETIME2 |
+| `O` (DBCS) | GRAPHIC | (UTF-8 native) | NVARCHAR |
+| `G` (DBCS open) | VARGRAPHIC | (UTF-8 native) | NVARCHAR |
+
+For RPG-style column definitions:
+- `PIC 9(7)V99` (RPG D-spec) → NUMERIC(9,2)
+- `PIC X(50)` → VARCHAR(50)
+- `PIC L` (date) → DATE
+
+Watch for:
+- **Implicit zoned decimal** in older DDS — 1 byte per digit + sign
+- **Implicit packed decimal** — 2 digits per byte + sign nibble
+- **CCSID** (character encoding) — DB2 for i uses EBCDIC code pages; target uses UTF-8
+
+### 6. Keys and indexes
+
+For each PF, document keys:
+
+```
+Source DDS:
+A          R CUSTREC
+A            CUSTNO         7P 0
+A            CUSTNAME      50A
+A            CUSTSTAT       1A
+A          K CUSTNO
+```
+
+Translates to:
+```sql
+CREATE TABLE customers (
+    cust_no BIGINT NOT NULL,
+    cust_name VARCHAR(50),
+    cust_stat CHAR(1),
+    PRIMARY KEY (cust_no)
+);
+```
+
+For LFs that define alternate access paths:
+```
+Source LF:
+A          R CUSTREC PFILE(CUSTMAST)
+A          K CUSTSTAT
+A          K CUSTNO
+A          S CUSTSTAT  COMP(EQ 'A')
+```
+
+Translates to a partial index:
+```sql
+CREATE INDEX idx_customers_active_status_no
+    ON customers (cust_stat, cust_no)
+    WHERE cust_stat = 'A';
+```
+
+Don't blindly create an index for every LF. Verify the new application
+actually needs each access path.
+
+### 7. Journaling
+
+DB2 for i has built-in journaling. If files are journaled:
+- Document which files (most production files are)
+- Note recovery scenarios (point-in-time restore)
+- For migration: target must have equivalent (transaction log + backup strategy)
+
+For ongoing CDC during migration:
+- IBM CDC (now Qlik Replicate) reads journal receivers
+- Reads are non-disruptive
+- Standard pattern for IBM i → cloud DB sync
+
+### 8. Commitment control
+
+If the application uses commitment control (`COMMIT` / `ROLLBACK` in RPG/CL):
+- Document scope (file-level commitment scope)
+- Translates to standard transactions in modern
+- Watch for cross-file transactions (common in DB2 for i; need explicit transaction in modern)
+
+If the application doesn't use commitment control:
+- Each I/O is implicitly committed
+- Modern target needs explicit transaction strategy
+- Often a chance to ADD transaction integrity that was missing
+
+### 9. Triggers
+
+For each trigger:
+
+**SQL triggers:** Translate to target SQL trigger syntax
+
+**Program triggers (older — calls RPG/CL):**
+- Often hold significant business logic
+- Better to migrate logic to application code (testability, observability)
+- Don't translate to target as triggers; rewrite as application services
+
+### 10. Schema DDL output
+
+Generate target SQL DDL:
+
+```sql
+-- Schema for migrated CUSTMAST
+-- Source: PRODLIB.CUSTMAST (DDS-defined PF)
+-- Migration date: [date]
+-- Original record count: 250,000
+
+CREATE TABLE customers (
+    cust_no BIGINT PRIMARY KEY,
+    cust_name VARCHAR(50) NOT NULL,
+    cust_stat CHAR(1) NOT NULL DEFAULT 'A'
+        CHECK (cust_stat IN ('A', 'I', 'D', 'P')),  -- Active/Inactive/Deleted/Prospect
+    cust_email VARCHAR(100),
+    cust_phone VARCHAR(20),
+    cust_addr_1 VARCHAR(50),
+    cust_addr_2 VARCHAR(50),
+    cust_city VARCHAR(40),
+    cust_state CHAR(2),
+    cust_zip VARCHAR(10),
+    cust_country CHAR(3) DEFAULT 'USA',
+    -- Migrated from DDS field RESERV1 PIC X(20); verified unused
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+COMMENT ON TABLE customers IS
+    'Migrated from DB2 for i PRODLIB.CUSTMAST. See migration log [date].';
+COMMENT ON COLUMN customers.cust_stat IS
+    'A=Active, I=Inactive, D=Deleted, P=Prospect. Originally DDS VALUES list.';
+
+-- Indexes for access paths used by RPG programs
+-- (was logical file CUSTMASTL2 in original)
+CREATE INDEX idx_customers_email ON customers (cust_email);
+
+-- (was logical file CUSTACTL — only active customers, by region)
+CREATE INDEX idx_customers_active_state
+    ON customers (cust_state, cust_no)
+    WHERE cust_stat = 'A';
+```
+
+Add comments documenting source for every table and important column.
+
+### 11. ETL strategy
+
+For DB2 for i → target:
+
+**One-time backfill:**
+- Tools: AWS DMS for DB2 for i, IBM CDC, Qlik Replicate, custom Java/.NET ETL
+- For text-only data, even simple ODBC bulk extract works
+- Volume estimate and time
+
+**Ongoing sync (during migration):**
+- Journal-based CDC (read journal receivers) — minimal IBM i impact
+- Polling-based (last_modified) — works if you have such columns
+- Application-level dual-write — most invasive but most controlled
+
+**Validation queries:**
+```sql
+-- Row count parity
+SELECT COUNT(*) FROM customers;
+
+-- Aggregate parity
+SELECT cust_stat, COUNT(*), SUM(...)
+FROM customers
+GROUP BY cust_stat;
+
+-- Spot-check sampling
+SELECT * FROM customers WHERE cust_no IN (1001, 5000, 10000, ...);
+```
+
+### 12. Indexes for access patterns
+
+Map source access patterns to target indexes:
+
+| Source pattern | Implementation | Target index |
+|----------------|---------------|---------------|
+| RPG CHAIN by primary key | PF key access | PRIMARY KEY (covered) |
+| RPG CHAIN by alternate key | LF key access | CREATE INDEX |
+| RPG SETLL/READ in key order | LF key access | Same index, ordered scan |
+| RPG SETLL/READE on subset | LF with SELECT/OMIT | Partial index |
+| Embedded SQL SELECT WHERE | DB2 query optimizer | Same index strategy |
+| RUNQRY dynamic queries | Various access paths | Indexes per common predicate |
+
+Don't blindly add an index per LF. Verify new application uses them.
+
+### 13. Encoding (CCSID)
+
+DB2 for i typically uses EBCDIC (CCSID 37 for US English, others vary).
+Target databases use UTF-8.
+
+Migration:
+- Most data converts losslessly to UTF-8
+- Watch for shop-specific characters, hex non-printable
+- Sort order changes: EBCDIC sorts numbers AFTER letters; UTF-8 sorts numbers BEFORE letters
+- Document any ORDER BY queries affected
+
+For each text column, decide:
+- Trim trailing spaces (DB2 for i pads CHAR; target may not)
+- Normalize case (legacy often UPPER; modern often mixed)
+- Handle blank as NULL where appropriate
+
+### 14. Open questions
+
+Things you can't determine from schema alone:
+
+- "Field RESERV2 PIC X(20) — purpose unknown; preserved as text. Confirm with SME."
+- "DDS REFFLD pulls from external definition library; need that library to fully resolve."
+- "Multi-member file ARCHFILE — meaning of member naming convention unclear."
+- "LF CUSTSPC has computed field — formula unclear; need RPG that uses it."
+
+Each open question:
+- Where it surfaces
+- Who could answer (SME, RPG code review, DDS analysis)
+- Default assumption
+- Risk of wrong default
+
+## Quality bar
+
+- Every column has explicit target type (no "depends")
+- Multi-member files have explicit migration strategy
+- Logical files classified (index vs view vs join)
+- DDS extensions translated (TEXT/COLHDG → comments, CHECK/RANGE → constraints)
+- Encoding strategy documented
+- Validation queries provided
+- Open questions listed honestly
+
+## Style
+
+- Specific to actual DDS/DDL provided
+- Match recommendations to actual target_engine
+- Honest about ambiguity
+- Include comments in DDL for traceability
+````
+
+## Tips
+
+- **Start with the most-used files.** A typical IBM i shop has 200-500 files, but the top 50 cover most use.
+- **Pull DDS even if files are SQL-defined.** Older shops mix; you need both views.
+- **Test with realistic data volumes.** DB2 for i optimizer behavior on tens of millions of records may differ from cloud target.
+- **Don't overlook journaling.** Many shops journal everything; target needs equivalent durability.
+- **Pair with RPG Business Rule Extraction.** Schema captures structure; rule extraction captures meaning.
+- **For multi-member files, audit usage.** Some are partitioning workarounds; some are genuine multi-data-set scenarios.
+
+## Common mistakes to avoid
+
+- **Treating LFs as if they're all indexes.** Some are views, some are joins; classify before translating.
+- **Ignoring CCSID / encoding.** EBCDIC → UTF-8 issues surface as garbled characters days later.
+- **Dropping DDS metadata silently.** TEXT and COLHDG are documentation; preserve as comments.
+- **Skipping multi-member analysis.** Migration discovers them at the worst time if not planned.
+- **Adding an index per LF.** Some LFs are dead; new app may not use them.
+- **Forgetting journaling / commitment control.** Target durability strategy must match.
+- **Translating program triggers as DB triggers.** They often hold business logic better placed in app code.

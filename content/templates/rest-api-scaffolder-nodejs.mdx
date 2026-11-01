@@ -1,0 +1,154 @@
+---
+title: "REST API Scaffolder (Node.js)"
+slug: "rest-api-scaffolder-nodejs"
+description: "Scaffold a production-ready REST API with Express, validation, error handling, and OpenAPI docs."
+type: template
+phase: build
+category: api-development
+projectType: ["custom-app"]
+stack: ["nodejs", "express", "typescript"]
+tags: ["boilerplate", "rest", "openapi"]
+difficulty: intermediate
+estimatedTime: "30 min"
+author: "Platform Engineering"
+featured: true
+createdAt: 2026-04-26
+updatedAt: 2026-04-26
+inputs:
+  - name: resource_name
+    description: "The resource (e.g., 'product', 'order')"
+    required: true
+  - name: fields
+    description: "JSON describing fields and types"
+    required: true
+  - name: auth_required
+    description: "Should endpoints require auth? (yes/no)"
+    required: true
+output:
+  format: code
+relatedAssets:
+  - "openapi-spec-generator"
+  - "database-schema-from-resources"
+  - "express-error-handler"
+---
+
+# REST API Scaffolder (Node.js)
+
+Generate a complete CRUD REST API for a single resource using Express + TypeScript with production-grade patterns: input validation, structured error handling, OpenAPI documentation, and unit-testable controllers.
+
+## When to use
+
+- Starting a new Node.js backend service
+- Adding a new resource to an existing API
+- Want a consistent pattern across services
+
+## Prompt
+
+````text
+You are a senior backend engineer. Generate a production-ready REST API for
+the resource described below using Node.js, Express, and TypeScript.
+
+## Input
+
+**Resource name:** {{resource_name}}
+**Fields:**
+```json
+{{fields}}
+```
+**Auth required:** {{auth_required}}
+
+## Requirements
+
+Generate the following files in a clear folder structure:
+
+1. **routes/{{resource_name}}.routes.ts** - Express router with endpoints:
+   - GET /{{resource_name}}s (list, with pagination + filtering)
+   - GET /{{resource_name}}s/:id (get one)
+   - POST /{{resource_name}}s (create)
+   - PUT /{{resource_name}}s/:id (full update)
+   - PATCH /{{resource_name}}s/:id (partial update)
+   - DELETE /{{resource_name}}s/:id (delete)
+
+2. **controllers/{{resource_name}}.controller.ts** - Controller functions, thin layer that calls services and shapes the response
+
+3. **services/{{resource_name}}.service.ts** - Business logic layer, database-agnostic
+
+4. **schemas/{{resource_name}}.schema.ts** - Zod schemas for:
+   - Create payload validation
+   - Update payload validation
+   - Query params validation (pagination, filters)
+   - Response shape
+
+5. **types/{{resource_name}}.types.ts** - TypeScript types derived from Zod schemas using `z.infer`
+
+6. **middleware/validate.ts** - Generic middleware that validates against a Zod schema
+
+7. **errors/api-error.ts** - Custom `ApiError` class with `statusCode`, `code`, `message`, `details`
+
+8. **middleware/error-handler.ts** - Global error handler that converts errors to consistent JSON responses
+
+9. **openapi/{{resource_name}}.yaml** - OpenAPI 3.1 spec for these endpoints
+
+## Standards
+
+- All endpoints return JSON with shape: `{ data: T }` for success, `{ error: { code, message, details } }` for errors
+- Pagination: query params `?page=1&pageSize=20` with response meta `{ data, meta: { page, pageSize, total } }`
+- Filtering: query params like `?status=active&createdAfter=2024-01-01`
+- Auth: if required, use `requireAuth` middleware (assume it's imported from `../middleware/auth`)
+- HTTP status codes:
+  - 200 for successful GET, PUT, PATCH
+  - 201 for successful POST (return Location header)
+  - 204 for successful DELETE
+  - 400 for validation errors (with field-level details)
+  - 401 for missing/invalid auth
+  - 403 for forbidden
+  - 404 for not found
+  - 409 for conflicts (e.g., duplicate)
+  - 500 for unexpected errors
+
+## Constraints
+
+- Use ES modules (import/export)
+- Use async/await, no callbacks
+- No `any` types; use `unknown` and narrow
+- Service layer must be testable without HTTP mocking
+- All Zod schemas exported for reuse in tests
+
+## Output format
+
+Show each file with:
+1. The full file path
+2. The complete code in a fenced code block with `ts` syntax
+
+After all files, include a "## Wiring" section showing how to register the router in `app.ts`.
+
+After that, include a "## Tests to add" section listing 5-8 critical test cases (don't write the tests, just list them).
+````
+
+## Example input
+
+```yaml
+resource_name: product
+fields:
+  id: string (uuid, generated)
+  name: string (required, 1-200 chars)
+  sku: string (required, unique)
+  price: number (required, > 0)
+  status: enum [draft, active, archived]
+  createdAt: datetime (generated)
+  updatedAt: datetime (generated)
+auth_required: yes
+```
+
+## Tips
+
+- For complex resources, split into multiple controllers (e.g., separate read vs. write controllers)
+- Pair with the **Database Schema Generator** to keep the data model in sync
+- Pair with the **OpenAPI Spec Generator** for richer API docs
+- Add the resulting OpenAPI YAML to your CI to prevent drift
+
+## Limitations
+
+- Doesn't generate database access (use a DB-specific template after)
+- Assumes Express; for Fastify or NestJS, use the variants of this template
+- Doesn't include rate limiting or caching — add those at the gateway layer

@@ -1,0 +1,227 @@
+---
+title: "Test Cases — Comprehensive (5-Category)"
+slug: "test-case-comprehensive"
+description: "Generate test cases across 5 categories — Positive, Negative, Edge, Integration, UI/UX — with priority, preconditions, automation flag, and test-data references."
+type: template
+phase: test
+category: e2e-testing
+projectType: ["custom-app"]
+stack: ["playwright", "cypress", "jest", "pytest"]
+tags: ["qa", "test-design", "test-cases", "ready-for-jira"]
+difficulty: intermediate
+estimatedTime: "20 min"
+author: "Platform Engineering"
+createdAt: 2026-04-26
+updatedAt: 2026-04-26
+inputs:
+  - name: elaborated_story
+    description: "The elaborated user story in markdown (from user-story-elaboration-detailed) or any user story with ACs"
+    required: true
+  - name: integrations
+    description: "Comma-separated list of third-party integrations involved (Stripe, Avalara, Auth0, MuleSoft, etc.)"
+    required: false
+  - name: test_data_notes
+    description: "Available test accounts, fixtures, sandbox URLs, or known test data IDs"
+    required: false
+output:
+  format: markdown
+relatedAssets:
+  - "user-story-elaboration-detailed"
+  - "user-story-from-prd"
+  - "user-story-gherkin"
+  - "test-cases-from-user-story"
+  - "test-automation-script"
+  - "regression-bed-master"
+---
+
+# Test Cases — Comprehensive (5-Category)
+
+Generate test cases across **5 categories** — Positive, Negative, Edge, Integration, UI/UX — with strict per-category minimums. Each test case is a structured table (ID, category, title, priority, preconditions, steps, expected result, test-data ref, automation flag, notes) ready to drop into TestRail / Xray / Zephyr / Jira sub-tasks.
+
+This is the heavyweight cousin of `test-cases-from-user-story` (which is a lighter Markdown-list format). Use the comprehensive variant when QA needs a structured artifact for sign-off, or when the story is being pushed into a test-management tool that expects rigid fields.
+
+## When to use
+
+- The story is high-priority, customer-facing, or in a regulated flow
+- You need to satisfy a "minimum N tests per story" quality gate
+- The output goes into TestRail / Xray / Zephyr / Jira sub-tasks
+- The story will be regression-tested forever — coverage matters
+
+## Prompt
+
+```text
+You are a senior QA engineer responsible for comprehensive test design.
+Generate test cases for the following elaborated user story across 5
+mandatory categories with strict per-category minimums.
+
+## Inputs
+
+**Elaborated story:** {{elaborated_story}}
+
+**Third-party integrations involved:** {{integrations}}
+
+**Test data notes:** {{test_data_notes}}
+
+## Output requirements
+
+Return ONLY the markdown document below. Do not include preamble or
+closing notes.
+
+---
+
+# Test Cases: <STORY-ID> — <Story Title>
+
+> **Linked Story**: <STORY-ID>_elaborated.md
+> **Generated**: <today's date YYYY-MM-DD>
+> **Total Test Cases**: <count>
+
+## Summary Table
+
+| TC ID | Category | Title | Priority | Automation? |
+|---|---|---|---|---|
+| TC-<ID>-001 | Positive | ... | High / Medium / Low | Yes / No |
+| ... | | | | |
+
+## Coverage Matrix
+
+| Acceptance Criterion | Positive TCs | Negative TCs | Edge TCs |
+|---|---|---|---|
+| AC-1 | TC-<ID>-001, TC-<ID>-002 | TC-<ID>-005 | TC-<ID>-008 |
+| ... | | | |
+
+## 🟢 Category 1 — Positive / Happy Path
+
+> **Minimum: 3 test cases**
+
+### TC-<ID>-001
+
+| Field | Value |
+|---|---|
+| **Test Case ID** | TC-<ID>-001 |
+| **Category** | Positive — Happy Path |
+| **Title** | <one-line description> |
+| **Priority** | High / Medium / Low |
+| **Preconditions** | <what must be true before the test runs> |
+| **Test Steps** | 1. <step> <br> 2. <step> <br> 3. <step> |
+| **Expected Result** | <exact behavior — be specific> |
+| **Test Data Ref** | TD-<ID>-XXX |
+| **Automation** | Yes — Playwright / Cypress / Jest / API |
+| **Linked AC** | AC-1, AC-2 |
+| **Notes** | <optional> |
+
+[Repeat for TC-<ID>-002 and TC-<ID>-003 minimum]
+
+## 🔴 Category 2 — Negative / Error Handling
+
+> **Minimum: 3 test cases**
+> Verify the system fails gracefully and shows correct error messages.
+
+[3+ test cases in the same table format. Expected Result MUST
+include the exact error message text shown to the user.]
+
+## 🟡 Category 3 — Edge Cases
+
+> **Minimum: 2 test cases**
+> Boundary conditions, unusual inputs, concurrent actions.
+
+[2+ test cases — boundary values (min, max, just-below-min,
+just-above-max), concurrent operations, unusual character sets,
+extremely large or empty inputs.]
+
+## 🔵 Category 4 — Integration Tests
+
+> **Minimum: 2 test cases**
+> Only include integrations relevant to this story (per the input).
+
+[2+ test cases — each must specify the integrating system, the
+sandbox URL or test mode, and the expected end-to-end behavior
+across systems.]
+
+## 🖥️ Category 5 — UI / UX Tests
+
+> **Minimum: 2 test cases**
+> Component behavior, rendering, responsiveness, accessibility.
+
+[2+ test cases — include responsive behavior at mobile / tablet /
+desktop breakpoints, keyboard navigation, screen-reader announcements,
+color contrast, focus management.]
+
+## 📋 Test Data Required
+
+| Test Data ID | Description | Sample Value | Source |
+|---|---|---|---|
+| TD-<ID>-001 | <e.g. B2C user with active subscription> | <inline value or "see fixtures/users.json"> | <where it lives> |
+
+## Coverage Notes
+
+- Acceptance criteria NOT covered (and why): <list or "all covered">
+- Manual-only tests: <list or "none">
+- Tests that need new fixtures: <list or "none">
+- Open questions for the product owner: <list or "none">
+
+## Style guide
+
+- Test cases verify ONE behavior each. Don't chain unrelated checks.
+- Steps are imperative and observable from the user's seat.
+- Expected results are specific. "Page works" is not a result;
+  "User is redirected to /dashboard within 2s and sees their name in
+  the header" is.
+- Negative cases should outnumber positive cases when ACs include
+  validation rules.
+- Always cover at least one accessibility check in Category 5.
+- Always include the EXACT error message text in negative tests'
+  expected results.
+- For integration tests, always specify which sandbox / mock / test mode.
+
+## Hard rules
+
+1. Every category has its minimum number of test cases — no exceptions.
+2. Every TC has a Linked AC reference (or "general" if it doesn't map
+   to a single AC).
+3. The Coverage Matrix must list every AC in the story.
+4. Test data IDs follow the pattern TD-<STORY-ID>-NNN.
+5. Test case IDs follow the pattern TC-<STORY-ID>-NNN, sequential.
+```
+
+## Example output (excerpt)
+
+```markdown
+# Test Cases: FIN-8751 — Add subscription to cart from course page
+
+> **Linked Story**: FIN-8751_elaborated.md
+> **Generated**: 2026-04-26
+> **Total Test Cases**: 12
+
+## Coverage Matrix
+
+| Acceptance Criterion | Positive TCs | Negative TCs | Edge TCs |
+|---|---|---|---|
+| AC-1: Add from course page | TC-FIN8751-001, 002 | TC-FIN8751-005 | TC-FIN8751-008 |
+| AC-2: Cart icon updates | TC-FIN8751-003 | — | — |
+| AC-6: Network failure shows retry | — | TC-FIN8751-006 | TC-FIN8751-009 |
+
+## 🟢 Category 1 — Positive / Happy Path
+
+### TC-FIN8751-001
+
+| Field | Value |
+|---|---|
+| **Test Case ID** | TC-FIN8751-001 |
+| **Category** | Positive — Happy Path |
+| **Title** | Anonymous user adds Personal subscription from course page |
+| **Priority** | High |
+| **Preconditions** | User signed out; CT cart service reachable |
+| **Test Steps** | 1. Navigate to /course/python-fundamentals <br> 2. Scroll to subscription tile <br> 3. Click "Add to cart" |
+| **Expected Result** | Cart icon transitions from "0 items" to "1 item" within 500ms; slide-in panel shows "Added — Pluralsight Personal · $29/mo" |
+| **Test Data Ref** | TD-FIN8751-001 (course slug `python-fundamentals`) |
+| **Automation** | Yes — Playwright |
+| **Linked AC** | AC-1, AC-2 |
+| **Notes** | First test in the regression suite for cart |
+```
+
+## Tips
+
+- Pair with the **Test Automation Script** template to convert any single TC into a runnable test in your framework.
+- The Coverage Matrix is the QA artifact PMs will look at — keep it accurate.
+- For regulated work, add a Category 6 (Compliance) — a couple of tests proving the audit log fires correctly is usually plenty.
+- Push the result into Jira as Story sub-tasks via the **Jira Push (Bulk)** skill.

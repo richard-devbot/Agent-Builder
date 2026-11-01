@@ -1,0 +1,300 @@
+---
+title: "Postgres MCP"
+slug: "postgres-mcp"
+description: "Pre-configured Postgres MCP server for Claude Code — schema inspection and read-only queries to make database work safer and faster."
+type: mcp-config
+phase: design
+category: database-design
+projectType: ["custom-app", "etl"]
+stack: ["claude-code", "mcp", "postgres"]
+tags: ["postgres", "database", "schema"]
+difficulty: intermediate
+estimatedTime: "10 min setup"
+author: "Platform Engineering"
+featured: false
+createdAt: 2026-04-26
+updatedAt: 2026-04-26
+serverName: "postgres"
+configFormat: "claude-code"
+envVars:
+  - name: POSTGRES_CONNECTION_STRING
+    description: "Postgres connection string in standard format"
+    example: "postgresql://user:password@localhost:5432/mydb"
+    secret: true
+relatedAssets:
+  - "database-migration-skill"
+  - "postgres-schema-designer"
+---
+
+# Postgres MCP
+
+A Model Context Protocol server config that gives Claude Code **read-only** access to a Postgres database for schema inspection and query analysis. Designed for development databases — never connect this to production with write access.
+
+## What you can do once configured
+
+- "Show me the current schema for the customers table"
+- "What indexes exist on the orders table?"
+- "Run EXPLAIN ANALYZE on this query and tell me what's slow"
+- "Are there any rows with NULL email values? (count, don't show)"
+- "What foreign keys reference the products table?"
+- "Compare the schema in this migration file to the live schema"
+
+## Why this matters for migrations
+
+Your **Database Migration Skill** is much safer when it can:
+
+1. Inspect the current schema before generating a migration
+2. Verify column types, constraints, and indexes that already exist
+3. Run `EXPLAIN` to confirm queries will use indexes
+4. Count rows to assess migration risk (small table → fast; large → online ops needed)
+
+Without this MCP, the skill operates on assumptions. With it, decisions are data-driven.
+
+## Setup
+
+### Step 1: Choose your database
+
+**For local dev:** point at your local Postgres (Docker, Postgres.app, etc.)
+
+**For shared dev/staging:** use a read-only user (see below)
+
+**For production:** ⚠️ Use only with extreme caution. Ideally, point at a read replica with a read-only user.
+
+### Step 2: Create a read-only user (strongly recommended)
+
+Even for local dev, separation between "the user that runs migrations" and "the user Claude Code uses" is a good habit.
+
+```sql
+-- Connect to your database as a superuser
+CREATE USER claude_readonly WITH PASSWORD 'your-secure-password';
+
+-- Grant connect
+GRANT CONNECT ON DATABASE mydb TO claude_readonly;
+GRANT USAGE ON SCHEMA public TO claude_readonly;
+
+-- Grant SELECT on all current tables
+GRANT SELECT ON ALL TABLES IN SCHEMA public TO claude_readonly;
+
+-- Grant SELECT on tables created in the future
+ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT SELECT ON TABLES TO claude_readonly;
+
+-- Schema introspection (information_schema is granted by default but doesn't hurt)
+GRANT SELECT ON ALL TABLES IN SCHEMA information_schema TO claude_readonly;
+GRANT SELECT ON ALL TABLES IN SCHEMA pg_catalog TO claude_readonly;
+```
+
+### Step 3: Set the connection string
+
+```bash
+export POSTGRES_CONNECTION_STRING="postgresql://claude_readonly:password@localhost:5432/mydb"
+```
+
+For multiple databases, use distinct env var names:
+
+```bash
+export POSTGRES_DEV="postgresql://claude_readonly:password@localhost:5432/customer_portal_dev"
+export POSTGRES_STAGING="postgresql://claude_readonly:password@staging.db.your-org.internal:5432/customer_portal"
+```
+
+### Step 4: Add the MCP config
+
+Edit `~/.config/claude-code/mcp.json`:
+
+```json
+{
+  "mcpServers": {
+    "postgres": {
+      "command": "npx",
+      "args": [
+        "-y",
+        "@modelcontextprotocol/server-postgres",
+        "${POSTGRES_CONNECTION_STRING}"
+      ]
+    }
+  }
+}
+```
+
+For multiple databases, register each as a separate server:
+
+```json
+{
+  "mcpServers": {
+    "postgres-dev": {
+      "command": "npx",
+      "args": ["-y", "@modelcontextprotocol/server-postgres", "${POSTGRES_DEV}"]
+    },
+    "postgres-staging": {
+      "command": "npx",
+      "args": ["-y", "@modelcontextprotocol/server-postgres", "${POSTGRES_STAGING}"]
+    }
+  }
+}
+```
+
+### Step 5: Restart Claude Code
+
+### Step 6: Test it
+
+Ask: "List the tables in the postgres database"
+
+You should see your schema's tables. If you get a permission error, the read-only user grants need adjusting.
+
+## Available tools
+
+The official Postgres MCP server is **read-only by design** — it cannot run INSERT, UPDATE, DELETE, DDL, or any mutation.
+
+### Schema inspection
+- `pg_list_schemas` - List schemas in the database
+- `pg_list_tables` - List tables (filter by schema)
+- `pg_describe_table` - Columns, types, constraints, defaults
+- `pg_list_indexes` - Indexes on a table or schema
+- `pg_list_foreign_keys` - FK relationships
+- `pg_list_views` - Views and materialized views
+- `pg_list_functions` - Stored procedures and functions
+- `pg_list_sequences` - Sequences
+
+### Querying
+- `pg_query` - Run a SELECT query (only SELECT is allowed)
+- `pg_explain` - EXPLAIN or EXPLAIN ANALYZE on a query
+- `pg_table_size` - Size info for a table (rows, size on disk)
+
+### Statistics
+- `pg_table_stats` - pg_stat_user_tables data (scan counts, modifications)
+- `pg_index_usage` - Which indexes are being used (or not)
+- `pg_slow_queries` - Top slow queries (requires pg_stat_statements extension)
+
+## Recommended pairings
+
+- **Database Migration Skill** - inspects schema before generating migrations
+- **Postgres Schema Designer** template - validates new design against existing
+- **Performance Profiler Skill** - runs EXPLAIN ANALYZE for query diagnosis
+
+## Workflow examples
+
+### Generating a safe migration
+
+```
+You: "I need to add a phone_number column to the customers table"
+
+Claude Code with Postgres MCP:
+1. Inspects customers table → confirms it doesn't already have phone_number
+2. Checks table size via pg_table_size → 12M rows, large table
+3. Runs pg_index_usage → checks current index situation
+4. Generates a migration that:
+   - Adds nullable column (avoids table rewrite)
+   - Suggests a separate backfill script
+   - Adds the index CONCURRENTLY in a follow-up migration
+```
+
+Without the MCP, the skill would have to assume table size and current schema. With it, decisions are precise.
+
+### Diagnosing a slow query
+
+```
+You: "This query is slow: SELECT * FROM orders WHERE customer_id = 12345 AND status = 'pending'"
+
+Claude Code with Postgres MCP:
+1. Runs pg_explain → reveals sequential scan on orders (20M rows)
+2. Checks pg_list_indexes → no index on (customer_id, status)
+3. Checks pg_index_usage → index on customer_id alone is used but inefficient
+4. Recommends compound index: (customer_id, status)
+5. Estimates impact based on table stats
+```
+
+## Security notes
+
+### Read-only is non-negotiable
+
+The MCP server itself only allows SELECT. But underneath, the **database user must also be read-only**. Don't connect with a user that has INSERT/UPDATE/DELETE rights, even if you trust the MCP layer.
+
+Defense in depth:
+1. MCP layer: read-only by design
+2. DB user: read-only privileges
+3. Network: prefer local/VPN-only access
+
+### Connection string hygiene
+
+The connection string contains credentials. Treat it like a password:
+
+- **Never commit** it to a repo
+- **Never paste** it in chat
+- **Use env vars** in mcp.json (already shown above)
+- **Rotate** the password if exposed
+
+### Avoid production connections
+
+If you must connect to production data:
+- Use a read replica, not the primary
+- Use a dedicated read-only user with row-level filters if available
+- Consider that any query Claude runs is logged in pg_stat_statements
+- Sensitive data (PII) may end up in chat logs — use staging copies when possible
+
+## Troubleshooting
+
+**"Permission denied for table X"**
+- Read-only user is missing GRANT SELECT on that table
+- Run the GRANT statement from Step 2 again
+- For tables created after the grant, run `ALTER DEFAULT PRIVILEGES`
+
+**"Connection refused"**
+- Database isn't running or connection string is wrong
+- Check `pg_hba.conf` allows connections from your IP
+- For Docker Postgres: confirm port mapping (`-p 5432:5432`)
+
+**"FATAL: SSL is required"**
+- Some hosted Postgres requires SSL — append `?sslmode=require` to connection string
+
+**EXPLAIN doesn't include actual timing**
+- Use `pg_explain` with `analyze: true` to get EXPLAIN ANALYZE
+- Note: EXPLAIN ANALYZE actually executes the query — be careful with destructive `WITH` queries (the MCP blocks DML, but joins on huge tables can still be expensive)
+
+**"pg_stat_statements not found"**
+- Optional extension; install with `CREATE EXTENSION pg_stat_statements;`
+- Adds slow query analytics
+- Requires `shared_preload_libraries = 'pg_stat_statements'` in postgresql.conf and restart
+
+## Customization
+
+### Multi-tenant databases
+
+If your database has tenant-scoped data and you only want to query one tenant's view:
+
+Create a row-level security policy on the read-only user, or use a view:
+
+```sql
+CREATE VIEW claude_readonly_customers AS
+SELECT * FROM customers WHERE tenant_id = 'acme-internal';
+
+GRANT SELECT ON claude_readonly_customers TO claude_readonly;
+```
+
+Then point Claude at the view instead of the table.
+
+### Limiting what's exposed
+
+The MCP exposes everything the user has SELECT on. To hide tables:
+
+```sql
+REVOKE SELECT ON sensitive_table FROM claude_readonly;
+```
+
+### Heavy query timeouts
+
+Set a statement timeout for the read-only user to prevent runaway queries:
+
+```sql
+ALTER USER claude_readonly SET statement_timeout = '30s';
+```
+
+## What this enables
+
+The biggest benefit is making the **Database Migration Skill** dramatically safer. The skill always asks "is this table large?" before generating a migration; with this MCP, it can answer that itself by querying `pg_table_size`.
+
+For everything else (debugging slow queries, understanding existing schema, validating new designs), it's a major time-saver — you don't have to copy-paste schema dumps into chat.
+
+## What this does NOT enable
+
+- **Running migrations.** This MCP is read-only by design. Migrations should be applied via your normal tooling (Alembic, Knex, Flyway, etc.)
+- **Mutating data.** Even simple INSERTs are blocked. For data fixes, use a separate one-off script with appropriate review.
+- **Production debugging without caveats.** This MCP works against any reachable Postgres, but production access should be controlled and audited separately.

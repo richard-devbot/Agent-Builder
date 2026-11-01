@@ -1,0 +1,360 @@
+---
+title: "SQL Server to Modern Schema Translator"
+slug: "sql-server-schema-translator"
+description: "Translate SQL Server schemas to modernized SQL Server (Azure SQL) or Postgres, handling type differences, constraints, and stored procedure migration."
+type: template
+phase: design
+category: database-design
+projectType: ["custom-app"]
+stack: ["postgres", "sql"]
+tags: ["migration", "sql-server", "schema", "translation"]
+difficulty: advanced
+estimatedTime: "1 day"
+author: "Platform Engineering"
+featured: false
+createdAt: 2026-04-26
+updatedAt: 2026-04-26
+inputs:
+  - name: source_schema
+    description: "Source SQL Server schema (DDL output, schema description, or scripts)"
+    required: true
+  - name: target_engine
+    description: "Target (Azure SQL DB / SQL Server 2022 / PostgreSQL 16 / other)"
+    required: true
+  - name: source_version
+    description: "Source SQL Server version (2008/2012/2014/2016/2019/2022)"
+    required: false
+output:
+  format: code
+relatedAssets:
+  - "data-migration-plan"
+  - "postgres-schema-designer"
+---
+
+# SQL Server to Modern Schema Translator
+
+Translate SQL Server schemas to a modernized target — either a newer SQL Server / Azure SQL, or PostgreSQL. Handles type mappings, constraints, identity columns, computed columns, and translates the most common stored procedure patterns.
+
+## When to use
+
+- Migrating SQL Server 2008/2012 to Azure SQL or SQL Server 2022
+- Migrating SQL Server to PostgreSQL (cross-engine)
+- Need a comprehensive schema mapping document for the migration plan
+
+## Prompt
+
+````text
+You are a senior database engineer with deep expertise in SQL Server and
+modern alternatives. Translate the source schema to the target engine.
+
+## Input
+
+**Source schema:**
+```
+{{source_schema}}
+```
+
+**Target engine:** {{target_engine}}
+**Source version:** {{source_version}}
+
+## Output structure
+
+### 1. Translation strategy
+
+State which translation case applies:
+
+**Case A: Same family (SQL Server old → SQL Server new / Azure SQL)**
+Mostly straightforward. Watch for:
+- Deprecated features (text/ntext/image, READTEXT)
+- Behavior changes between versions
+- Cloud-specific limitations (Azure SQL doesn't allow some operations)
+
+**Case B: Cross-family (SQL Server → PostgreSQL)**
+Major translation. Watch for:
+- Type mappings
+- Identity columns vs sequences
+- Stored procedure rewriting
+- Locking and isolation differences
+- Date/time handling
+
+Specify which case applies and the implications.
+
+### 2. Type mapping table
+
+For each source column type, document the target type:
+
+#### SQL Server → Azure SQL / SQL Server 2022
+
+```
+Same. But check:
+- text / ntext / image → varchar(max) / nvarchar(max) / varbinary(max) (deprecated types)
+- timestamp → rowversion (renamed but same)
+- Behavior of money / smallmoney (use decimal where possible)
+```
+
+#### SQL Server → PostgreSQL
+
+| SQL Server | PostgreSQL | Notes |
+|------------|-----------|-------|
+| `int` | `integer` | Same |
+| `bigint` | `bigint` | Same |
+| `smallint` | `smallint` | Same |
+| `tinyint` | `smallint` | PG has no tinyint |
+| `bit` | `boolean` | Logical change required |
+| `decimal(p,s)` / `numeric(p,s)` | `numeric(p,s)` | Same |
+| `money` | `numeric(19,4)` | Use numeric explicit |
+| `float` | `double precision` | Same |
+| `real` | `real` | Same |
+| `char(n)` | `char(n)` | Avoid char; prefer varchar/text |
+| `varchar(n)` | `varchar(n)` or `text` | Postgres `text` has no perf cost |
+| `nvarchar(n)` | `varchar(n)` or `text` | PG is UTF-8 native |
+| `text` / `ntext` | `text` | Same name, different semantics; PG text is unlimited |
+| `varbinary(n)` | `bytea` | Different access patterns |
+| `image` | `bytea` | Or move to object storage |
+| `datetime` | `timestamp(3)` | Lose tz; consider `timestamptz` instead |
+| `datetime2` | `timestamp(6)` | Same precision available |
+| `datetimeoffset` | `timestamptz` | Better in PG (always UTC stored) |
+| `date` | `date` | Same |
+| `time` | `time` | Same |
+| `smalldatetime` | `timestamp(0)` | No PG equivalent precision |
+| `uniqueidentifier` | `uuid` | Use `uuid_generate_v4()` or `gen_random_uuid()` |
+| `xml` | `xml` | Same name; query syntax differs |
+| `geography` | `geography` (PostGIS) | Requires PostGIS extension |
+| `geometry` | `geometry` (PostGIS) | Requires PostGIS extension |
+| `hierarchyid` | n/a | Translate to ltree (extension) or recursive CTE |
+
+For each conversion, flag risks:
+- **Lossy:** money → numeric (precision identical, but app code referencing money type breaks)
+- **Behavior change:** datetime (no tz) → timestamptz (UTC); app must handle timezone-aware values
+- **Performance change:** clustered index semantics differ
+
+### 3. Identity / sequences
+
+**SQL Server → SQL Server:** Same identity columns
+**SQL Server → PostgreSQL:**
+
+```sql
+-- SQL Server
+CREATE TABLE customers (
+    id INT IDENTITY(1,1) PRIMARY KEY,
+    ...
+);
+
+-- PostgreSQL (modern: use IDENTITY)
+CREATE TABLE customers (
+    id INT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    ...
+);
+
+-- PostgreSQL (older syntax: SERIAL)
+CREATE TABLE customers (
+    id SERIAL PRIMARY KEY,  -- creates implicit sequence
+    ...
+);
+```
+
+When migrating data, reset target sequences past the highest source ID:
+
+```sql
+-- After data load
+SELECT setval('customers_id_seq', (SELECT MAX(id) FROM customers));
+```
+
+### 4. Constraints
+
+**Primary keys:** Same syntax mostly.
+
+**Foreign keys:** Watch for cascade behavior differences. Document each FK explicitly with ON DELETE / ON UPDATE.
+
+**CHECK constraints:** Mostly portable, but watch for SQL dialect:
+- `LEN()` (SQL Server) → `length()` (PostgreSQL)
+- `ISNULL(x, y)` (SQL Server) → `coalesce(x, y)` (standard SQL, both engines)
+- `GETDATE()` (SQL Server) → `now()` or `current_timestamp` (PostgreSQL)
+
+**Unique constraints:** Same syntax.
+
+**Default values:** Watch function names:
+- `DEFAULT GETDATE()` → `DEFAULT now()`
+- `DEFAULT NEWID()` → `DEFAULT gen_random_uuid()`
+- `DEFAULT 0` (for bit) → `DEFAULT false` (for boolean)
+
+### 5. Computed columns
+
+```sql
+-- SQL Server
+CREATE TABLE orders (
+    subtotal DECIMAL(10,2),
+    tax DECIMAL(10,2),
+    total AS (subtotal + tax) PERSISTED
+);
+
+-- PostgreSQL (12+)
+CREATE TABLE orders (
+    subtotal NUMERIC(10,2),
+    tax NUMERIC(10,2),
+    total NUMERIC(10,2) GENERATED ALWAYS AS (subtotal + tax) STORED
+);
+```
+
+For more complex expressions, consider whether to keep as computed column,
+turn into a view, or move to application code.
+
+### 6. Indexes
+
+Same names mostly, but:
+
+- **Filtered indexes:** SQL Server `WHERE` clause → Postgres `WHERE` clause (same syntax)
+- **Covering indexes:** SQL Server `INCLUDE` → Postgres `INCLUDE` (same)
+- **Indexed views (SQL Server) → Materialized views (Postgres)** — different refresh semantics
+- **Columnstore (SQL Server) → No direct Postgres equivalent** — for analytics, consider TimescaleDB or move to a warehouse
+
+### 7. Stored procedures and functions
+
+This is often the biggest migration effort.
+
+For each stored procedure, recommend ONE of:
+
+**A. Translate to target dialect**
+- Simple SELECT-based procedures: easy
+- Complex T-SQL with cursors / dynamic SQL / CTEs: hard
+- Time/effort estimate per category
+
+**B. Rewrite in application code**
+- For business logic in stored procs, this is usually right
+- Better testability, observability, version control
+- Cost: larger upfront effort
+- Benefit: easier to maintain forever
+
+**C. Wrap in a function or view**
+- For procs that are essentially queries: convert to view
+- For procs that compute one value: convert to function
+
+**D. Decommission**
+- Procs that nobody uses (check call logs)
+- Procs replaced by app logic anyway
+
+For each proc in source, document:
+- Name
+- Lines of T-SQL
+- Complexity (Simple / Medium / Complex)
+- Recommendation (Translate / Rewrite / View / Decommission)
+- Migration effort estimate
+
+### 8. Common T-SQL → PL/pgSQL patterns
+
+| T-SQL pattern | PL/pgSQL equivalent |
+|---------------|---------------------|
+| `BEGIN TRY ... END TRY BEGIN CATCH ... END CATCH` | `BEGIN ... EXCEPTION WHEN OTHERS THEN ...` |
+| `RAISERROR('msg', 16, 1)` | `RAISE EXCEPTION 'msg'` |
+| `IF EXISTS (SELECT ...)` | `IF EXISTS (SELECT ...)` (same) |
+| `DECLARE @var INT = 0` | `var INTEGER := 0;` (in DECLARE block) |
+| `SET @var = ...` | `var := ...;` |
+| `PRINT 'msg'` | `RAISE NOTICE 'msg'` |
+| `WAITFOR DELAY '00:00:01'` | `PERFORM pg_sleep(1)` |
+| `OUTPUT INSERTED.*` | `RETURNING *` |
+| `MERGE` | `INSERT ... ON CONFLICT DO UPDATE` |
+| Cursors (FOR UPDATE) | Avoid; use set-based queries or PL/pgSQL FOR loops |
+| Temp tables (`#table`) | `CREATE TEMP TABLE` (different scope) |
+| Table variables | `CREATE TEMP TABLE ON COMMIT DROP` |
+
+### 9. Triggers
+
+SQL Server triggers fire AFTER or INSTEAD OF events. Postgres has BEFORE / AFTER row / statement.
+
+For each source trigger:
+- What event (INSERT/UPDATE/DELETE)
+- What it does
+- Translate to target with equivalent timing
+
+Often, **moving trigger logic to application code is preferable** — it's testable and observable.
+
+### 10. Schema migration script
+
+Generate a single migration SQL file:
+
+For SQL Server → Azure SQL: use Azure Database Migration Service compatible scripts.
+
+For SQL Server → PostgreSQL: produce paired files:
+- `01_schema.sql` — DDL for tables, indexes, constraints
+- `02_data.sql` — placeholder; data load is separate (use COPY for Postgres bulk)
+- `03_functions.sql` — translated stored procedures and functions
+- `04_grants.sql` — permissions
+
+### 11. Validation script
+
+Generate validation SQL that compares source and target after migration:
+
+```sql
+-- Row counts (run on both, compare)
+SELECT 'customers' as t, COUNT(*) FROM customers
+UNION ALL
+SELECT 'orders' as t, COUNT(*) FROM orders;
+
+-- Aggregate sums (catches data loss)
+SELECT SUM(amount) FROM orders WHERE created_at >= '2024-01-01';
+
+-- Distribution checks
+SELECT status, COUNT(*) FROM orders GROUP BY status;
+
+-- Spot checks
+SELECT * FROM customers WHERE id = '...';
+```
+
+### 12. Performance considerations
+
+After migrating schema, plan for:
+
+- **Run UPDATE STATISTICS / ANALYZE** on all target tables after data load
+- **Re-evaluate indexes** — query patterns may differ on new engine
+- **Test top 20 hot queries** with EXPLAIN ANALYZE on target
+- **Tune target config:** memory, parallelism, etc.
+
+### 13. App code changes required
+
+The migration affects more than the DB. List app code changes:
+
+- **Connection string:** new format, new driver
+- **Driver:** SqlClient → Npgsql (for Postgres) or stay (for Azure SQL)
+- **SQL dialect in app:** explicit T-SQL functions need to change
+- **Stored procedure calls:** if procs are being rewritten, change app calls
+- **Connection pooling:** different defaults
+- **Transaction handling:** isolation level differences
+
+### 14. Things that DON'T translate
+
+Some SQL Server features have no good equivalent:
+
+- **CLR integration (.NET in SQL):** rewrite the function in app code
+- **SQL Server Agent jobs:** recreate as Azure Functions, app cron, etc.
+- **Database mail:** use SendGrid, AWS SES, or app-level mail
+- **Service Broker:** use a message queue (Service Bus, RabbitMQ, etc.)
+- **Linked servers:** replace with API calls or ETL
+- **Full-text search:** Postgres has tsvector; behavior differs from SQL Server FTS
+
+For each, suggest a replacement.
+
+## Quality bar
+
+- Every source type maps to a specific target type (no "depends")
+- Every constraint translated explicitly
+- Stored procedures categorized with effort estimates
+- Validation queries provided
+- App code changes enumerated
+- Confidence level marked where translations are ambiguous
+
+````
+
+## Tips
+
+- **For SQL Server → Azure SQL,** Microsoft's Azure Database Migration Assistant is a great starting point — it identifies compatibility issues automatically.
+- **For SQL Server → PostgreSQL,** AWS DMS or pgloader can do the data movement; this template handles the schema/logic migration that they can't.
+- **Move stored proc logic to app code when possible.** It's testable, observable, easier to maintain. The target engine doesn't matter as much.
+- **Test the migration with realistic data volumes.** A schema that works for 10K rows may need different indexes for 10M.
+
+## Common mistakes to avoid
+
+- Translating procs to PL/pgSQL when rewriting in app code would be faster and cleaner long-term
+- Using `SERIAL` instead of `IDENTITY` in modern Postgres (12+)
+- Missing the difference between `datetime` (no tz) and `timestamptz` (always UTC) — common cause of timezone bugs post-migration
+- Migrating SQL Server's clustered index assumptions to Postgres (Postgres doesn't have clustered indexes)
+- Forgetting CLR functions, SQL Agent jobs, linked servers — they don't show up in DDL dumps

@@ -1,0 +1,240 @@
+---
+title: "OpenAPI 3.1 Spec Generator"
+slug: "openapi-spec-generator"
+description: "Generate a complete OpenAPI 3.1 specification from user stories or a feature description, ready for API-first development."
+type: template
+phase: design
+category: api-design
+projectType: ["custom-app"]
+stack: []
+tags: ["api", "spec-driven", "openapi", "contract-first"]
+difficulty: intermediate
+estimatedTime: "25 min"
+author: "Platform Engineering"
+featured: true
+createdAt: 2026-04-26
+updatedAt: 2026-04-26
+inputs:
+  - name: feature_or_stories
+    description: "User stories, feature description, or domain to spec out"
+    required: true
+  - name: api_style
+    description: "REST | GraphQL-on-REST | RPC-style"
+    required: false
+  - name: auth_method
+    description: "Auth scheme (e.g., 'Bearer JWT', 'API key', 'OAuth2')"
+    required: false
+output:
+  format: code
+relatedAssets:
+  - "user-story-from-prd"
+  - "rest-api-scaffolder-nodejs"
+  - "fastapi-scaffolder-python"
+---
+
+# OpenAPI 3.1 Spec Generator
+
+Generate a complete, valid OpenAPI 3.1 specification before writing a single line of API code. Use the spec as the contract between frontend and backend, generate clients from it, and validate it in CI.
+
+## When to use
+
+- Starting a new API and want to nail the contract first
+- Frontend and backend teams need to work in parallel
+- Generating SDK clients automatically from a spec
+- Adding a new endpoint group to an existing API and want it documented before code
+
+## Prompt
+
+````text
+You are a senior API designer. Generate a complete OpenAPI 3.1 specification
+based on the input below. The spec must be valid OpenAPI 3.1, lint-clean,
+and ready to publish.
+
+## Input
+
+**Feature or stories:**
+{{feature_or_stories}}
+
+**API style:** {{api_style}}
+**Auth method:** {{auth_method}}
+
+## Standards
+
+### Conventions
+- snake_case for all path segments and query params
+- camelCase for JSON property names
+- Plural resource names: `/users`, `/orders`, `/products`
+- Use sub-resources for relationships: `/users/{user_id}/orders`
+- Versioning in URL: `/v1/users` (not in headers)
+
+### HTTP semantics (strict)
+- `GET` — retrieve, idempotent, no body
+- `POST` — create or non-idempotent action
+- `PUT` — full replace, idempotent
+- `PATCH` — partial update, idempotent
+- `DELETE` — remove, idempotent
+- `200 OK` for successful GET/PUT/PATCH
+- `201 Created` for successful POST creating a resource (with `Location` header)
+- `202 Accepted` for async operations
+- `204 No Content` for successful DELETE
+- `400 Bad Request` — validation failure
+- `401 Unauthorized` — missing/invalid auth
+- `403 Forbidden` — authenticated but not allowed
+- `404 Not Found` — resource doesn't exist
+- `409 Conflict` — state conflict (duplicate, version mismatch)
+- `422 Unprocessable Entity` — semantic validation failure (vs syntactic 400)
+- `429 Too Many Requests` — rate limit
+- `500 Internal Server Error` — unexpected server error
+
+### Pagination (cursor-based, not offset)
+For all list endpoints:
+- Query params: `?limit=50&cursor=<opaque>`
+- Default `limit=20`, max `limit=100`
+- Response includes `data: T[]` and `pagination: { next_cursor?: string, has_more: boolean }`
+
+### Filtering and sorting
+- Filtering: `?status=active&created_after=2024-01-01`
+- Sorting: `?sort=-created_at,name` (`-` for desc)
+- Document allowed filter and sort fields per endpoint
+
+### Error format (consistent across all endpoints)
+```yaml
+Error:
+  type: object
+  required: [error]
+  properties:
+    error:
+      type: object
+      required: [code, message]
+      properties:
+        code:
+          type: string
+          description: Machine-readable error code (e.g., "validation_failed")
+        message:
+          type: string
+          description: Human-readable error message
+        details:
+          type: array
+          items:
+            type: object
+            properties:
+              field: { type: string }
+              issue: { type: string }
+        request_id:
+          type: string
+          description: Trace this in support requests
+```
+
+## What to produce
+
+A single OpenAPI 3.1 YAML document with these sections:
+
+### `openapi: 3.1.0`
+
+### `info`
+- `title`, `version`, `description` (rich, with usage examples)
+- `contact`, `license`
+
+### `servers`
+- Production, staging, dev URLs as appropriate
+
+### `tags`
+Group endpoints by resource. Each tag has a description.
+
+### `paths`
+For each endpoint:
+- Description (1-2 sentences)
+- `operationId` in camelCase (used for SDK gen): `listUsers`, `createOrder`
+- Parameters with `name`, `in`, `description`, `schema`, `required`, `example`
+- Request body schema (use `$ref` to components)
+- All response codes with their schemas (200, 400, 401, 403, 404, 422, 500 minimum)
+- Examples for common request/response shapes
+- `security` block referencing the configured auth scheme
+
+### `components`
+- `schemas` — all data models with descriptions, types, examples, validation
+- `securitySchemes` — Bearer JWT / API key / OAuth2 as configured
+- `parameters` — reusable parameter definitions (pagination, common filters)
+- `responses` — reusable error responses (e.g., `Unauthorized`, `NotFound`)
+- `examples` — named examples reusable across endpoints
+
+### Schema quality
+- Every property has a `description`
+- Every property has appropriate constraints (`minLength`, `maxLength`, `pattern`, `format`)
+- Use `format` correctly: `email`, `uuid`, `date-time`, `date`, `uri`
+- Mark required fields explicitly
+- Use `nullable: false` (default) — only set `nullable: true` when actually nullable
+- Enum values for known sets
+- `additionalProperties: false` on schemas to prevent unknown fields
+
+## Output
+
+Produce the YAML file in a single fenced code block. After the YAML:
+
+- **"## Spec checklist"** — confirm:
+  - [ ] All endpoints have all standard error responses
+  - [ ] Every schema has descriptions
+  - [ ] Pagination is consistent
+  - [ ] Auth is configured
+  - [ ] Examples cover happy path and at least one error case
+
+- **"## Next steps"** — 3-5 things to do with this spec:
+  - Validate with `openapi-cli lint`
+  - Generate client SDKs with `openapi-generator-cli`
+  - Mock the API with Prism
+  - Use as input for the API scaffolder template
+````
+
+## Example output snippet
+
+```yaml
+openapi: 3.1.0
+info:
+  title: Customer Portal API
+  version: 1.0.0
+  description: |
+    Self-service portal for B2B customers.
+    See /docs for usage examples.
+servers:
+  - url: https://api.example.com/v1
+    description: Production
+paths:
+  /invoices:
+    get:
+      operationId: listInvoices
+      summary: List customer invoices
+      tags: [Invoices]
+      parameters:
+        - $ref: '#/components/parameters/Limit'
+        - $ref: '#/components/parameters/Cursor'
+        - name: status
+          in: query
+          schema:
+            type: string
+            enum: [draft, open, paid, void]
+      responses:
+        '200':
+          description: List of invoices
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/InvoiceListResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+```
+
+## Tips
+
+- Validate the spec with `openapi-cli lint` or `redocly lint` — auto-catches mistakes
+- Use the spec to generate mocks (Prism) so frontend can develop without waiting for backend
+- Use the spec to generate SDKs (openapi-generator-cli) — TypeScript, Python, Go all from one source
+- Pair with the **REST API Scaffolder** template — feed this spec in as input
+- Keep the spec in version control alongside the code; CI should fail if code drifts
+
+## Common mistakes to avoid
+
+- Letting the spec drift from the actual API (fix: contract tests in CI)
+- Returning different error shapes per endpoint (use the shared Error schema)
+- Missing 401/403 on auth-required endpoints (every secured endpoint needs both)
+- Forgetting `additionalProperties: false` (allows clients to send junk)
+- Using offset pagination for large datasets (use cursor)

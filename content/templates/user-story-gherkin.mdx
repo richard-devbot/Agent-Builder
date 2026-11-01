@@ -1,0 +1,165 @@
+---
+title: "User Story Generator — BDD / Gherkin"
+slug: "user-story-gherkin"
+description: "Generate a user story whose acceptance criteria are full Given / When / Then scenarios, ready for BDD test runners."
+type: template
+phase: discover
+category: user-stories
+projectType: ["custom-app"]
+stack: ["cucumber", "playwright", "behave"]
+tags: ["agile", "bdd", "gherkin", "requirements", "testable"]
+difficulty: intermediate
+estimatedTime: "10 min"
+author: "Platform Engineering"
+createdAt: 2026-04-26
+updatedAt: 2026-04-26
+inputs:
+  - name: requirements
+    description: "The requirement, ticket, or feature brief to convert"
+    required: true
+  - name: existing_definitions
+    description: "Reusable Given/When/Then steps from your suite (optional)"
+    required: false
+output:
+  format: json
+relatedAssets:
+  - "user-story-from-prd"
+  - "user-story-api"
+  - "user-story-ui"
+  - "test-cases-from-user-story"
+---
+
+# User Story Generator — BDD / Gherkin
+
+Generate a user story whose acceptance criteria are written as full BDD scenarios (Given / When / Then). Useful when QA runs Cucumber, Playwright with `test.step`, Behave, or any other BDD-style framework — the criteria can be lifted straight into `.feature` files.
+
+## When to use
+
+- Your team writes BDD tests and wants stories that flow into them with no rewrite
+- You need acceptance criteria a non-technical reader can sign off on
+- You want explicit preconditions, actions, and outcomes for each path
+
+## Prompt
+
+```text
+You are a senior business analyst specializing in agile methodologies and BDD
+user-story creation. Convert the following requirement into a comprehensive
+user story whose acceptance criteria are full Given / When / Then scenarios.
+
+## Requirements
+
+{{requirements}}
+
+## Existing reusable steps (if any)
+
+{{existing_definitions}}
+
+## Template Type
+
+BDD / Gherkin
+
+## Output requirements
+
+Return ONLY a valid JSON object with exactly this structure — no markdown
+fences, no commentary, no leading or trailing text:
+
+{
+  "title": "Clear and concise title of the user story",
+  "description": "User story in the format: As a <role>, I want to <do something> so that <benefit>",
+  "acceptance_criteria": [
+    "Given <precondition>\nWhen <action>\nThen <expected result>"
+  ],
+  "velocity_points": "Estimated story points as a string (1-13)",
+  "priority": "High | Medium | Low",
+  "template_type": "BDD / Gherkin",
+  "user_role": "The specific user role identified",
+  "business_value": "One-sentence statement of the business value",
+  "dependencies": "Any system or data dependencies that must exist first",
+  "definition_of_done": [
+    "Concrete checks for completion (tests pass, docs updated, deployed, etc.)"
+  ],
+  "scenarios": [
+    {
+      "name": "Short scenario name",
+      "given": ["List of preconditions"],
+      "when": ["The user action(s)"],
+      "then": ["Expected outcome(s)"],
+      "examples": "Optional Scenario Outline data — leave empty string if N/A"
+    }
+  ]
+}
+
+## Style guide
+
+- Each scenario covers ONE behavior. Don't AND multiple behaviors together.
+- Include at least one happy-path scenario AND one negative / error scenario.
+- Reuse existing step definitions when listed — flag new step definitions
+  needed in `dependencies`.
+- Velocity points: 1-13 (Fibonacci). If the scenarios outnumber the points,
+  the story is probably too big — split it.
+
+## Hard rules
+
+1. Output is a single JSON object — no surrounding text, no markdown fences.
+2. acceptance_criteria items must contain literal "\n" between the
+   Given / When / Then lines (escaped newlines, valid JSON).
+3. priority must be exactly one of: "High", "Medium", "Low".
+4. velocity_points must be a string ("1" through "13").
+5. scenarios is an array of objects. given/when/then are arrays of strings.
+6. No trailing commas. All brackets balanced.
+```
+
+## Example output
+
+```json
+{
+  "title": "Customer can reset password via email link",
+  "description": "As a customer who forgot their password, I want to reset it through an emailed link so that I can regain access without contacting support.",
+  "acceptance_criteria": [
+    "Given I am on the sign-in page\nWhen I click 'Forgot password' and submit my registered email\nThen I see a confirmation that an email is on its way",
+    "Given I open a valid reset link from my email within 1 hour of requesting it\nWhen I enter and confirm a new compliant password\nThen my password is updated and I am signed in",
+    "Given I open a reset link that is older than 1 hour\nWhen the page loads\nThen I see an 'Expired link' message with an option to request a new one"
+  ],
+  "velocity_points": "5",
+  "priority": "High",
+  "template_type": "BDD / Gherkin",
+  "user_role": "Registered customer who has forgotten their password",
+  "business_value": "Reduces support tickets for password resets and unblocks self-service recovery.",
+  "dependencies": "Transactional email provider must be configured; password policy service must expose validation rules.",
+  "definition_of_done": [
+    "All three scenarios pass in the BDD suite",
+    "Reset emails render correctly in Gmail / Outlook / Apple Mail",
+    "Token entropy and expiry confirmed by security review",
+    "Telemetry: counters for requested / completed / expired flows"
+  ],
+  "scenarios": [
+    {
+      "name": "Request reset email",
+      "given": ["I am on the sign-in page"],
+      "when": ["I click 'Forgot password'", "I submit my registered email address"],
+      "then": ["I see a confirmation message", "An email is queued for delivery"],
+      "examples": ""
+    },
+    {
+      "name": "Complete reset with valid link",
+      "given": ["I have a reset link issued in the last hour"],
+      "when": ["I open the link", "I enter a compliant new password and confirm"],
+      "then": ["My password is updated", "I am signed in", "All other sessions are invalidated"],
+      "examples": ""
+    },
+    {
+      "name": "Reject expired link",
+      "given": ["I have a reset link issued more than 1 hour ago"],
+      "when": ["I open the link"],
+      "then": ["I see an 'Expired link' message", "I am offered a button to request a new link"],
+      "examples": ""
+    }
+  ]
+}
+```
+
+## Tips
+
+- The `scenarios` array can be lifted straight into `.feature` files — wrap each as a `Scenario:`.
+- For data-driven tests, fill `examples` with a Gherkin Scenario Outline table.
+- If you write Playwright/Vitest tests in code rather than `.feature` files, use the JSON `scenarios` to generate matching `test()` blocks.

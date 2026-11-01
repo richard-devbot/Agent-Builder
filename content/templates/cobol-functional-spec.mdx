@@ -1,0 +1,290 @@
+---
+title: "COBOL Program → Functional Specification"
+slug: "cobol-functional-spec"
+description: "Reverse-engineer a COBOL program into a structured 10-section functional spec — inputs, processing logic, business rules, calculations, outputs, customizations, dependencies."
+type: template
+phase: design
+category: system-design
+projectType: ["custom-app"]
+stack: ["cobol", "mainframe", "db2", "vsam", "cics"]
+tags: ["legacy", "modernization", "reverse-engineering", "documentation"]
+difficulty: advanced
+estimatedTime: "30-60 min per program"
+author: "Platform Engineering"
+createdAt: 2026-04-26
+updatedAt: 2026-04-26
+inputs:
+  - name: program_source
+    description: "The full COBOL source code of the program (paste the entire .cbl / .cob file)"
+    required: true
+  - name: program_id
+    description: "The PROGRAM-ID from the IDENTIFICATION DIVISION (or filename if unknown)"
+    required: true
+  - name: source_folder
+    description: "Folder the program lives in — used to infer customization status (e.g. base product folder vs custom-extensions folder)"
+    required: false
+  - name: domain_glossary
+    description: "Industry / product glossary so the model uses correct terminology (life insurance, billing, claims, etc.)"
+    required: false
+output:
+  format: markdown
+relatedAssets:
+  - "regression-bed-master"
+  - "test-case-comprehensive"
+  - "adr-generator"
+---
+
+# COBOL Program → Functional Specification
+
+Reverse-engineer a single COBOL program into a structured functional spec — every section filled, business rules numbered, customizations flagged, ambiguities surfaced. Built for legacy modernization work where the source is the only documentation that exists.
+
+The output is markdown — convert to .docx for stakeholder review with any markdown-to-docx tool (or hand the markdown to a separate "to-docx" agent run).
+
+## When to use
+
+- You inherited a COBOL codebase with no documentation
+- A modernization initiative needs functional specs before re-platforming
+- You're producing artifacts for a SME review cycle on legacy systems
+- You need a consistent shape across hundreds of programs (so a regression bed can be assembled later)
+
+## Prompt
+
+```text
+You are a senior systems analyst with deep COBOL and mainframe experience.
+Reverse-engineer the following COBOL program into a structured functional
+specification. Fill every section in the template. Never leave a section
+blank — write "Not applicable" or "⚠️ UNCLEAR: <reason>" if you genuinely
+cannot infer.
+
+## Inputs
+
+**Program ID:** {{program_id}}
+
+**Source folder:** {{source_folder}}
+
+**Domain glossary:** {{domain_glossary}}
+
+**Source code:**
+
+{{program_source}}
+
+## Analysis approach (do this in order before writing the spec)
+
+1. Identify the 4 DIVISIONS — IDENTIFICATION, ENVIRONMENT, DATA, PROCEDURE.
+2. Map every SECTION and PARAGRAPH in PROCEDURE DIVISION.
+3. Extract all key data items from WORKING-STORAGE and FILE SECTION.
+4. Identify all PERFORM calls (internal program flow).
+5. Identify all CALL statements (other programs).
+6. Identify all file I/O — READ, WRITE, REWRITE, DELETE.
+7. Identify all DB2 / SQL operations (EXEC SQL blocks).
+8. Identify all external interfaces — CICS, MQ, web services if present.
+9. Infer business rules from conditional logic (IF, EVALUATE, COMPUTE).
+
+## Customization detection rules
+
+Apply each rule. If matched, flag with 🔧 CUSTOM in the spec.
+
+1. Source folder name contains "CUSTOM" / "EXTEND" / "CLIENT" → entire program is custom.
+2. PROGRAM-ID begins with a client-specific prefix (e.g. MMA, ASCN, ACME) → custom.
+3. Comments contain "MODIFICATION", "CLIENT CHANGE", "CUSTOM", "EXTENDED" → flag those paragraphs as custom.
+4. Program names containing "EXIT", "EXTP", "XPNT" → likely a base-product exit hook with custom logic.
+
+## Output requirements
+
+Return ONLY the markdown document below. No preamble, no closing notes.
+
+---
+
+# Functional Specification: <PROGRAM-ID>
+
+| Field | Value |
+|---|---|
+| **Program ID** | <from IDENTIFICATION DIVISION> |
+| **Source File** | <filename> |
+| **Source Folder** | <input or "unknown"> |
+| **Functional Domain** | <Policy / Billing / Claims / Underwriting / Reporting / Utility> |
+| **Program Type** | <Batch / Online / Sub-program / Exit-point / Report / Interface> |
+| **Customization Status** | <Base product / 🔧 Custom extension / 🔧 Exit point with custom logic> |
+| **Prepared By** | Claude Code (AI-generated — requires SME review) |
+| **Review Status** | ⚠️ DRAFT — Not yet reviewed |
+| **Last Updated** | <today's date YYYY-MM-DD> |
+
+## 1. Program Overview
+
+### 1.1 Purpose
+
+<2-4 sentences. What does this program do? What business problem does it solve? When is it invoked?>
+
+### 1.2 Trigger / Invocation
+
+| Trigger Type | Detail |
+|---|---|
+| **How invoked** | <Batch JCL / CICS transaction / Called by <PROGRAM-ID> / Scheduled job> |
+| **Frequency** | <Daily / Monthly / On-demand / Real-time / End-of-day> |
+| **Job name** | <JCL job name if known, else N/A> |
+
+### 1.3 Plain-English Summary
+
+<Paragraph explaining what this program does, step by step, as if explaining to a business analyst. No COBOL jargon.>
+
+## 2. Inputs
+
+### 2.1 Input Files
+
+| File Name | DD Name | Format | Description | Key Fields |
+|---|---|---|---|---|
+
+### 2.2 Input Parameters / PARM
+
+| Parameter | Type | Description | Valid Values |
+|---|---|---|---|
+
+### 2.3 Database Inputs (DB2/SQL)
+
+| Table | Operation | Key Columns | Purpose |
+|---|---|---|---|
+
+### 2.4 Called Programs
+
+| Program | Purpose | Data Passed | Data Returned |
+|---|---|---|---|
+
+## 3. Processing Logic
+
+### 3.1 High-Level Flow
+
+<Numbered list of main processing steps, readable by a business analyst.>
+
+### 3.2 Paragraph / Section Map
+
+| Paragraph / Section | Business Function | Notes |
+|---|---|---|
+
+### 3.3 Business Rules
+
+<List every business rule extracted from the code. Number BR-001, BR-002, etc.>
+
+**BR-001:** <plain-English rule, with the paragraph it appears in>
+
+### 3.4 Calculations
+
+| Calculation ID | Formula | Variables | Purpose |
+|---|---|---|---|
+
+### 3.5 Conditional Logic
+
+| Condition | When True | When False | Business Meaning |
+|---|---|---|---|
+
+## 4. Outputs
+
+### 4.1 Output Files
+
+| File | DD Name | Format | Description | Key Fields Written |
+|---|---|---|---|---|
+
+### 4.2 Database Updates
+
+| Table | Operation | Columns | Condition |
+|---|---|---|---|
+
+### 4.3 Reports / Print Output
+
+| Report | Description | Trigger Condition |
+|---|---|---|
+
+### 4.4 Return Codes
+
+| Return Code | Meaning | Next Action |
+|---|---|---|
+| 0 | Successful | Continue job stream |
+| 4 | Warning | Review output log |
+| 8 | Error | Notify operations |
+| 12 | Abend | Immediate investigation |
+
+## 5. Error Handling
+
+| Error Condition | How Detected | Program Response | Operator Action |
+|---|---|---|---|
+
+## 6. Customizations
+
+> 🔧 Code that appears to be a custom extension to the base product.
+
+| Customization ID | Paragraph / Section | Description | Business Reason (if known) |
+|---|---|---|---|
+
+## 7. Data Dictionary
+
+| Data Item | PIC | Description | Valid Values / Notes |
+|---|---|---|---|
+
+## 8. Dependencies & Interfaces
+
+| Type | Name | Direction | Description |
+|---|---|---|---|
+
+## 9. Open Questions
+
+> ⚠️ Items requiring SME / human review
+
+| # | Question | Code Location | Priority |
+|---|---|---|---|
+
+## 10. Review Checklist
+
+- [ ] Business rules verified by SME
+- [ ] Calculations verified against product documentation
+- [ ] Customizations confirmed with development team
+- [ ] Open questions answered and doc updated
+- [ ] Test cases generated
+- [ ] Approved by business analyst / product owner
+
+## Hard rules
+
+1. Never invent business logic. Only document what is in the code.
+2. Flag every ambiguity with ⚠️ UNCLEAR — don't guess.
+3. Flag every customization with 🔧 CUSTOM in the relevant section.
+4. Numbered IDs (BR-001, CALC-001, CUST-001) are sequential within their section.
+5. Tables must have rows even if you write "Not applicable" — empty tables are not allowed.
+```
+
+## Example output (excerpt)
+
+```markdown
+# Functional Specification: MMACLM01
+
+| Field | Value |
+|---|---|
+| **Program ID** | MMACLM01 |
+| **Source File** | mmaclm01.cbl |
+| **Source Folder** | Mass Mutual Ascend CUSTOM SRC |
+| **Functional Domain** | Claims |
+| **Program Type** | Batch |
+| **Customization Status** | 🔧 Custom extension (entire file) |
+
+## 1. Program Overview
+
+### 1.1 Purpose
+
+MMACLM01 processes the daily claims FNOL feed from the customer
+portal, validates each notice against the policy master, and creates
+draft claim records in the LifePro claims module. Invoked end-of-day
+by job MMACLMJ01.
+
+### 3.3 Business Rules
+
+**BR-001:** A claim notice is rejected if the policy is in LAPSE
+status as of the loss date (PROCEDURE: VALIDATE-POLICY-STATUS, line 412).
+
+**BR-002:** 🔧 CUSTOM — Claims for variable annuity contracts are
+routed to the VA claims queue (DEST-CODE = "VAQ") instead of the
+default queue (PROCEDURE: ROUTE-BY-PRODUCT, line 567).
+```
+
+## Tips
+
+- Pair with the **Regression Bed Master** template — once you have a stack of functional specs, build the regression suite from them.
+- For COBOL programs over ~2k lines, run this in two passes: structural (DIVISIONS + paragraph map) first, then a second pass for business rules + calculations.
+- Always include a domain glossary for the industry — life insurance, banking, healthcare, etc. — otherwise the model defaults to generic terminology.
+- The `.docx` output that stakeholders ultimately want can be produced by piping this markdown through a `markdown → docx` converter (Pandoc, `npx md-to-docx`, etc.).

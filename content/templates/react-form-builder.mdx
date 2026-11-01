@@ -1,0 +1,181 @@
+---
+title: "React Form Builder (react-hook-form + Zod)"
+slug: "react-form-builder"
+description: "Build a fully accessible, type-safe form with react-hook-form, Zod validation, and shadcn/ui components."
+type: template
+phase: build
+category: forms
+projectType: ["custom-app"]
+stack: ["react", "typescript", "nextjs", "tailwind", "shadcn-ui"]
+tags: ["forms", "validation", "accessibility"]
+difficulty: intermediate
+estimatedTime: "20 min"
+author: "Platform Engineering"
+featured: true
+createdAt: 2026-04-26
+updatedAt: 2026-04-26
+inputs:
+  - name: form_purpose
+    description: "What this form does (e.g., 'create a new customer', 'edit profile')"
+    required: true
+  - name: fields_spec
+    description: "Fields with types and validation rules"
+    required: true
+  - name: submit_action
+    description: "What happens on submit (API call, server action, etc.)"
+    required: false
+output:
+  format: code
+relatedAssets:
+  - "shadcn-component-builder"
+  - "nextjs-page-scaffolder"
+---
+
+# React Form Builder (react-hook-form + Zod)
+
+Generate a production-grade React form using react-hook-form for state, Zod for validation, and shadcn/ui for components. Forms are typed end-to-end, accessible, and handle async submission, server errors, and optimistic UI properly.
+
+## When to use
+
+- Building any non-trivial form (3+ fields with validation)
+- Need typed validation with TypeScript inference
+- Want consistent form UX across the app
+- Need accessibility (screen reader labels, keyboard nav) done right
+
+## Prompt
+
+````text
+You are a senior React engineer specializing in forms and accessibility.
+Generate a complete form using react-hook-form + Zod + shadcn/ui.
+
+## Input
+
+**Form purpose:** {{form_purpose}}
+**Fields:**
+{{fields_spec}}
+
+**Submit action:** {{submit_action}}
+
+## Files to generate
+
+1. **`forms/[name].schema.ts`** — Zod schema with:
+   - All fields with appropriate types
+   - Validation rules (min/max length, regex, custom refinements)
+   - Useful error messages (specific, actionable)
+   - Type export via `z.infer`
+
+2. **`forms/[name].tsx`** — The form component:
+   - Uses `useForm<FormValues>` with `zodResolver`
+   - Default values explicitly set (avoids uncontrolled-to-controlled warnings)
+   - shadcn/ui Form components (`Form`, `FormField`, `FormItem`, `FormLabel`, `FormControl`, `FormMessage`)
+   - Each field uses `<Controller>` or shadcn's `<FormField>` pattern
+   - Submit handler is async, with loading state
+   - Server errors surfaced via `setError('root.serverError')`
+   - Disable submit button when:
+     - Form is submitting
+     - Form has validation errors
+     - Form is pristine (optional - depends on use case)
+   - Show field-level errors inline below each input
+   - Show server errors at the top of the form
+
+3. **`forms/[name].test.tsx`** — Vitest + RTL tests:
+   - Renders all fields
+   - Shows validation errors on invalid submit
+   - Calls submit handler with parsed values on valid submit
+   - Surfaces server errors
+   - Disables submit during async submission
+
+## Standards
+
+### Validation patterns
+- Use `.trim()` on string fields where user might add accidental whitespace
+- Use `.email()` for email, `.url()` for URLs, `.uuid()` for IDs
+- Use `.refine()` for cross-field validation (e.g., password matches confirmPassword)
+- Use `.transform()` to coerce values (e.g., string to Date, string to number)
+- Use `z.discriminatedUnion()` for variant-based forms
+
+### Accessibility (non-negotiable)
+- Every field has a `<FormLabel>` (visible OR sr-only with aria-label)
+- Required fields marked with aria-required and visual indicator
+- Error messages linked via aria-describedby
+- Focus moves to first error on submit fail
+- Submit button has clear text ("Save customer", not "Submit")
+- Loading state announced to screen readers (aria-live="polite" status)
+
+### UX patterns
+- Inline validation on blur (not on every keystroke — too noisy)
+- Show success state briefly (then redirect or reset)
+- Preserve user input on server error (don't clear the form)
+- For long forms, group into sections with semantic <fieldset>
+- For optional fields, label them "(optional)" rather than marking required ones with *
+
+### Error handling
+- Network errors: "Couldn't reach the server. Please try again."
+- 4xx server errors: parse field-level errors from response, set on respective fields
+- 5xx server errors: generic message + reference ID for support
+- Validation errors from Zod: show inline below the field
+
+### State management
+- Loading state during submission
+- Show optimistic UI where appropriate (e.g., "Customer created" before server confirms)
+- Reset form on successful submit (or redirect)
+- Confirm before navigation if form has unsaved changes (use react-router or Next.js `usePathname`)
+
+## Field type cheat sheet
+
+| Field type | Component | Schema |
+|------------|-----------|--------|
+| Text | `<Input>` | `z.string().min(1)` |
+| Email | `<Input type="email">` | `z.string().email()` |
+| Number | `<Input type="number">` | `z.coerce.number().min(0)` |
+| Textarea | `<Textarea>` | `z.string().max(1000)` |
+| Select (single) | `<Select>` | `z.enum([...])` |
+| Multi-select | `<Combobox>` | `z.array(z.string()).min(1)` |
+| Date | `<Calendar>` + `<Popover>` | `z.coerce.date()` |
+| Checkbox | `<Checkbox>` | `z.boolean()` |
+| Radio group | `<RadioGroup>` | `z.enum([...])` |
+| File upload | `<Input type="file">` | `z.instanceof(File).refine(...)` |
+| Password | `<Input type="password">` | `z.string().min(8).regex(...)` |
+
+## Output
+
+For each file:
+1. Full file path
+2. Complete code in fenced code block
+
+After the files:
+- **"## Wiring"** — how to use the form in a page
+- **"## Accessibility checklist"** — what was implemented
+- **"## Edge cases handled"** — list of edge cases the implementation covers
+- **"## Future improvements"** — 2-3 enhancements (e.g., autosave, draft recovery)
+````
+
+## Example input
+
+```yaml
+form_purpose: "Create a new customer"
+fields_spec: |
+  - companyName: string, required, 1-200 chars
+  - contactEmail: string, required, must be email
+  - contactPhone: string, optional, must match phone pattern
+  - industry: enum [tech, retail, healthcare, finance, other]
+  - employeeCount: number, optional, 1-1000000
+  - notes: string, optional, max 2000 chars
+submit_action: "POST /api/customers (returns { id: string })"
+```
+
+## Tips
+
+- Run shadcn CLI first: `npx shadcn@latest add form input textarea select checkbox` to install primitives
+- Use `useFieldArray` for forms with repeated sections (line items, multiple addresses)
+- For very long forms, consider splitting into a wizard with steps
+- Use the **shadcn/ui Component Builder** template for any custom field components needed
+
+## Common mistakes to avoid
+
+- Forgetting `defaultValues` (causes uncontrolled-to-controlled warnings)
+- Validating on every keystroke (too noisy, validate on blur)
+- Clearing the form on server error (frustrates users)
+- Generic error messages ("Something went wrong" — useless)
+- Missing aria-describedby links between inputs and error messages
+- Not testing keyboard-only navigation (Tab, Shift+Tab, Enter on submit)

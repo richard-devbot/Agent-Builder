@@ -1,0 +1,193 @@
+---
+title: "Test Cases from a User Story"
+slug: "test-cases-from-user-story"
+description: "Generate positive and negative test cases — title, preconditions, steps, expected result — from a user story."
+type: template
+phase: test
+category: e2e-testing
+projectType: ["custom-app"]
+stack: []
+tags: ["qa", "test-cases", "manual-testing", "test-design"]
+difficulty: beginner
+estimatedTime: "10 min"
+author: "Platform Engineering"
+createdAt: 2026-04-26
+updatedAt: 2026-04-26
+inputs:
+  - name: user_story
+    description: "The user story (paste the description + acceptance criteria, or the JSON output of any of the user-story templates)"
+    required: true
+  - name: scope
+    description: "Scope — e.g. 'happy path only', 'happy + critical edge', 'exhaustive' (optional)"
+    required: false
+  - name: test_data_notes
+    description: "Notes about available test data, fixtures, or accounts (optional)"
+    required: false
+output:
+  format: markdown
+relatedAssets:
+  - "user-story-from-prd"
+  - "user-story-gherkin"
+  - "test-automation-script"
+  - "code-review-comprehensive"
+---
+
+# Test Cases from a User Story
+
+Generate a structured set of test cases — positive paths, negative paths, edge cases, and at least one accessibility / non-functional check — from any user story. Output is Markdown so it drops cleanly into TestRail, Xray, Zephyr, or a `/qa/cases.md` in the repo.
+
+## When to use
+
+- You've finished a user story and need test cases before development starts (shift-left)
+- You're handing a story to a QA contractor or new team member who needs the cases spelled out
+- You want a consistent test-case format across the team
+
+## Prompt
+
+```text
+You are a senior QA engineer. Write a comprehensive set of test cases for the
+following user story. Cover positive scenarios, negative scenarios, edge cases,
+and at least one accessibility or non-functional check.
+
+## User story
+
+{{user_story}}
+
+## Scope
+
+{{scope}}
+
+## Test data notes
+
+{{test_data_notes}}
+
+## Output requirements
+
+Return a Markdown document organized as follows:
+
+# Test cases — <story title>
+
+## Summary
+
+| Type | Count |
+|------|-------|
+| Positive | N |
+| Negative | N |
+| Edge / boundary | N |
+| Non-functional / a11y | N |
+
+## TC-001 — <short title>
+
+| Field | Value |
+|-------|-------|
+| Type | Positive | Negative | Edge | Non-functional |
+| Priority | P0 | P1 | P2 | P3 |
+| Preconditions | Comma-separated list |
+| Test data | Specific values, accounts, or "see fixtures/X" |
+
+**Steps**
+1. Step one
+2. Step two
+3. ...
+
+**Expected result**
+- Bullet 1
+- Bullet 2
+
+**Notes** (optional — flaky risks, dependencies on other cases, etc.)
+
+---
+
+(Repeat for TC-002, TC-003, ...)
+
+## Coverage notes
+
+- Which acceptance criteria are NOT covered and why (or "all covered")
+- Which behaviors require manual verification vs. automation candidates
+- Open questions for the product owner
+
+## Style guide
+
+- Each test case verifies ONE behavior. Don't chain unrelated checks.
+- Steps are numbered, imperative, and observable from the user's seat
+  (no "the database row is updated" — that's an expected result, not a step).
+- Expected results are specific. "Page works" is not a result; "User is
+  redirected to /dashboard within 2 seconds and sees their name in the header"
+  is.
+- Mark every case Positive / Negative / Edge / Non-functional in the metadata
+  table.
+- Negative cases should outnumber positive cases in most well-tested stories.
+- Always include at least one accessibility check (keyboard nav, screen reader
+  announcement, contrast, focus management).
+
+## Coverage rules
+
+- For every acceptance criterion in the story, generate at least one positive
+  case AND at least one negative case where applicable.
+- Boundary checks: min, max, just-below-min, just-above-max for any input.
+- Permission/role checks: at least one case per privileged role mentioned.
+
+Return ONLY the Markdown document above — no leading commentary, no closing
+notes outside the structure.
+```
+
+## Example output (excerpt)
+
+```markdown
+# Test cases — Customer can reset password via email link
+
+## Summary
+
+| Type | Count |
+|------|-------|
+| Positive | 2 |
+| Negative | 4 |
+| Edge / boundary | 3 |
+| Non-functional / a11y | 2 |
+
+## TC-001 — Request reset email with registered address
+
+| Field | Value |
+|-------|-------|
+| Type | Positive |
+| Priority | P0 |
+| Preconditions | User is signed out; valid account exists for `qa+pwreset@example.com` |
+| Test data | `qa+pwreset@example.com` |
+
+**Steps**
+1. Navigate to `/sign-in`.
+2. Click `Forgot password`.
+3. Enter `qa+pwreset@example.com` and submit.
+
+**Expected result**
+- Confirmation page reads `If that email exists, a reset link is on its way.`
+- Within 30 seconds, an email arrives at the test inbox titled `Reset your password`.
+- The link in the email points to `/reset?token=<32+ chars>`.
+
+---
+
+## TC-005 — Request reset for unknown address (privacy)
+
+| Field | Value |
+|-------|-------|
+| Type | Negative |
+| Priority | P1 |
+| Preconditions | No account exists for `qa+nope@example.com` |
+| Test data | `qa+nope@example.com` |
+
+**Steps**
+1. Navigate to `/sign-in`.
+2. Click `Forgot password`.
+3. Enter `qa+nope@example.com` and submit.
+
+**Expected result**
+- Same confirmation page as TC-001 (do NOT leak whether the address is registered).
+- No email is sent to the test inbox within 60 seconds.
+- Internal audit log records the attempt with reason `unknown_email`.
+```
+
+## Tips
+
+- Pair this with the **Test Automation Script** template — drop a single test case in and get an automated test in your framework of choice.
+- If the user story was generated by the **Gherkin** template, the scenarios array maps cleanly to TC-001..TC-N.
+- For pure-API stories, replace UI steps with `curl`-equivalent steps or actual request/response payloads.

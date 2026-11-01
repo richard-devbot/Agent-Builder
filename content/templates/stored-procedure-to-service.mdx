@@ -1,0 +1,285 @@
+---
+title: "Stored Procedure to Service Migration"
+slug: "stored-procedure-to-service"
+description: "Convert business logic embedded in T-SQL stored procedures into testable, observable application services."
+type: template
+phase: build
+category: backend-development
+projectType: ["custom-app"]
+stack: ["dotnet", "sql"]
+tags: ["migration", "stored-procedures", "refactoring", "dotnet"]
+difficulty: advanced
+estimatedTime: "varies (per procedure)"
+author: "Platform Engineering"
+featured: false
+createdAt: 2026-04-26
+updatedAt: 2026-04-26
+inputs:
+  - name: stored_procedure
+    description: "The T-SQL stored procedure source"
+    required: true
+  - name: target_language
+    description: "Target language/framework (C#/.NET, Python/FastAPI, etc.)"
+    required: true
+  - name: business_context
+    description: "What this procedure is used for in the application"
+    required: false
+output:
+  format: code
+relatedAssets:
+  - "sql-server-schema-translator"
+  - "data-migration-plan"
+---
+
+# Stored Procedure to Service Migration
+
+Legacy SQL Server applications often have years of business logic buried in stored procedures. Migrating to modern architecture means lifting that logic out of the database and into testable application services. This template handles that translation systematically.
+
+## When to use
+
+- Migrating from SQL Server-heavy architecture (logic in T-SQL) to modern app-layer architecture
+- Specific procedures keep causing bugs and need refactoring
+- The team wants to add tests / observability to logic that's currently invisible
+- DBAs want stored procedures simplified to data access only
+
+## Why move logic out of the database
+
+| Concern | In stored proc | In app service |
+|---------|---------------|-----------------|
+| Testability | Hard (requires DB) | Easy (unit tests) |
+| Version control | Often not | Always |
+| Code review | Often skipped | Required |
+| Observability | Limited (SQL traces) | Full (APM, logs, traces) |
+| Reusability across UIs | Tied to one app | API-callable |
+| Performance tuning | Limited tools | Profilers, flame graphs |
+| Refactoring | Risky, no safety net | Safe with tests |
+| Debugging | Print statements | Modern debuggers |
+
+The DB should hold and shape data; the app should hold logic.
+
+## Prompt
+
+````text
+You are a senior engineer who has migrated thousands of stored procedures
+to application services. Translate the T-SQL procedure into a clean
+service-layer implementation.
+
+## Input
+
+**Stored procedure:**
+```sql
+{{stored_procedure}}
+```
+
+**Target language:** {{target_language}}
+**Business context:** {{business_context}}
+
+## Process
+
+### Step 1: Decompose the procedure
+
+Identify each concern in the procedure:
+
+1. **Data access** (SELECT, INSERT, UPDATE, DELETE) — moves to repository layer
+2. **Business logic** (calculations, validations, branching) — moves to service layer
+3. **Cross-cutting** (logging, error handling, transactions) — moves to middleware/decorators
+4. **Side effects** (triggers, message sends, file operations) — explicit in service layer
+
+Annotate the procedure showing what's what.
+
+### Step 2: Identify the public contract
+
+What inputs go in, what outputs come out?
+
+- **Parameters:** translate to service method parameters with types
+- **Result sets:** what does the procedure return?
+- **Output parameters:** convert to return values (TypeScript/C# tuples or DTOs)
+- **Side effects:** document explicitly (sends email, updates audit log, etc.)
+- **Error conditions:** what can fail and how?
+
+This becomes the service interface.
+
+### Step 3: Generate the service
+
+Three layers:
+
+#### Layer 1: Repository (data access only)
+
+For each SELECT / INSERT / UPDATE / DELETE in the procedure, generate a
+repository method. NO business logic here — just data access.
+
+```csharp
+public interface ICustomerRepository
+{
+    Task<Customer?> GetByIdAsync(Guid id);
+    Task<Customer?> GetByEmailAsync(string email);
+    Task UpdateLastLoginAsync(Guid id, DateTimeOffset loggedInAt);
+    Task<int> InsertAuditLogAsync(AuditEntry entry);
+}
+```
+
+#### Layer 2: Service (business logic)
+
+The actual translation of the procedure's logic, calling the repository
+for data access. Pure logic, no SQL strings.
+
+```csharp
+public class CustomerLoginService
+{
+    private readonly ICustomerRepository _customerRepo;
+    private readonly IAuditRepository _auditRepo;
+    private readonly IEmailService _emailService;
+    private readonly IClock _clock;
+
+    public async Task<LoginResult> ProcessLoginAsync(LoginRequest request)
+    {
+        var customer = await _customerRepo.GetByEmailAsync(request.Email);
+        if (customer == null) return LoginResult.NotFound;
+
+        if (customer.LockedUntil > _clock.Now) {
+            return LoginResult.Locked(customer.LockedUntil.Value);
+        }
+
+        // ... rest of logic translated from the procedure
+
+        await _customerRepo.UpdateLastLoginAsync(customer.Id, _clock.Now);
+        await _auditRepo.InsertAuditLogAsync(new AuditEntry { ... });
+
+        return LoginResult.Success(customer);
+    }
+}
+```
+
+#### Layer 3: Tests
+
+Generate unit tests for the service that mock the repository:
+
+```csharp
+public class CustomerLoginServiceTests
+{
+    [Fact]
+    public async Task ProcessLogin_ReturnsLocked_WhenAccountLocked()
+    {
+        var customerRepo = Substitute.For<ICustomerRepository>();
+        var auditRepo = Substitute.For<IAuditRepository>();
+        var emailService = Substitute.For<IEmailService>();
+        var clock = new TestClock(DateTimeOffset.Parse("2024-01-15T12:00:00Z"));
+
+        customerRepo.GetByEmailAsync("user@example.com").Returns(new Customer {
+            Id = Guid.NewGuid(),
+            LockedUntil = DateTimeOffset.Parse("2024-01-15T13:00:00Z")
+        });
+
+        var sut = new CustomerLoginService(customerRepo, auditRepo, emailService, clock);
+        var result = await sut.ProcessLoginAsync(new LoginRequest { Email = "user@example.com" });
+
+        result.Status.Should().Be(LoginStatus.Locked);
+        await customerRepo.DidNotReceive().UpdateLastLoginAsync(default, default);
+    }
+}
+```
+
+### Step 4: Translate common T-SQL patterns
+
+Map idiomatic T-SQL to idiomatic target-language code:
+
+| T-SQL pattern | C# equivalent |
+|---------------|---------------|
+| `IF @count = 0` | `if (count == 0)` |
+| `SET @var = ...` | `var x = ...` |
+| `BEGIN TRANSACTION` | `using var tx = await connection.BeginTransactionAsync()` |
+| Cursors | `foreach` over async enumerable (or LINQ) |
+| Temp tables | In-memory collections (List, Dictionary) |
+| Dynamic SQL | Strongly-typed query builder or LINQ — never string concat |
+| `RAISERROR` | `throw new BusinessException(...)` |
+| `OUTPUT` clauses | `RETURNING` (Postgres) or separate query |
+| Table-valued params | Pass IEnumerable<T>, bulk insert via Dapper / EF |
+
+### Step 5: Handle transactions correctly
+
+Stored procedures often have implicit transaction boundaries. Make them explicit:
+
+```csharp
+using var connection = await _connectionFactory.OpenAsync();
+using var tx = await connection.BeginTransactionAsync();
+try
+{
+    // ... operations
+    await tx.CommitAsync();
+}
+catch
+{
+    await tx.RollbackAsync();
+    throw;
+}
+```
+
+For async multi-step operations, consider whether everything must be in
+one transaction or whether SAGA / outbox patterns are appropriate.
+
+### Step 6: Handle existing callers
+
+The procedure has callers (other procs, app code, scheduled jobs). For each:
+
+- **App code calling via SqlCommand:** update to call the new service
+- **Other procs calling this proc:** they need the same migration
+- **Scheduled jobs / SQL Agent:** trigger via API, function, or recurring job
+- **External integrations:** if external systems call this proc directly, you may need to keep it as a thin wrapper that calls the new service
+
+### Step 7: Document migration
+
+For each migrated proc, document:
+
+- **Original proc name** (for traceability)
+- **New service / method**
+- **Test coverage achieved**
+- **Side effects** (emails, audit logs, file writes — explicit list)
+- **Performance comparison** (before/after on representative inputs)
+- **Decommission criteria** (when the original proc can be dropped)
+
+### Step 8: Decommission original
+
+Don't delete the proc immediately. Instead:
+
+1. Add `RAISERROR` at the start: "This procedure is deprecated. Calling it logs to audit_deprecated_calls table."
+2. Monitor the audit log for callers
+3. When no calls for 30 days, drop the procedure
+
+## Quality requirements
+
+- Service layer has NO SQL strings (uses repository)
+- Repository layer has NO business logic (just queries)
+- Tests cover all decision branches in the original proc
+- All side effects (emails, logs) are explicit and testable
+- No hidden dependencies on other procs (must be self-contained)
+- Code is reviewable (readable to engineers who don't know T-SQL)
+
+## Output structure
+
+Produce:
+
+1. **Repository interface and implementation** in target language
+2. **Service interface and implementation** with full logic
+3. **DTO classes** for inputs and outputs
+4. **Unit tests** covering all branches
+5. **Migration notes** documenting what changed
+6. **Decommission script** for the original proc (with monitoring)
+````
+
+## Tips
+
+- **One proc at a time.** Don't try to migrate 100 procs in one PR.
+- **Start with the most-called procs.** Highest leverage.
+- **Skip simple data-access procs.** A proc that's just `SELECT * FROM customer WHERE id = @id` doesn't need migration to a service — it can become a repository method directly.
+- **Watch for cursors.** They're often hiding what should be set-based queries. Look for opportunities to do the work in a single SQL statement instead.
+- **Watch for global state.** T-SQL procedures sometimes modify @@GLOBAL_VARS or use SQL Server-specific session state. These don't translate.
+- **Performance test before deprecating.** Sometimes the proc was fast precisely because it ran in the DB. Multi-trip-to-DB service implementations can be slower.
+
+## Common mistakes to avoid
+
+- Migrating procs to procs in the new DB engine instead of moving logic to app code
+- Letting SQL strings creep into the service layer
+- Untested service code (the whole point of the migration is testability)
+- Hidden side effects not documented (the email that no one knew was sent)
+- Decommissioning the original proc before all callers are migrated
+- Performance regression because the new code does N queries instead of one

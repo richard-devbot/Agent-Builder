@@ -1,0 +1,357 @@
+---
+title: "Legacy ETL to Azure Modernization Playbook"
+slug: "legacy-etl-to-azure-modernization-playbook"
+description: "Migrate legacy ETL tools (Informatica, SSIS, DataStage, Pentaho) to Azure Data Factory + Microsoft Fabric + PySpark with parity validation and incremental rollout."
+type: playbook
+phase: design
+category: architecture
+projectType: ["etl"]
+stack: ["azure", "adf", "fabric", "pyspark"]
+tags: ["etl", "migration", "informatica", "ssis", "datastage", "azure", "modernization"]
+difficulty: advanced
+estimatedTime: "2-4 quarters"
+totalEstimatedTime: "2-4 quarters — driven mostly by pipeline count + complexity"
+author: "Platform Engineering"
+featured: true
+createdAt: 2026-04-26
+updatedAt: 2026-04-27
+intakeFields:
+  - name: legacy_etl_tool
+    label: "Legacy ETL tool"
+    type: text
+    required: true
+    placeholder: "Informatica PowerCenter 10.5 / SSIS 2014 / DataStage 11.7 / Pentaho 8 / Mix"
+  - name: pipeline_count
+    label: "Pipeline / mapping inventory"
+    type: textarea
+    required: true
+    placeholder: "Approximately 350 mappings, 120 workflows, scheduled via Tidal. ~50 are critical-path nightly jobs."
+  - name: source_target_landscape
+    label: "Sources and targets"
+    type: textarea
+    required: true
+    placeholder: "Sources: SAP, Salesforce, on-prem SQL Server (8 dbs), Oracle EBS. Targets: Teradata DW (decommissioning), some SQL Server marts, Power BI"
+  - name: target_azure_platform
+    label: "Target Azure platform"
+    type: text
+    required: true
+    placeholder: "ADF + Synapse + ADLS / Microsoft Fabric / Hybrid"
+  - name: timeline_driver
+    label: "Timeline driver"
+    type: text
+    required: false
+    placeholder: "Informatica license renewal in Q2 2026 / Hardware EOL on Teradata in 18 months / No hard deadline"
+  - name: business_constraints
+    label: "Business constraints"
+    type: textarea
+    required: false
+    placeholder: "Daily reports must continue running uninterrupted / Quarter-end financial close cannot be disrupted / SOX-compliant audit trail required"
+steps:
+  - number: 1
+    title: "Pipeline Inventory and Audit"
+    description: "Inventory every legacy mapping / workflow / package — active vs dead, who consumes it, complexity, criticality, owner. Pipeline counts always come in higher than expected."
+    whatYoureDoing: "Document every pipeline in the legacy tool: active or dead, source / target tables, transformation complexity, schedule and dependencies, SLA, owner. Capture tool-specific artifacts (Informatica mapplets / parameter files, SSIS .dtsx + script tasks, DataStage routines / sequences). Expect 20-40% of pipelines to be dead — those don't get migrated; they get retired."
+    primaryAsset: "data-source-inventory-profiling"
+    alternativeAssets:
+      - slug: "legacy-system-audit"
+        when: "You want a more general audit framework alongside the pipeline-specific profiling"
+    relevantSkills:
+      - "migration-planner-skill"
+      - "legacy-code-analyzer-skill"
+    relevantMcpConfigs:
+      - "filesystem-mcp"
+      - "postgres-mcp"
+      - "confluence-mcp"
+    estimatedTime: "6-10 weeks"
+    definitionOfDone:
+      - "Complete pipeline inventory (all mappings, workflows, schedules)"
+      - "Active vs dead classification (with explicit criteria)"
+      - "Consumer mapping for each output (who uses what)"
+      - "Complexity score per pipeline (Simple / Medium / Complex / Hairy)"
+      - "Critical path identified (jobs that block business operations)"
+      - "Dead-pipeline retirement list (don't migrate; just delete)"
+      - "SME assignments for migration validation"
+      - "Risk register"
+    commonPitfalls:
+      - "Trusting the inventory provided — run actual job-log queries; trust data over documentation"
+      - "Missing scheduler dependencies — external schedulers (Tidal, Control-M) often have more coordination than the ETL tool itself"
+      - "Ignoring custom code — SSIS Script Tasks, Informatica Java/Python transformations, DataStage routines all hold logic"
+      - "Auditing only production — dev / QA may have pipelines running that nobody knows about"
+      - "Underestimating dead pipelines — often 20-40% of inventory is dead; retirement is high-leverage work"
+
+  - number: 2
+    title: "Strategy Decision (per Pipeline Category)"
+    description: "Not every pipeline needs the same approach. Categorize each into rewrite, tool-assisted translation, redesign, retire, or replace-with-platform-feature."
+    whatYoureDoing: "For each pipeline, pick a strategy: (A) direct rewrite in ADF + PySpark, (B) tool-assisted translation (Informatica IICS, AWS SCT, SSMA), (C) rethink and redesign (for pipelines that were bad anyway), (D) retire (for dead or duplicated work — 20-40% of inventory), (E) replace with platform feature (Fabric Mirroring, Fivetran, Debezium CDC). Document the categorization."
+    primaryAsset: "migration-risk-register"
+    alternativeAssets:
+      - slug: "coexistence-architecture-adr"
+        when: "Capturing the strategy decisions as architecture decision records alongside the risk register"
+    relevantSkills:
+      - "migration-planner-skill"
+    relevantMcpConfigs:
+      - "filesystem-mcp"
+      - "confluence-mcp"
+    estimatedTime: "2-3 weeks"
+    definitionOfDone:
+      - "Every pipeline categorized into a strategy (A/B/C/D/E)"
+      - "Retirement list confirmed — pipelines NOT migrating"
+      - "Tool-assisted translation tooling chosen (if applicable)"
+      - "Replace-with-platform candidates identified"
+      - "High-level effort estimate per strategy"
+      - "Risk register updated"
+    commonPitfalls:
+      - "One-size-fits-all strategy — different pipelines need different approaches"
+      - "Skipping the retirement list — migrating dead pipelines is the easiest waste to eliminate"
+      - "Picking automated translation without piloting — tools vary in quality"
+      - "Underestimating \"rethink\" pipelines — \"while we're modernizing, let's also...\" is a project killer"
+
+  - number: 3
+    title: "Target Architecture and Framework"
+    description: "Stand up the Azure-side architecture and the metadata-driven pipeline framework before migrating any specific pipeline. Reuses Phases 2-5 of the Azure Data Platform Modernization playbook."
+    whatYoureDoing: "Make the Fabric vs Synapse vs Hybrid decision, set up the metadata-driven ADF / Fabric pipeline framework, deploy the PySpark transformation framework with shared utility library, integrate the data quality framework. Don't reinvent — use the Azure Data Platform Modernization Playbook's framework setup as your starting point."
+    primaryAsset: "adf-fabric-pipeline-design-patterns"
+    alternativeAssets:
+      - slug: "pyspark-transformation-standards"
+        when: "Setting up the PySpark side of the framework specifically"
+      - slug: "data-quality-test-suite"
+        when: "Building the DQ framework as part of the platform setup"
+      - slug: "azure-data-platform-modernization-playbook"
+        when: "You want a complete framework-build sequence to follow alongside this playbook"
+    relevantSkills:
+      - "migration-planner-skill"
+      - "compatibility-layer-generator-skill"
+    relevantMcpConfigs:
+      - "azure-devops-mcp"
+      - "filesystem-mcp"
+    estimatedTime: "4-6 weeks"
+    definitionOfDone:
+      - "Target architecture documented (Fabric / Synapse / Hybrid choice)"
+      - "Pipeline framework operational in dev"
+      - "PySpark framework with shared utility library"
+      - "DQ framework integrated into pipelines"
+      - "First \"hello world\" pipeline migrated end-to-end (proves the framework)"
+    commonPitfalls:
+      - "Skipping the framework — hand-coding 350 ADF pipelines is the path to madness"
+      - "Choosing tools without piloting — validate the architecture with one real pipeline before declaring done"
+
+  - number: 4
+    title: "Behavior Parity Test Framework"
+    description: "Lock down legacy pipeline behavior as ground truth — including the quirks (rounding, null handling, date / sort / aggregation behavior). The new pipelines must match these to keep trust."
+    whatYoureDoing: "Build a reconciliation framework that captures legacy outputs and compares against new outputs with explicit tolerance configuration per data type. Document the quirk catalog (legacy behavior the new system must intentionally preserve). Prepare a sanitized production-data corpus. Run reconciliation in CI for every new pipeline."
+    primaryAsset: "behavior-parity-test-suite"
+    alternativeAssets:
+      - slug: "data-quality-test-suite"
+        when: "DQ checks are the right framework for the parity work in your case"
+    relevantSkills:
+      - "data-validation-skill"
+      - "test-generator-skill"
+    relevantMcpConfigs:
+      - "filesystem-mcp"
+      - "postgres-mcp"
+    estimatedTime: "4-6 weeks"
+    definitionOfDone:
+      - "Reconciliation framework built and tested"
+      - "Tolerance configuration documented per data type"
+      - "Quirk catalog started (legacy behaviors intentionally preserved)"
+      - "Sample data corpus prepared (production-realistic, sanitized)"
+      - "Reconciliation runs in CI for new pipelines"
+      - "First pilot pipeline shows parity"
+    commonPitfalls:
+      - "Skipping parity tests — \"we'll just check the counts\" is insufficient"
+      - "Not running on production data — synthetic data hides quirks"
+      - "No tolerance configuration — either everything must match exactly (impossible) or nothing matches (useless)"
+      - "Hiding quirks instead of documenting — quirks come back as bug reports"
+      - "No reconciliation in CI — ad-hoc parity checks drift over time"
+
+  - number: 5
+    title: "Pilot Migration (1-3 Representative Pipelines)"
+    description: "Validate the framework end-to-end on real pipelines: one simple, one medium, one complex. The pilot is where you discover what the framework didn't anticipate."
+    whatYoureDoing: "Pick 1-3 pipelines spanning the complexity range. For each: document the legacy mapping, design the modern equivalent, build in ADF + PySpark, run parity tests, resolve discrepancies, deploy in shadow mode (parallel to legacy), cut over consumers when confident. Update the framework based on what you learn."
+    primaryAsset: "feature-flag-rollout-migration"
+    alternativeAssets:
+      - slug: "behavior-parity-test-suite"
+        when: "The pilot needs new parity scenarios beyond what the framework has"
+      - slug: "migration-cutover-runbook"
+        when: "Cutting consumers over from legacy to new — formal runbook drives the change"
+      - slug: "pyspark-transformation-standards"
+        when: "Implementation pattern reference while building the pilot pipelines"
+    relevantSkills:
+      - "spec-driven-builder"
+      - "compatibility-layer-generator-skill"
+      - "data-validation-skill"
+      - "test-generator-skill"
+    relevantMcpConfigs:
+      - "azure-devops-mcp"
+      - "github-mcp"
+      - "filesystem-mcp"
+      - "postgres-mcp"
+    estimatedTime: "6-10 weeks"
+    definitionOfDone:
+      - "1-3 pilot pipelines fully migrated"
+      - "Parity tests pass for each"
+      - "Shadow mode validation (parallel runs producing matching output)"
+      - "Successful cutover to new pipelines"
+      - "Lessons documented; framework updated based on findings"
+    commonPitfalls:
+      - "Pilot too easy — pick representative complexity; otherwise the framework isn't validated"
+      - "Skipping shadow mode — first time the new pipeline runs alone is when bugs appear"
+      - "No rollback drill — practice rolling back before you need to"
+      - "Ignoring lessons — each pilot should update the framework or patterns"
+
+  - number: 6
+    title: "Mass Migration"
+    description: "Migrate the bulk of pipelines in batches using the established patterns. Common batching: by source system, by consumer, by complexity, or by owner."
+    whatYoureDoing: "Pipeline by pipeline, in batches. For each: migrate following established patterns, reconcile against legacy output, run shadow for N days, cut over consumers, document new patterns, retire the legacy pipeline. Track % pipelines migrated, % consumers cut over, DQ pass rate, cost trajectory."
+    primaryAsset: "feature-flag-rollout-migration"
+    alternativeAssets:
+      - slug: "pyspark-transformation-standards"
+        when: "Adding new patterns or refining existing ones during the mass migration"
+      - slug: "scd-implementation-pyspark"
+        when: "A batch contains slowly-changing-dimension migrations"
+      - slug: "data-quality-test-suite"
+        when: "Adding DQ tests as new pipelines come online"
+    relevantSkills:
+      - "spec-driven-builder"
+      - "migration-planner-skill"
+      - "test-generator-skill"
+      - "code-reviewer-skill"
+      - "data-validation-skill"
+    relevantMcpConfigs:
+      - "azure-devops-mcp"
+      - "github-mcp"
+      - "filesystem-mcp"
+    estimatedTime: "1-3 quarters"
+    definitionOfDone:
+      - "All in-scope pipelines migrated"
+      - "All consumers cut over to new pipelines"
+      - "Legacy pipelines disabled (not yet deleted)"
+      - "Reconciliation continues for monitoring period"
+      - "DQ acceptable across new pipelines"
+    commonPitfalls:
+      - "Long tail of \"weird\" pipelines — they take 50% of the time. Budget for it"
+      - "Burnout — multi-quarter projects need rotation and small wins"
+      - "Pattern divergence — each engineer reinvents patterns; maintain code review"
+      - "Skipping reconciliation in batch — discovers issues after consumer cutover"
+      - "No retire step — old pipelines linger; legacy ETL tool licenses persist"
+
+  - number: 7
+    title: "Cutover and Decommission Legacy ETL"
+    description: "Disable legacy pipelines, verify zero traffic for 30+ days, decommission infrastructure, cancel licenses, archive legacy code for compliance and reference."
+    whatYoureDoing: "After all in-scope pipelines are migrated and shadow-validated: disable legacy pipelines (don't delete; disable), monitor for any residual traffic to legacy outputs, run final reconciliation, decommission infrastructure (Informatica nodes, SSIS Catalog DBs, DataStage servers), cancel licenses (often the biggest savings), archive legacy code."
+    primaryAsset: "migration-cutover-runbook"
+    alternativeAssets:
+      - slug: "migration-rollback-plan"
+        when: "Pre-flight check — make sure rollback path is documented and rehearsed before pulling the plug"
+    relevantSkills:
+      - "migration-planner-skill"
+      - "documentation-skill"
+    relevantMcpConfigs:
+      - "azure-devops-mcp"
+      - "filesystem-mcp"
+      - "confluence-mcp"
+    estimatedTime: "4-8 weeks"
+    definitionOfDone:
+      - "Legacy ETL traffic = 0% for 30+ consecutive days"
+      - "All consumers verified on new platform"
+      - "Final backups complete"
+      - "Legacy infrastructure decommissioned"
+      - "License cancelled"
+      - "Cost savings realized vs business case"
+      - "Migration retrospective complete"
+    commonPitfalls:
+      - "Decommissioning too fast — 30-day buffer minimum"
+      - "Forgetting license costs — inform vendor of non-renewal early"
+      - "No data archive — historical pipeline definitions may be needed for compliance / audit"
+      - "No retrospective — lessons not captured = repeated mistakes"
+
+  - number: 8
+    title: "Optimize and Stabilize"
+    description: "Tune performance, rationalize cost, build operational maturity, refine patterns. The migration is over — the platform owns the work now."
+    whatYoureDoing: "Profile and tune hot pipelines. Right-size compute (Synapse Spark pools, Fabric capacity). Move cold data to cheaper storage tiers. Establish runbooks, on-call rotation, SLO tracking, postmortem culture. Refactor the rushed migration code. Update the shared library based on patterns that emerged. Hand the platform off from migration team to ops team."
+    primaryAsset: "performance-profiler-skill"
+    alternativeAssets:
+      - slug: "documentation-skill"
+        when: "Driving the post-migration retrospective and the optimization roadmap"
+      - slug: "code-reviewer-skill"
+        when: "Auditing migration-era code for the rushed-but-shipped parts that need cleanup"
+      - slug: "regression-bed-master"
+        when: "Standing up a permanent regression bed for the new platform"
+    relevantSkills:
+      - "performance-profiler-skill"
+      - "documentation-skill"
+      - "code-reviewer-skill"
+    relevantMcpConfigs:
+      - "azure-devops-mcp"
+      - "github-mcp"
+      - "postgres-mcp"
+    estimatedTime: "Ongoing — especially the first 6 months post-migration"
+    definitionOfDone:
+      - "Cost outcomes verified vs business case"
+      - "Performance acceptable on critical paths"
+      - "DQ trend improving"
+      - "Operational runbooks complete"
+      - "Team transitioned from \"migration mode\" to \"platform ops mode\""
+    commonPitfalls:
+      - "Skipping optimization — code shipped during migration is rushed; tech debt persists"
+      - "No retrospective — lessons not captured"
+      - "Treating optimization as one-shot — it's continuous"
+      - "No transition plan from project to ops — project team disbands; nobody owns the platform"
+wrapUp:
+  deliverables:
+    - "All in-scope pipelines migrated to ADF / Fabric + PySpark"
+    - "Behavior parity verified pipeline by pipeline against legacy"
+    - "Legacy ETL infrastructure decommissioned, licenses cancelled"
+    - "Metadata-driven pipeline framework + shared PySpark library"
+    - "DQ framework wired into every pipeline"
+    - "Cost savings realized vs the legacy ETL baseline"
+    - "Pipeline inventory, strategy categorization, parity reports, and cutover runbook in /docs/migration/"
+  nextSteps:
+    - title: "Run a 12-month optimization sprint"
+      description: "Most migration code shipped quickly. Allocate a quarter to refactor the rushed parts and tune Spark compute."
+    - title: "Mature the data quality program"
+      description: "DQ went in to keep migration honest. Now expand it: SLOs per Gold table, alerts to data owners, public DQ dashboard."
+    - title: "Document the playbook updates for the next ETL migration"
+      description: "What surprised you? What would you do differently? Capture it while it's fresh."
+relatedAssets:
+  - "azure-data-platform-modernization-playbook"
+  - "data-source-inventory-profiling"
+  - "adf-fabric-pipeline-design-patterns"
+  - "pyspark-transformation-standards"
+  - "data-quality-test-suite"
+---
+
+# Legacy ETL to Azure Modernization Playbook
+
+Migrate legacy ETL tooling (Informatica PowerCenter, SQL Server Integration Services, DataStage, Pentaho, etc.) to a modern Azure-based stack — ADF, Fabric Data Pipelines, and PySpark for transformations. **The hard case** — you have hundreds of existing mappings producing critical reports, and you need to replace them without breaking anything.
+
+If you're standing up a new data platform from scratch (no legacy to retire), use the [Azure Data Platform Modernization Playbook](/playbook/azure-data-platform-modernization-playbook) instead.
+
+## When to use this playbook
+
+- You have a legacy ETL tool you're retiring (Informatica, SSIS, DataStage, Pentaho, etc.)
+- The pipelines are running in production and feeding critical reports
+- You need behavior parity (output of new pipelines = output of old, for trusted consumers)
+- The new platform is Azure-based (ADF, Fabric, Synapse, PySpark)
+
+## When NOT to use this playbook
+
+- **Greenfield platform with no legacy.** Use the [Azure Data Platform Modernization Playbook](/playbook/azure-data-platform-modernization-playbook).
+- **Just upgrading versions of the same tool.** That's a vendor upgrade, not modernization.
+- **Replacing one legacy ETL with another legacy ETL.** Don't do this; it's putting lipstick on a pig.
+
+## Why ETL migration is different from app migration
+
+| Concern | App migration | ETL migration |
+|---|---|---|
+| What's migrated | User-facing features | Data pipelines (invisible) |
+| Failure mode | UI breaks, user complains | Wrong data ships, decisions made on it, found weeks later |
+| Parity bar | Behavior matches in user actions | Output matches across data, including quirks |
+| Rollback | Flip the flag back | Reverse-flow the data |
+| Cutover style | Per slice, gradual | Per pipeline, parallel run mandatory |
+
+ETL parity is harder than app parity. The new pipelines must produce **the same numbers** — or trust evaporates and the project stalls.
+
+## Independent of the other playbooks
+
+This playbook is for **legacy ETL → Azure**. For greenfield Azure data platforms, see [Azure Data Platform Modernization](/playbook/azure-data-platform-modernization-playbook). For application migrations, see [ASP.NET Modernization](/playbook/aspnet-to-angular-dotnet-modernization-playbook), [VB.NET WinForms Migration](/playbook/vbnet-winforms-to-spa-migration-playbook), [COBOL Modernization](/playbook/cobol-modernization-playbook), or [RPG / IBM i Modernization](/playbook/rpg-modernization-playbook). For pure DB engine moves, see [Database Migration](/playbook/database-migration-playbook).

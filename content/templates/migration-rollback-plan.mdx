@@ -1,0 +1,359 @@
+---
+title: "Migration Rollback Plan"
+slug: "migration-rollback-plan"
+description: "Plan recovery procedures for when migrations fail at any stage — from pre-cutover bugs to post-cutover production incidents."
+type: template
+phase: deploy
+category: ci-cd
+projectType: ["custom-app"]
+stack: []
+tags: ["migration", "rollback", "disaster-recovery", "operations"]
+difficulty: advanced
+estimatedTime: "0.5-1 day"
+author: "Platform Engineering"
+featured: false
+createdAt: 2026-04-26
+updatedAt: 2026-04-26
+inputs:
+  - name: migration_summary
+    description: "What's being migrated and the chosen strategy"
+    required: true
+  - name: stages_with_risk
+    description: "Migration stages with notable rollback risk (e.g., 'data backfill', 'cutover')"
+    required: true
+output:
+  format: markdown
+relatedAssets:
+  - "migration-cutover-runbook"
+  - "migration-risk-register"
+---
+
+# Migration Rollback Plan
+
+The plan you hope you'll never use. But the team that doesn't write a rollback plan is the team whose migration becomes a multi-day incident. This template forces explicit thinking about recovery at every stage.
+
+## When to use
+
+- Before any migration cutover
+- For multi-stage migrations, planned per-stage
+- After the Cutover Runbook (the rollback plan complements it)
+
+## Prompt
+
+````text
+You are a senior site reliability engineer. Create a comprehensive rollback
+plan for the migration described below. Think through what could go wrong
+at each stage and how to recover.
+
+## Input
+
+**Migration:** {{migration_summary}}
+**Risky stages:** {{stages_with_risk}}
+
+## Output
+
+A Markdown rollback plan with:
+
+### 1. Rollback philosophy
+
+2-3 paragraphs:
+- Rollback is a feature of a healthy migration, not an admission of failure
+- The cost of staying broken usually exceeds the cost of rolling back
+- Rolling back forward (rolling forward to a fix) is sometimes better than rolling backward — make this distinction
+- Specific rollback decisions need pre-defined criteria, not vibe-based calls in the moment
+
+### 2. Rollback decision matrix
+
+For different problem types, who decides and what's the bar:
+
+| Problem type | Decision authority | Time to decide | Default action |
+|--------------|---------------------|----------------|----------------|
+| Critical bug, customer-facing | Incident Commander | 5 min | Roll back |
+| Performance regression > 50% | IC + Tech Lead | 15 min | Roll back if won't resolve |
+| Performance regression 20-50% | IC + Tech Lead | 30 min | Investigate, then decide |
+| Data integrity issue | IC + Database Engineer | Immediate | Roll back |
+| Internal-only bug | Tech Lead | 30 min | Fix forward usually |
+| Compliance/security issue | Security + IC | Immediate | Roll back; notify Compliance |
+| Single-tenant issue | Tech Lead | 30 min | Hotfix or workaround |
+
+### 3. Rollback by stage
+
+For each migration stage, generate explicit rollback procedure.
+
+#### Stage: Pre-cutover bugs (development phase)
+
+**What can go wrong:**
+- Bugs found in new system before cutover
+- Data validation failures
+- Performance regressions in load tests
+- Integration test failures
+
+**Rollback / response:**
+- Don't proceed with cutover
+- File defects, fix forward
+- Re-test before next cutover attempt
+- Postpone cutover, communicate
+
+**Cost of rolling back at this stage:** Low (no production impact)
+
+---
+
+#### Stage: Backfill / data sync
+
+**What can go wrong:**
+- Data validation fails on target
+- Backfill takes longer than expected
+- Schema mismatch surfaced
+- Source data quality issues found
+
+**Rollback procedure:**
+
+1. **If discovered before cutover:**
+   - Stop backfill
+   - Investigate divergence
+   - Fix and re-run, OR delay cutover
+   - No customer impact
+
+2. **If discovered during ongoing dual-write / CDC:**
+   - Continue dual-writing (don't stop)
+   - Run reconciliation queries
+   - Fix discrepancies
+   - Re-validate before cutting over
+
+**Cost of rolling back at this stage:** Medium (delay, additional infra cost for dual-running)
+
+---
+
+#### Stage: Cutover in progress
+
+**What can go wrong:**
+- Verification fails after switching traffic
+- Smoke tests reveal broken functionality
+- Performance degrades
+- Errors spike
+
+**Rollback procedure:**
+
+1. **IC calls "rollback" out loud**
+2. **Update status page:** "Rolling back maintenance; additional time required"
+3. **Revert traffic routing** (DNS, load balancer, gateway)
+4. **Verify legacy is healthy:**
+   - Sample requests succeed
+   - Database accessible
+   - Background jobs running
+5. **Run validation queries on legacy** to confirm data is intact (especially if any writes happened to new during the partial cutover)
+6. **Communicate:** "Rolled back; investigating; will reschedule"
+7. **Hold post-mortem within 48 hours**
+
+**Cost:** Brief extended downtime, internal time, communication burden. Acceptable.
+
+**Time bound:** Rollback should complete within 30 minutes. If longer, the rollback itself has issues that need investigation.
+
+---
+
+#### Stage: Hours-to-days after cutover
+
+**What can go wrong:**
+- Bug discovered that wasn't in test cases
+- Performance under real load reveals issues
+- Edge case in customer data triggers errors
+- Long-tail integration breaks
+
+**Decision: roll back vs roll forward?**
+
+Roll BACK when:
+- Many customers affected
+- Critical functionality broken
+- Data integrity at risk
+- Fix forward would take >4 hours
+
+Roll FORWARD when:
+- Single customer / small impact
+- Workaround available
+- Fix is straightforward and tested
+- Rolling back has its own cost (newer data on new system that would be lost)
+
+**Roll-back procedure (post-cutover):**
+
+This is the hard case. New data has been written to the new system. Going back to legacy means either:
+- Losing that new data (unacceptable for most cases)
+- Migrating new data back to legacy (complex)
+
+Plan for this BEFORE cutover by:
+- Keeping legacy DB in sync via dual-write OR
+- Designing the cutover so reverse migration is feasible OR
+- Planning to "fix forward" only after a certain checkpoint
+
+Document explicitly: "After T+X, rollback is no longer reversible without data loss."
+
+---
+
+#### Stage: Days-to-weeks after cutover
+
+**What can go wrong:**
+- Reports / batch jobs depend on legacy schema
+- Annual processes hit edge cases
+- Hidden integrations surface
+- Customer reports gradually decreasing functionality
+
+**Response:**
+
+By this stage, full rollback is rarely viable. Instead:
+- Fix forward
+- Surface hot fixes
+- Maintain legacy as "read-only fallback" for affected workflows
+- Continue monitoring and addressing issues
+
+**Lesson:** the cutover risk window extends well beyond "cutover day." Plan support coverage and rapid-response capability for at least 30 days post-cutover.
+
+### 4. Specific rollback procedures by component
+
+**Application code:**
+- Deployments are versioned; revert to previous deployment
+- Time: 5-10 minutes for most app frameworks
+- Document: exact commands to deploy a previous version
+
+**Database:**
+- Schema migration: have reverse migration script ready
+- Data migration: keep source data immutable until decommission
+- Restore from backup: only as last resort; document recovery time
+
+**Configuration / feature flags:**
+- Flip flag back to legacy
+- Time: seconds (the whole point of feature flags)
+
+**Infrastructure (DNS, load balancer):**
+- Revert routing rules
+- Watch for DNS TTL caching delays
+- Document IP / hostname for both sides
+
+**External integrations:**
+- Some integrations cache endpoints (Salesforce, partners)
+- May require contacting partners to flush cache
+- Document each partner's caching behavior
+
+### 5. Pre-cutover rehearsal
+
+Before cutover, REHEARSE the rollback in staging:
+
+- Schedule a "rollback drill" in staging
+- Run through the entire rollback procedure
+- Time it
+- Find broken assumptions
+- Update the runbook
+
+A rollback you've never tested is a rollback that won't work in production.
+
+### 6. Communication during rollback
+
+When rollback is called, what gets said:
+
+**Internal (Slack, in real-time):**
+"Rollback decision made at [time]. Reason: [brief]. ETA back to stable: [estimate]. IC: [name]."
+
+**Status page:**
+"We're experiencing issues with our recent maintenance. We're rolling back to the previous version. Expected resolution: [time]. Updates every 15 minutes."
+
+**Customer email (after stable):**
+"Earlier today we attempted [migration]. Issues were detected and we've rolled back. No customer data was affected. We'll communicate the rescheduled timing soon."
+
+**Internal post-rollback announcement (Slack/email):**
+"Rollback complete. Systems stable. Post-mortem scheduled for [time]. Thanks to: [team members]."
+
+DO NOT:
+- Blame anyone publicly during the incident
+- Speculate about the cause before investigating
+- Promise specific causes / timelines you can't verify
+
+### 7. Post-rollback checklist
+
+After rollback, before declaring "stable":
+
+- [ ] Legacy system serving 100% traffic
+- [ ] Error rate back to normal
+- [ ] Latency back to baseline
+- [ ] All scheduled jobs ran successfully
+- [ ] Customer-facing features verified manually
+- [ ] No data loss confirmed
+- [ ] Status page updated
+- [ ] Customer comms sent
+- [ ] All team members informed
+- [ ] Post-mortem scheduled
+
+### 8. Post-mortem template
+
+Within 48 hours of any rollback:
+
+**What happened:**
+- Timeline of events
+- Decisions made and by whom
+- What went well
+- What went badly
+
+**Root cause:**
+- The technical reason for the failure
+- The process gap that allowed it through
+
+**Customer impact:**
+- How many users affected
+- For how long
+- What workarounds existed
+
+**Action items:**
+- Prevent: what fix prevents this exact issue?
+- Detect: how do we catch similar issues earlier?
+- Mitigate: how do we limit damage if it happens again?
+
+For each action item: owner, deadline, success criteria.
+
+### 9. Rollback what-if scenarios
+
+For this specific migration, run through scenarios:
+
+**"What if the database backfill is 50% slower than expected?"**
+Plan: Extend maintenance window OR delay cutover OR cut over with partial backfill (and accept partial functionality).
+
+**"What if we discover at T+30 that 1% of users can't log in?"**
+Plan: If pattern is identifiable (specific tenant, specific role), feature-flag those users back to legacy. If pattern is unclear, full rollback.
+
+**"What if a critical integration partner can't reach the new system?"**
+Plan: Verify DNS / firewall whitelist. If their cache is the issue, full rollback may not help — coordinate with them.
+
+**"What if we discover data divergence post-cutover?"**
+Plan: Full reconciliation query. Identify scope. Either fix in place (if isolated) or rollback (if systemic).
+
+Generate 5-10 specific scenarios for THIS migration and the response plan for each.
+
+### 10. The hard truth about rollback
+
+Some honest acknowledgments:
+
+- **Some migrations can't fully roll back.** Once data is dual-shape and customers have used the new system, going back means data loss or weeks of reverse migration.
+- **Plan for this BEFORE cutover.** The point of no return must be explicit and team-agreed.
+- **A "stuck" state is worse than rolling back.** Limping along with both systems half-working creates more bugs and burns out the team.
+- **Sometimes the right answer is "fix forward fast."** Have a SWAT team ready who can ship hotfixes within hours.
+
+## Style
+
+- Decision-tree style ("if X, then Y")
+- Time-bounded ("if not resolved in 30 min")
+- Honest about trade-offs
+- Specific to this migration, not generic
+````
+
+## Tips
+
+- **Test the rollback** in staging before cutover. A rollback never tested is a rollback that won't work.
+- **Time-box decisions.** Without explicit time-boxes, "let's investigate a bit more" turns into hours of broken state.
+- **Document the point of no return.** Be honest about when full rollback becomes infeasible.
+- **Plan for partial rollback** — the ability to roll back specific slices is sometimes more useful than full rollback.
+
+## Common mistakes to avoid
+
+- No rollback procedure (just "we'll figure it out")
+- Untested rollback procedure
+- No clear decision authority — committee paralysis
+- Optimistic time estimates for rollback steps
+- Forgetting external systems (CDN, partner caches, mobile app caches)
+- Treating rollback as failure (cultural problem)
+- Not planning for post-cutover rollback being more complex than pre-cutover

@@ -1,0 +1,161 @@
+---
+title: "Authentication Setup (OAuth + JWT)"
+slug: "auth-setup-oauth-jwt"
+description: "Implement production-grade authentication with OAuth providers, JWT sessions, role-based access, and secure refresh flows."
+type: template
+phase: build
+category: auth
+projectType: ["custom-app"]
+stack: ["nodejs", "typescript", "nextjs"]
+tags: ["security", "auth", "oauth", "jwt"]
+difficulty: intermediate
+estimatedTime: "45 min"
+author: "Platform Engineering"
+featured: true
+createdAt: 2026-04-26
+updatedAt: 2026-04-26
+inputs:
+  - name: auth_providers
+    description: "OAuth providers needed (e.g., 'google, github, microsoft')"
+    required: true
+  - name: framework
+    description: "Framework (e.g., 'nextjs', 'express', 'fastify')"
+    required: true
+  - name: roles
+    description: "User roles needed (e.g., 'admin, member, viewer')"
+    required: false
+output:
+  format: code
+relatedAssets:
+  - "rest-api-scaffolder-nodejs"
+  - "nextjs-page-scaffolder"
+  - "security-review"
+---
+
+# Authentication Setup (OAuth + JWT)
+
+Generate a complete authentication implementation: OAuth provider integration, JWT-based sessions with refresh tokens, role-based access control, and secure cookie handling. Production-grade patterns, not toy examples.
+
+## When to use
+
+- Setting up auth for a new application
+- Migrating from a session-only auth to a more flexible token model
+- Adding a second OAuth provider to an existing setup
+- Need RBAC (role-based access control) baked into the auth layer
+
+## Prompt
+
+````text
+You are a senior backend engineer who has shipped auth at scale. Generate a
+production-ready authentication implementation.
+
+## Input
+
+**OAuth providers:** {{auth_providers}}
+**Framework:** {{framework}}
+**Roles:** {{roles}}
+
+## Architecture
+
+Implement this three-layer model:
+
+1. **OAuth layer** — handles third-party sign-in (Google, GitHub, etc.)
+2. **Session layer** — issues short-lived access tokens (JWT) + long-lived refresh tokens
+3. **Authorization layer** — middleware that checks tokens and enforces roles
+
+## Files to generate
+
+### 1. `auth/providers.ts`
+- Configuration for each OAuth provider (client ID, secret, scopes, callback URL)
+- Read from environment variables, never hardcoded
+- Throw at startup if required vars are missing
+
+### 2. `auth/oauth-flow.ts`
+- `getAuthorizationUrl(provider, state)` — generates the redirect URL
+- `handleCallback(provider, code, state)` — exchanges code for user info
+- State parameter handled correctly (prevents CSRF)
+- PKCE flow for public clients (mobile, SPA)
+
+### 3. `auth/tokens.ts`
+- `issueAccessToken(user)` — JWT, 15-minute expiry
+- `issueRefreshToken(user)` — opaque token stored in DB, 30-day expiry
+- `verifyAccessToken(token)` — returns claims or throws
+- `rotateRefreshToken(oldToken)` — invalidates old, issues new (refresh token rotation)
+- Use RS256 signing (asymmetric) — public key can be shared safely
+- Include `sub`, `email`, `roles`, `iat`, `exp` in JWT claims
+
+### 4. `auth/cookies.ts`
+- Set tokens as httpOnly + secure + SameSite=Lax cookies
+- Refresh token in `__Host-` prefixed cookie (binds to exact origin)
+- Clear cookies on logout
+- Never expose tokens to client-side JavaScript
+
+### 5. `auth/middleware.ts`
+- `requireAuth` — verifies access token, attaches user to request
+- `requireRole(role)` — checks user has the required role
+- `optionalAuth` — attaches user if token is valid, otherwise continues anonymous
+- Token refresh logic: if access token is expired but refresh token is valid, issue new access token transparently
+
+### 6. `auth/db-schema.sql`
+- `users` table (id, email, name, oauth_provider, oauth_id, created_at)
+- `user_roles` table (user_id, role) — supports multi-role users
+- `refresh_tokens` table (token_id, user_id, expires_at, revoked_at)
+- `auth_audit_log` table (user_id, event, ip, user_agent, occurred_at) — for security review
+
+### 7. `auth/routes.ts`
+- `GET /auth/:provider` — redirects to OAuth provider
+- `GET /auth/:provider/callback` — handles OAuth response
+- `POST /auth/logout` — clears cookies, revokes refresh token
+- `POST /auth/refresh` — exchanges refresh token for new access token
+- `GET /auth/me` — returns current user info (requires auth)
+
+### 8. `auth/types.ts`
+- TypeScript types for User, JWTClaims, AuthSession, OAuthProvider
+
+## Security requirements
+
+- Refresh token **rotation** — every use issues a new token, old one invalidated
+- Refresh token **reuse detection** — if a revoked token is used, invalidate the entire token family (suggests theft)
+- Rate limit auth endpoints (10 requests/minute per IP)
+- CSRF protection on state-changing endpoints
+- Generic error messages on auth failures (don't reveal which step failed)
+- Log all auth events for audit
+- Secrets validated at startup (fail loud, not silent)
+- No tokens in URL query parameters (cookies or Authorization header only)
+
+## Standards
+
+- TypeScript strict, no `any`
+- All time values in UTC, ISO 8601 strings
+- Cookies: `httpOnly: true, secure: true, sameSite: 'lax'`
+- Use `crypto.randomUUID()` for IDs, never `Math.random()`
+- Use a vetted JWT library (`jose` for Node, not custom crypto)
+
+## Output format
+
+For each file:
+1. Full file path
+2. Complete code in fenced code block with `ts` syntax
+3. 1-2 sentence comment explaining its role
+
+After all files, include:
+- **"## Environment variables"** — list all required env vars with example values
+- **"## Setup checklist"** — 5-7 steps to wire this into an existing app
+- **"## Test cases"** — 8-10 critical tests to write (don't write them, just list)
+- **"## Common pitfalls"** — 3-5 things people get wrong
+````
+
+## Tips
+
+- For Next.js apps, consider Auth.js (NextAuth) instead of rolling your own — it handles 80% of this for you
+- For SaaS multi-tenant apps, add `tenant_id` to the JWT claims and enforce in middleware
+- Refresh token rotation is non-negotiable — don't ship without it
+- Log auth events to a separate audit table, not just app logs
+
+## Common mistakes to avoid
+
+- Storing JWTs in localStorage (XSS risk — use httpOnly cookies)
+- Long-lived JWTs (15 min max for access tokens)
+- Not rotating refresh tokens
+- Trusting `iss` claim without verifying signature
+- Symmetric JWT signing (HS256) when distributing public keys would be safer

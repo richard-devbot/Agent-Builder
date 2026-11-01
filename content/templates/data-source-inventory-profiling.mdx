@@ -1,0 +1,333 @@
+---
+title: "Data Source Inventory & Profiling"
+slug: "data-source-inventory-profiling"
+description: "Discovery template for ETL projects: inventory all data sources, profile their structure and quality, and document downstream dependencies."
+type: template
+phase: discover
+category: product-briefs
+projectType: ["etl"]
+stack: ["azure", "adf", "fabric", "pyspark"]
+tags: ["etl", "data-engineering", "discovery", "data-profiling", "azure"]
+difficulty: intermediate
+estimatedTime: "1-2 weeks per major source system"
+author: "Platform Engineering"
+featured: true
+createdAt: 2026-04-26
+updatedAt: 2026-04-26
+inputs:
+  - name: project_context
+    description: "What's driving this discovery (new DWH, legacy ETL modernization, data quality fix-it)"
+    required: true
+  - name: source_systems
+    description: "List of source systems in scope (e.g., 'Salesforce, SAP S/4, on-prem SQL Server, Excel from Finance')"
+    required: true
+  - name: target_platform
+    description: "Where the data is going (Azure Synapse, Microsoft Fabric, Databricks)"
+    required: true
+  - name: known_pain_points
+    description: "Issues users have raised (slow reports, conflicting numbers, freshness problems)"
+    required: false
+output:
+  format: markdown
+relatedAssets:
+  - "azure-data-platform-modernization-playbook"
+  - "legacy-etl-to-azure-modernization-playbook"
+---
+
+# Data Source Inventory & Profiling
+
+The first step of every data engineering engagement. You can't build a modern data platform on top of sources you don't understand. This template produces the discovery document that drives every later decision — what to ingest, what to skip, what to fix at source.
+
+## When to use
+
+- Starting a cloud data warehouse modernization
+- Inheriting a data platform from another team or vendor
+- Before scoping/estimating an ETL engagement
+- When users complain about "the data" but nobody knows which data
+- For data quality fix-it projects (where to start?)
+
+## Why this matters
+
+Most failed data projects fail at this step. Teams skip discovery, build pipelines for the obvious sources, then discover three months in that:
+- The "customer" entity exists in 7 systems with 7 different definitions
+- The "real" data is in a spreadsheet someone in Finance updates monthly
+- A critical report depends on a SQL Server view nobody documented
+- Half the source data has quality issues that have been silently masked by legacy ETL
+
+This template forces honest discovery before commitments are made.
+
+## Prompt
+
+````text
+You are a senior data architect doing initial discovery on a data
+engineering engagement. Generate a comprehensive data source inventory
+and profiling document.
+
+## Input
+
+**Project context:** {{project_context}}
+**Source systems:** {{source_systems}}
+**Target platform:** {{target_platform}}
+**Known pain points:** {{known_pain_points}}
+
+## Output
+
+A Markdown document with these sections:
+
+### 1. Engagement summary
+1-2 paragraphs: what's the project, why now, what success looks like.
+
+### 2. Source system inventory
+
+For each source system, document:
+
+#### System overview
+- **Name and version** (Salesforce Lightning, SAP S/4HANA 2022, SQL Server 2019)
+- **Vendor / hosting** (SaaS / on-prem / hybrid)
+- **Owner team** (who runs it)
+- **Primary use** (what business function it supports)
+- **Active? Sunset planned?** (no point ingesting from a system being retired in 6 months)
+- **License / contract considerations** (data extraction allowed? per-row costs?)
+
+#### Connectivity
+- **Network access** (direct connection, VPN, private endpoint, public API)
+- **Authentication** (service principal, key vault secret, OAuth, basic auth)
+- **Rate limits** (API call limits, query throttling)
+- **Latency to Azure** (matters for incremental loads)
+
+#### Data access methods
+- **Native API** (REST, GraphQL, SOAP)
+- **Database direct** (JDBC, ODBC, native driver)
+- **File extracts** (CSV/JSON/XML drop, SFTP, blob storage)
+- **CDC available?** (transaction log access, change feeds)
+- **Recommended pattern** for ingestion (which method to use)
+
+#### Data scope in this system
+- **Tables / objects in scope** (with row counts where known)
+- **Tables / objects explicitly out of scope** (and why)
+- **PII / sensitive data flags** (per table)
+- **Refresh frequency available** (real-time, hourly, daily, monthly)
+
+### 3. Entity-level profiling
+
+For each major entity (customer, order, product, etc.) across all source systems:
+
+```markdown
+## Entity: Customer
+
+**Found in (with row counts):**
+- Salesforce: Account (45,000 rows)
+- SAP S/4: BUT000 (180,000 rows)
+- SQL Server CRM_Legacy: dbo.Customer (52,000 rows)
+- Excel from Finance: Top_Accounts.xlsx (~500 rows, manually maintained)
+
+**Definition variance:**
+- Salesforce defines customer as "any signed contract"
+- SAP defines customer as "any business partner with sales transactions"
+- SQL Server includes prospects (not yet customers)
+- Excel includes only accounts >$1M ARR
+
+**Master / source of truth:**
+[Document conclusion: which is authoritative? Or is the answer "depends"?]
+
+**Identifier strategy:**
+- Salesforce uses 18-char Account ID
+- SAP uses 10-digit BUT000 ID
+- SQL Server uses incremental int
+- No common key — needs MDM / matching strategy
+
+**Migration concerns:**
+- Customer count varies by system; need reconciliation logic
+- PII handling: Salesforce has consent flags, others don't track
+- Historical data: SAP keeps full history, Salesforce only current state
+```
+
+For each shared entity, this is where the project gets interesting. Document
+ALL duplications, not just the convenient ones.
+
+### 4. Data profiling (per major source table)
+
+For each significant source table, profile:
+
+#### Volume and velocity
+- **Row count** (current)
+- **Daily change rate** (inserts, updates, deletes per day)
+- **Annual growth** (rows/year)
+- **Peak load times** (when is the system busy)
+
+#### Schema characteristics
+- **Column count**
+- **Primary key** (and uniqueness verification)
+- **Nullable column count** (and which are commonly null)
+- **Data types in use** (especially: text, decimal precision, dates, booleans)
+- **Indexes that matter** (for query patterns)
+
+#### Data quality findings
+For each table, run profiling queries and report:
+
+```sql
+-- Null percentages
+SELECT 
+  COUNT(*) AS total_rows,
+  SUM(CASE WHEN customer_id IS NULL THEN 1 ELSE 0 END) AS null_customer_id,
+  SUM(CASE WHEN order_date IS NULL THEN 1 ELSE 0 END) AS null_order_date
+FROM orders;
+
+-- Distinct value counts (catches enum issues)
+SELECT order_status, COUNT(*) FROM orders GROUP BY order_status ORDER BY 2 DESC;
+
+-- Duplicate detection
+SELECT customer_email, COUNT(*) FROM customers GROUP BY customer_email HAVING COUNT(*) > 1;
+
+-- Referential integrity
+SELECT COUNT(*) FROM orders o
+LEFT JOIN customers c ON o.customer_id = c.id
+WHERE c.id IS NULL;
+
+-- Date range sanity
+SELECT MIN(order_date), MAX(order_date), 
+  SUM(CASE WHEN order_date > CURRENT_DATE THEN 1 ELSE 0 END) AS future_dated
+FROM orders;
+```
+
+Document findings:
+- **Null rates** higher than expected
+- **Orphaned records** (FK violations)
+- **Duplicate keys** in supposedly-unique columns
+- **Invalid values** (dates in 1900, negative ages, future dates)
+- **Inconsistent formats** (phone numbers in 5 patterns)
+- **Encoding issues** (mojibake from past charset mistakes)
+- **Out-of-range values** (PIC 9(7) overflow, decimal truncation)
+
+For each issue: severity (critical/medium/low), where it surfaces (downstream impact), and recommendation (fix at source / fix during ingest / migrate as-is + flag).
+
+### 5. Downstream dependencies
+
+For each source, identify what consumes it today:
+
+| Consumer | Type | Frequency | Owner | Impact if breaks |
+|----------|------|-----------|-------|------------------|
+| Sales Daily Report | Power BI report | daily | Sales Ops | High (CFO sees it) |
+| Customer 360 dashboard | Tableau | hourly | Marketing | Medium |
+| Commission calculation | SQL job | weekly | Finance | High (paychecks) |
+| Mailing list export | Custom Python | monthly | Marketing | Low |
+| Predictive model training | Databricks notebook | monthly | Data Science | Medium |
+
+For each consumer:
+- **What query/feed they use** (specific tables, refresh pattern)
+- **Latency requirement** (how fresh data needs to be)
+- **Schema dependencies** (what columns they reference; renaming breaks them)
+- **Migration plan** (will they switch to new platform? when?)
+
+This list is always longer than initially expected. Budget time to find consumers nobody mentioned.
+
+### 6. Data lineage (current state)
+
+For the most important pipelines, document current lineage:
+
+```
+SAP S/4 BUT000 ──┐
+                  ├─→ SSIS Job: NightlyCustomerLoad ─→ Stage_Customer (SQL Server) ─┐
+Salesforce API ──┘                                                                     ├─→ Customer_Master (DW)
+                                                                                       │
+SQL Server CRM_Legacy ─→ ADF copy activity ─→ Stage_Legacy_Customer (Synapse) ────────┘
+                                                                                       │
+                                                                                       ↓
+                                                                                Power BI: Customer 360
+```
+
+Use Mermaid or plain text. Goal: visualize WHERE data goes through current pipelines.
+
+This often reveals:
+- Multiple paths producing different results
+- Single points of failure
+- Black-box transformations (the .ipynb nobody owns)
+- Manual steps in supposedly automated pipelines
+
+### 7. Pain points and opportunities
+
+Capture user-reported issues categorized by root cause:
+
+#### Data freshness issues
+"The dashboard is always 2 days behind" → root cause analysis: where's the lag?
+
+#### Conflicting numbers
+"Sales report shows 45M revenue, finance says 47M" → root cause: which source is right?
+
+#### Performance issues
+"Daily report takes 4 hours to refresh" → root cause: ETL design? Storage? Compute?
+
+#### Quality issues
+"Half the customer emails are invalid" → root cause: source quality? Ingestion bug?
+
+For each, document root cause and whether the modernization addresses it (and how).
+
+### 8. Risks for the data engagement
+
+Top 10 risks specific to this project. For each:
+- Description
+- Likelihood / impact
+- Mitigation
+- Trigger
+
+Common risks for ETL projects:
+- **Schema changes mid-project.** Source schemas evolve; pipelines break.
+- **Volume surprises.** Test data is 10K rows; production is 100M.
+- **Hidden consumers.** Reports nobody mentioned that depend on legacy.
+- **Source system access changes.** API deprecation, account changes.
+- **Data quality surfacing.** Issues that didn't matter before become blockers.
+- **Stakeholder availability.** SMEs needed for definition validation.
+- **Compliance changes.** Cross-border data, PII handling, retention policies.
+
+### 9. Strategic recommendations
+
+Based on inventory, recommend:
+
+- **Quick wins:** sources/datasets that should be migrated first (high value, low risk)
+- **Defer items:** sources that should wait (low ROI, high complexity, pending sunset)
+- **Excludes:** sources that should NOT be migrated (replaced by something else, dying anyway)
+- **Architecture implications:** what the inventory suggests about the target architecture
+
+### 10. Open questions
+
+What you couldn't determine. Each:
+- The question
+- Why it matters for project planning
+- Who could answer
+- Default assumption + risk
+
+## Style
+
+- Specific over generic (named systems, named consumers, real numbers)
+- Honest about unknowns
+- Tone: discovery is meant to find problems; finding lots is good
+- Include actual SQL profiling queries used and their results
+- 10-30 pages typical for non-trivial engagements
+
+## Quality bar
+
+- Every source system has connectivity + access method documented
+- Major entities have cross-system definition variance documented
+- Profiling shows actual numbers, not assumptions
+- Downstream consumers found and contacted
+- Pain points have root cause analysis
+- Risks are specific to THIS project, not generic
+````
+
+## Tips
+
+- **Run profiling queries against actual data, not samples.** Sample data hides systematic issues.
+- **Talk to consumers, not just producers.** The team that produces the data and the team that uses it often disagree about what it means.
+- **Find the spreadsheet.** Every data project has a critical Excel file someone updates manually. Find it before it surprises you.
+- **Document the dead bodies.** Reports that don't refresh anymore, jobs that fail nightly, ETLs that someone "fixed" with a hardcoded value — all reveal what to be careful about.
+- **Profile early, profile often.** Schema and quality drift; today's findings won't be tomorrow's reality.
+- **Pair with stakeholder interviews.** The audit document is the artifact; the conversations that produce it are where the real understanding happens.
+
+## Common mistakes to avoid
+
+- **Auditing only systems with formal owners.** Spreadsheets, MS Access DBs, custom scripts in shared drives — these all carry data and they all matter.
+- **Trusting documentation over reality.** Always verify with profiling queries.
+- **Skipping the consumer audit.** Consumers determine what migrations are non-negotiable.
+- **Not quantifying.** "Lots of data" is useless. "12 source systems, 340 tables, 800 GB total, ~50 daily-active dashboards" is actionable.
+- **Hiding bad findings to look efficient.** If discovery finds problems, that's the point. Suppressing them just delays the surprise.
+- **Treating discovery as one-shot.** Discovery continues throughout the project; this template produces the initial picture.

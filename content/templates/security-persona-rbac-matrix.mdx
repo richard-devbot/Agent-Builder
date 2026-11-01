@@ -1,0 +1,137 @@
+---
+title: "Security Persona & RBAC Matrix"
+slug: "security-persona-rbac-matrix"
+description: "Generate persona-based access controls for an AI-assisted SDLC: who can do what, in which environment, behind which guardrails."
+type: template
+phase: design
+category: governance
+projectType: ["custom-app", "etl"]
+stack: []
+tags: ["governance", "rbac", "personas", "access-control", "security", "enterprise"]
+difficulty: advanced
+estimatedTime: "30 min"
+author: "Platform Engineering"
+featured: true
+createdAt: 2026-06-03
+updatedAt: 2026-06-03
+inputs:
+  - name: org_context
+    description: "Org structure, team types (pro devs, citizen devs, QA, platform), and environments (sandbox, dev, staging, prod)"
+    required: true
+  - name: tools_in_scope
+    description: "AI tools and systems to govern (Claude Code, Copilot, MCP servers, repos, pipelines, data stores)"
+    required: false
+  - name: compliance
+    description: "Regulatory / data-residency constraints (e.g. GDPR, client confidentiality, SOC 2)"
+    required: false
+output:
+  format: markdown
+relatedAssets:
+  - "vibe-coding-guardrails-policy"
+  - "pr-governance-gate-skill"
+  - "secure-coding-guardrails-skill"
+---
+
+# Security Persona & RBAC Matrix
+
+Defines **persona-based access controls** for AI-assisted development — the model Clifford Chance specifically asked to understand. It answers: *which persona may use which AI capability, in which environment, against which data, behind which guardrails?* The output is a concrete RBAC matrix plus persona definitions you can implement in your IdP, MCP allowlists, and pipeline policy.
+
+This is the access-control backbone of the governance framework. The [vibe-coding guardrails policy](/asset/template/vibe-coding-guardrails-policy) says *what the rules are*; this template says *who they apply to and what each persona can reach*.
+
+## When to use
+
+- Standing up an enterprise AI development program with mixed personas (professional developers, citizen developers, QA, platform/security).
+- Designing sandbox-based AI environments with least-privilege access.
+- Producing the access-control artifact for a governance / security review.
+
+## Prompt
+
+````text
+You are an enterprise security architect designing persona-based access
+controls for an AI-assisted SDLC. Produce concrete personas and an RBAC matrix
+grounded in least privilege. Be specific and implementable — not aspirational.
+
+## Organization context
+{{org_context}}
+
+## Tools & systems in scope
+{{tools_in_scope}}
+
+## Compliance & data constraints
+{{compliance}}
+
+## Method
+
+### 1. Define personas
+Propose a small set of personas (typically 4-6). For each:
+- **Name & intent** (e.g. "Citizen Developer", "Professional Developer",
+  "QA Automation Engineer", "Platform/Security Admin", "Reviewer/Approver").
+- **Trust level** and the **environments** they operate in (sandbox / dev /
+  staging / prod).
+- **What they should be able to do** and, explicitly, **what they must not**.
+
+### 2. Define the capability axes
+List the governed capabilities, e.g.:
+- AI tooling: which models/tools, autonomous vs. assisted, agent execution.
+- Data access: synthetic only / masked / real non-prod / production data.
+- Code: generate, merge to protected branches, deploy, manage secrets.
+- MCP/connectors: which servers (repo, ticketing, DB, internet) each persona
+  may use, read vs. write.
+- Governance: who can approve waivers, change guardrail rulesets, view audit logs.
+
+### 3. Build the RBAC matrix
+A table: rows = personas, columns = capabilities. Each cell is one of:
+✅ Allowed · 🟡 Allowed with guardrail/approval · ⛔ Denied.
+Where 🟡, name the guardrail (e.g. "PR governance gate", "human approver",
+"sandbox only", "masked data only").
+
+### 4. Bind guardrails to personas
+For each persona, list the **hard guardrails** (blocking) and **soft guardrails**
+(advisory) that apply, and the **default environment** they're sandboxed to.
+
+### 5. Define escalation & exceptions
+How a persona requests elevated access, who approves, and how it's logged and
+time-bound.
+
+## Output (Markdown)
+
+### Persona definitions
+One subsection per persona: intent, trust level, environments, can / cannot.
+
+### Capability axes
+The governed capability list with one-line definitions.
+
+### RBAC matrix
+The full persona × capability table using ✅ / 🟡 / ⛔, with guardrail notes.
+
+### Guardrail bindings
+Per persona: default environment, hard guardrails, soft guardrails, the AI
+tools/skills pre-installed for them.
+
+### Escalation & audit
+Exception/waiver process, approver roles, audit-log requirements, review cadence.
+
+### Implementation notes
+Where each control lives (IdP groups, MCP server allowlists, branch protection,
+pipeline policy, sandbox config) — so this is actionable, not just a diagram.
+
+## Rules
+- Default deny: if a capability isn't explicitly granted, it's ⛔.
+- Citizen developers default to a sandbox with synthetic/masked data and no
+  path to production secrets or protected branches.
+- Production data and protected-branch merges always require a hard guardrail
+  and/or a human approver.
+- Every 🟡 cell must name the specific guardrail that makes it acceptable.
+````
+
+## Tips
+
+- Start from the personas Clifford Chance raised — **professional → citizen developer transition** and **sandbox-based AI environments** map directly onto the trust levels and default-environment columns.
+- Keep the matrix small and enforceable. Five personas with crisp boundaries beat fifteen with overlapping grey areas.
+- Implement the 🟡 cells with the assets in this library: the [PR governance gate](/asset/skill/pr-governance-gate-skill) for protected-branch merges and the [secure-coding guardrails skill](/asset/skill/secure-coding-guardrails-skill) for citizen-developer sandboxes.
+
+## Reading the output
+
+- The RBAC matrix is the source of truth — wire IdP groups, MCP allowlists, and branch protection to match it exactly.
+- Revisit when a new tool, environment, or persona is introduced; access models drift fastest of all governance artifacts.
+- Treat "implementation notes" as the bridge from policy to enforcement — a matrix nobody implements governs nothing.

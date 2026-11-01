@@ -1,0 +1,263 @@
+---
+title: "Migration Risk Register"
+slug: "migration-risk-register"
+description: "Comprehensive risk inventory for migration projects with likelihood, impact, mitigations, and triggers."
+type: template
+phase: design
+category: architecture
+projectType: ["custom-app"]
+stack: []
+tags: ["migration", "risk", "planning"]
+difficulty: intermediate
+estimatedTime: "4 hours"
+author: "Platform Engineering"
+featured: false
+createdAt: 2026-04-26
+updatedAt: 2026-04-26
+inputs:
+  - name: migration_summary
+    description: "1-2 paragraph summary of the migration scope and approach"
+    required: true
+  - name: legacy_audit_findings
+    description: "Key findings from legacy audit (paste or summarize)"
+    required: true
+  - name: known_concerns
+    description: "Risks already identified by team or stakeholders"
+    required: false
+output:
+  format: markdown
+relatedAssets:
+  - "legacy-system-audit"
+  - "strangler-fig-migration-plan"
+---
+
+# Migration Risk Register
+
+Every migration project has risks that destroy timelines, blow budgets, or kill the project entirely. Surfacing them upfront — with explicit mitigations and trigger conditions — is what separates successful migrations from cautionary tales.
+
+## When to use
+
+- After Legacy System Audit
+- Before kickoff (so leadership knows what they're signing up for)
+- Reviewed monthly during migration
+
+## Prompt
+
+````text
+You are a senior architect with experience leading migrations that succeeded
+AND ones that failed. Generate a comprehensive risk register for the
+migration described below. Be honest about uncertainty.
+
+## Input
+
+**Migration summary:**
+{{migration_summary}}
+
+**Legacy audit findings:**
+{{legacy_audit_findings}}
+
+**Known concerns:**
+{{known_concerns}}
+
+## Output
+
+A Markdown document with:
+
+### 1. Risk philosophy
+2-3 paragraphs:
+- Why this register exists (not theater; actively used)
+- How it should be reviewed (monthly, at slice transitions)
+- How to add new risks as they emerge
+- Distinction between risks (might happen), issues (happening now), and constraints (will definitely happen)
+
+### 2. Top risks (2-page summary)
+
+The 5-10 risks most likely to derail the project. Each:
+- Risk title (one line)
+- Likelihood (1-5)
+- Impact (1-5)
+- Risk score (likelihood × impact)
+- One-line mitigation summary
+
+This is what the steering committee needs to see.
+
+### 3. Full risk register
+
+For each risk:
+
+```markdown
+## RISK-NNN: [Risk title]
+
+**Category:** Technical | Data | Schedule | Resource | External | Compliance | Operational | Knowledge
+**Likelihood:** 1 (Very Low) - 5 (Very High)
+**Impact:** 1 (Negligible) - 5 (Catastrophic)
+**Risk score:** [Likelihood × Impact]
+**Owner:** [Role responsible for monitoring]
+**Status:** Open | Mitigating | Accepted | Closed | Materialized
+
+### Description
+What this risk is, in 2-3 sentences.
+
+### Why it matters here
+What's specific to THIS migration that makes this risk relevant.
+(Generic risks don't drive action; specific ones do.)
+
+### Trigger / leading indicators
+What would tell us this risk is materializing? E.g.:
+- Migration of slice 1 takes >2x estimate
+- Parity tests show >1% drift in financial calculations
+- Key DBA gives notice
+- Vendor announces EOL of source DB version
+
+### Mitigation strategy
+**Preventive:** Actions to take to reduce likelihood
+**Detective:** Actions to take to spot it early
+**Reactive:** Actions to take if it happens
+
+### Cost of mitigation
+What we're paying to mitigate (time, money, scope).
+
+### Cost of accepting
+What happens if we don't mitigate and the risk materializes.
+
+### Last reviewed
+Date — risks should be reviewed and updated regularly.
+```
+
+### 4. Risks to consider (don't miss these)
+
+The audit may have missed risks below. Generate entries for each that applies:
+
+#### Technical risks
+- **Hidden business logic in stored procedures**
+  Stored procs are often skipped in initial estimates. Migrating logic from
+  T-SQL to application code is high-effort.
+- **Authentication migration complexity**
+  Forms Auth, Windows Auth, custom auth migrating to OAuth/JWT is rarely simple.
+- **Performance regression**
+  New stack may not match legacy performance without explicit work.
+- **Browser / client compatibility**
+  Legacy may target IE11; modern frameworks may break for some users.
+- **Mobile compatibility**
+  Legacy may have mobile workflow patterns that don't translate to SPA.
+- **Print and document generation**
+  Server-side reports, PDF generation, label printing — easy to miss in scope.
+- **Real-time / push notifications**
+  WebSockets / Server-Sent Events / SignalR migration patterns differ.
+
+#### Data risks
+- **Data quality issues surfacing only at scale**
+  Synthetic data hides issues; real data exposes 12 years of weirdness.
+- **Schema drift between source and target during long migrations**
+  Source schema changes mid-migration; new app must accommodate.
+- **PII / sensitive data handling**
+  Compliance bar might be different on target (e.g., cloud vs on-prem).
+- **Backup compatibility**
+  New backup format may not match old DR plan.
+- **Reporting and BI dependencies**
+  Reports built on source schema break when source goes away.
+- **External integrations querying source DB directly**
+  Salesforce, Tableau, custom reports — they all need to be redirected.
+
+#### Schedule risks
+- **Optimistic estimates**
+  Migrations always take longer. Use historical rate-of-completion if available.
+- **Scope creep**
+  "While we're rewriting it, let's also fix..." is the project killer.
+- **Decisions waiting on stakeholders**
+  Auth approach, hosting decisions, vendor choices — schedule slips on these.
+- **Dependencies on other teams**
+  Network changes, AD changes, security review — out of your control.
+
+#### Resource risks
+- **Key person dependencies**
+  Original developer is the only one who knows X.
+- **Engineer burnout**
+  Migrations are grueling; multi-quarter projects need rotation.
+- **Vendor delays**
+  External consultants, contractor availability.
+- **Tool licensing**
+  CDC tools, monitoring tools, IDE plugins all have lead times.
+
+#### External risks
+- **Compliance audit during migration**
+  Auditor sees migration in flight; may flag concerns.
+- **Vendor product changes**
+  Source DB engine vendor announces deprecation mid-migration.
+- **Customer pushback**
+  Tenants discover migration; complain about minor differences.
+- **Acquisition or reorg**
+  Project loses its sponsor; deprioritized.
+
+#### Compliance risks
+- **Regulatory boundary crossing**
+  Moving from on-prem to cloud may trigger new compliance review.
+- **Data residency requirements**
+  Target hosting region may not satisfy contracts.
+- **Audit trail continuity**
+  Migration period may have gaps in audit logs.
+
+#### Operational risks
+- **Operations team unfamiliar with new stack**
+  Need training, runbooks, monitoring before cutover.
+- **Disaster recovery untested on new stack**
+  RTO / RPO requirements may not be met initially.
+- **Monitoring blind spots**
+  New system has different metrics than old; alerts miss issues.
+
+#### Knowledge risks
+- **Documentation gaps**
+  Behavior nobody documented becomes "regression" when it changes.
+- **Tribal knowledge loss**
+  Operators who know "if X happens, do Y" leave or are not consulted.
+- **Original developers gone**
+  Code intent is unrecoverable; safest path is "preserve all behavior, even bugs".
+
+### 5. Risk monitoring plan
+
+How risks are tracked over time:
+- Weekly review by tech lead — update statuses, add new risks
+- Monthly review with steering committee — top 10 to leadership
+- Trigger conditions watched automatically (CI fail rate, parity test drift, etc.)
+- Post-mortem when a risk materializes — what did we miss? What's the next risk?
+
+### 6. Risk acceptance log
+
+Some risks we accept rather than mitigate. For each:
+- Risk
+- Why we're accepting it
+- Conditions under which we'd reconsider
+- Who approved acceptance
+
+### 7. Communications plan
+
+When a risk materializes or escalates:
+- Who needs to know
+- How fast
+- Through what channel
+
+## Style
+
+- Specific over generic
+- Honest about probability (don't underestimate to look optimistic)
+- Distinguish risks from issues (issues are happening; risks might)
+- Distinguish risks from constraints (constraints are certain; plan around them)
+````
+
+## Tips
+
+- **Review the register monthly.** Risks change. New ones emerge.
+- **A risk register that never changes is theater.** It should reflect what's actually changing in the project.
+- **Specific risks > vague risks.** "Performance regression" is generic. "The order detail page may take 3-5x longer to render due to chatty API pattern" is actionable.
+- **Don't only list bad outcomes.** Risks that would *speed up* delivery (e.g., we discover the legacy system is simpler than feared) deserve tracking too.
+- **Bring it to retrospectives.** Did our top 3 risks materialize? Did unexpected ones? Why did we miss them?
+
+## Common mistakes to avoid
+
+- Treating the register as one-and-done (it's a living doc)
+- Generic risks that apply to any migration (be specific to this one)
+- Sandbagging likelihoods to look better to leadership
+- Ignoring "low likelihood, high impact" risks ("it'll never happen")
+- No trigger conditions (so risks materialize unnoticed)
+- Risks without owners (no one watches them)
+- Overlooking knowledge / people risks (the most common cause of failure)

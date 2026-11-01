@@ -1,0 +1,304 @@
+---
+title: "Data Migration Plan"
+slug: "data-migration-plan"
+description: "Plan a safe data migration: schema mapping, ETL strategy, dual-write or one-shot, validation, and cutover with rollback."
+type: template
+phase: design
+category: database-design
+projectType: ["custom-app", "etl"]
+stack: []
+tags: ["migration", "data", "etl", "cutover"]
+difficulty: advanced
+estimatedTime: "1-2 days"
+author: "Platform Engineering"
+featured: true
+createdAt: 2026-04-26
+updatedAt: 2026-04-26
+inputs:
+  - name: source_database
+    description: "Source DB engine, version, hosting (e.g., 'SQL Server 2014 on-prem')"
+    required: true
+  - name: target_database
+    description: "Target DB engine, version, hosting (e.g., 'Azure SQL' or 'PostgreSQL on Azure')"
+    required: true
+  - name: data_volume
+    description: "Total data size + biggest tables (rows + GB)"
+    required: true
+  - name: downtime_tolerance
+    description: "Acceptable downtime (none / minutes / hours / days)"
+    required: true
+  - name: data_freshness_requirements
+    description: "How current must data be in the new system (real-time / near real-time / batch)"
+    required: false
+output:
+  format: markdown
+relatedAssets:
+  - "legacy-system-audit"
+  - "strangler-fig-migration-plan"
+  - "cutover-runbook-template"
+---
+
+# Data Migration Plan
+
+The hardest, riskiest part of most migrations. Code can be reverted; data can't. This template forces clear thinking about strategy, validation, and rollback before a single byte is moved.
+
+## When to use
+
+- Before any project that involves moving data between database engines
+- Before consolidating multiple databases
+- For application migrations that include schema changes
+- For cloud migrations involving data movement
+
+## Prompt
+
+````text
+You are a senior data engineer specializing in database migrations. Generate
+a comprehensive data migration plan based on the inputs below.
+
+## Input
+
+**Source database:** {{source_database}}
+**Target database:** {{target_database}}
+**Data volume:** {{data_volume}}
+**Downtime tolerance:** {{downtime_tolerance}}
+**Data freshness:** {{data_freshness_requirements}}
+
+## Output structure
+
+### 1. Migration strategy decision
+
+Based on inputs, recommend ONE of:
+
+**A. Big-bang (offline) migration**
+- When: small data, downtime acceptable, simple schema
+- Process: stop apps → dump → transform → load → restart apps
+- Downtime: hours (depending on size)
+- Rollback: restore source from backup, point apps back
+
+**B. Dual-write migration**
+- When: medium data, near-zero downtime needed, app changes manageable
+- Process: app writes to both DBs → backfill historical → cutover → decommission source
+- Downtime: minutes to seconds
+- Rollback: point apps back to source (data may have drifted)
+
+**C. CDC-based migration (Change Data Capture)**
+- When: large data, near-zero downtime, can't change app code
+- Process: backfill historical → CDC streams ongoing changes to target → cutover → stop CDC
+- Downtime: minutes
+- Rollback: harder, depends on CDC tool
+
+**D. Trickle migration (batch over time)**
+- When: data can be migrated by tenant/customer/region with no inter-dependency
+- Process: migrate one tenant at a time, both DBs run forever (until last tenant)
+- Downtime: per-tenant minutes
+- Rollback: per-tenant, easier
+
+Recommend with rationale.
+
+### 2. Schema mapping
+
+For each table in source, document:
+
+| Source table | Source columns | Target table | Target columns | Transformation |
+|--------------|----------------|--------------|----------------|----------------|
+| dbo.Customer | Id (int), Name (varchar 100), CreatedDt (datetime) | customers | id (uuid), name (text), created_at (timestamptz) | Generate UUIDs, convert datetimes |
+
+For each transformation, document:
+- Type changes (int → uuid, varchar → text, datetime → timestamptz)
+- Encoding changes (windows-1252 → UTF-8)
+- Default value changes
+- Constraint differences (NOT NULL added, FK added/removed)
+- Renamed columns (with mapping)
+- Split columns (e.g., Address → AddressLine1, AddressLine2)
+- Combined columns (e.g., FirstName + LastName → FullName, but keep both)
+- Computed columns (derived from source)
+
+### 3. Special data types
+
+These deserve their own attention. For each, document the migration plan:
+
+- **Identity columns / sequences:** Reset target sequences past max source value
+- **Computed columns:** Recreate as STORED or use views
+- **CLR types** (SQL Server): Usually need to be unraveled to standard types
+- **XML/JSON columns:** Validate and re-encode if engine differs
+- **Spatial types:** Engine-specific, check compatibility
+- **Currency / decimal:** Watch precision (NUMERIC(19,4) vs DECIMAL(18,2))
+- **Datetime types:** Time zone handling differs by engine (Postgres TIMESTAMPTZ vs SQL Server DATETIMEOFFSET vs DATETIME)
+- **Binary / blob columns:** Decide: migrate inline, move to object storage (S3/Azure Blob), or split
+
+### 4. Stored procedures and functions
+
+If the source has business logic in stored procedures (often the case with SQL Server):
+
+For each meaningful stored procedure:
+- **Purpose:** What does it do?
+- **Migration option:**
+  - **A. Translate to target SQL dialect** (SQL Server T-SQL → PostgreSQL PL/pgSQL)
+  - **B. Rewrite in application code** (recommended for most business logic)
+  - **C. Keep as a view + simple UDF** (if it's mostly query logic)
+  - **D. Decommission** (if it's no longer needed)
+- **Effort estimate**
+
+This list often has 100+ items in legacy SQL Server systems. Prioritize:
+- Used by hot paths first
+- Complex logic → rewrite in app code (testability, observability)
+- Simple aggregations → views in target
+
+### 5. Triggers, jobs, and scheduled tasks
+
+These are often overlooked and break things post-migration:
+
+- **Database triggers:** Document each. Migrate to app code or recreate.
+- **SQL Server Agent jobs:** Recreate as scheduled functions, app cron, or Azure Functions.
+- **DTS/SSIS packages:** Recreate as application code or modern ETL (ADF, Airflow, dbt).
+- **Linked servers / database mail:** Replace with API calls or modern messaging.
+
+### 6. Data quality assessment (DO THIS BEFORE MIGRATING)
+
+Run pre-migration audit on source data:
+
+For each major table, check:
+- **Null count** in columns supposed to be NOT NULL
+- **Orphaned rows** (FKs pointing to deleted records)
+- **Duplicate keys** in columns supposed to be unique
+- **Invalid values** (dates in 1900, negative ages, malformed emails)
+- **Encoding issues** (mojibake from past encoding mistakes)
+- **Truncation** in narrow VARCHARs
+- **Inconsistent formats** (phone numbers stored 5 different ways)
+
+Decide for each issue:
+- Fix in place before migration
+- Fix during migration (transform during load)
+- Migrate as-is, fix in target later
+- Reject the row
+
+This audit prevents migrating corrupt data into a clean target.
+
+### 7. Migration execution plan
+
+Step-by-step:
+
+**Phase 0: Preparation (weeks before)**
+- Set up target environment (sized for production)
+- Build migration scripts (loaders, transformers)
+- Run test migrations against staging
+- Tune target performance (indexes, statistics)
+- Set up monitoring on both source and target
+- Document runbook (use Cutover Runbook template)
+
+**Phase 1: Backfill (depending on strategy)**
+- For dual-write: dump source, transform, load to target, validate
+- For CDC: snapshot source, load, then start CDC stream
+- For big-bang: this is when you do the actual work, with downtime
+
+**Phase 2: Sync (for dual-write or CDC)**
+- Verify ongoing changes flow to target
+- Run reconciliation queries every N minutes
+- Investigate any drift
+
+**Phase 3: Cutover**
+- Stop app writes (briefly, during cutover window)
+- Verify final sync state
+- Switch app config to target
+- Verify app works against target
+- Optionally: keep source readable for read-side recovery
+
+**Phase 4: Decommission**
+- Run target-only for N days
+- Validate no source-only consumers remain
+- Archive source (don't delete immediately)
+- Remove source connection strings from app
+
+### 8. Validation queries
+
+For each major table, generate validation queries that should match between source and target:
+
+```sql
+-- Row count
+SELECT COUNT(*) FROM customers;
+
+-- Aggregate sums (catches data loss)
+SELECT SUM(amount) FROM orders;
+
+-- Distribution (catches systematic errors)
+SELECT status, COUNT(*) FROM orders GROUP BY status;
+
+-- Spot-check identity (random rows)
+SELECT * FROM customers WHERE id = 42;
+
+-- Foreign key integrity
+SELECT COUNT(*) FROM orders o
+LEFT JOIN customers c ON o.customer_id = c.id
+WHERE c.id IS NULL;
+```
+
+Build a validation script that runs all checks and reports differences.
+
+### 9. Rollback plan
+
+If migration fails at any phase, what's the recovery?
+
+| Phase | What's broken | Recovery |
+|-------|---------------|----------|
+| Pre-cutover | Target has wrong data | Re-run backfill |
+| During cutover | App can't read target | Point app back to source |
+| Post-cutover | Target slow / wrong | Read replica from source for reporting; investigate target issue |
+| Long after cutover | Target diverged | Hardest case — manual reconciliation; may need to keep source read-only forever |
+
+Critical: until the source is decommissioned, you must keep it intact and accessible. **Never delete source data on cutover day.**
+
+### 10. Performance plan
+
+The target may behave differently. Plan for:
+- **Indexing strategy:** map source indexes; consider new ones for new query patterns
+- **Statistics:** update after backfill, before going live
+- **Query optimization:** test top 20 hot queries against target with realistic data volumes
+- **Connection pooling:** may need to tune differently
+- **Caching:** if Redis/cache layer exists, make sure it's in front of new DB
+
+### 11. Operational concerns
+
+- **Backup strategy on target:** before you cut over, the new system must have working backups
+- **Monitoring:** target needs the same alerts as source had
+- **Disaster recovery:** target's RPO/RTO must meet business requirements
+- **Compliance:** if source is in a regulated environment, target must meet the same standards
+
+### 12. Risk register
+
+Top 10 data migration risks. For each:
+- Description
+- Likelihood / impact
+- Mitigation
+- Trigger
+
+### 13. Open questions
+
+Decisions still needed. Each with default assumption and cost of wrong default.
+
+## Style
+
+- Specific over generic
+- Numbers everywhere (rows, GB, minutes)
+- Honest about unknowns
+- Tone: this is risky work, treat it that way
+````
+
+## Tips
+
+- **Start with data quality audit.** You'll find issues you didn't know about. Better to find them now than during cutover.
+- **Test migration on a copy of production.** Synthetic data hides real-world weirdness.
+- **Run validation queries automatically** — don't rely on humans spot-checking.
+- **Plan for the long tail.** Mid-sized tables often have unique gotchas (1 row with NULL where it shouldn't be).
+- **Don't fix data during migration unless necessary.** Migrating data while transforming it is two bugs at once. Migrate then fix.
+- **Keep source read-accessible for at least 90 days** after cutover. Reporting tools, audit requests, finance reconciliations — they always show up after you think you're done.
+
+## Common mistakes to avoid
+
+- Migrating without a data quality audit first
+- Underestimating the long tail of small tables (each has its own quirks)
+- Forgetting about scheduled jobs and triggers
+- Discarding source data too early
+- "Improving" data during migration without explicit approval
+- No validation script (or validation that's just COUNT(*))
+- Not testing the rollback procedure
+- Cutover plan that takes longer than the maintenance window

@@ -1,0 +1,430 @@
+---
+title: "RPG Business Rule Extraction"
+slug: "rpg-business-rule-extraction"
+description: "Extract business rules from RPG II/III/IV programs into a structured catalog — handling indicators, cycle programs, and the procedural patterns of IBM i development."
+type: template
+phase: discover
+category: product-briefs
+projectType: ["custom-app"]
+stack: ["rpg", "ibm-i"]
+tags: ["migration", "rpg", "as400", "ibm-i", "business-rules", "discovery"]
+difficulty: advanced
+estimatedTime: "varies (per program)"
+author: "Platform Engineering"
+featured: true
+createdAt: 2026-04-26
+updatedAt: 2026-04-26
+inputs:
+  - name: rpg_program_source
+    description: "The RPG program source code (or representative section)"
+    required: true
+  - name: rpg_dialect
+    description: "Which RPG variant (RPG II / RPG III / RPG IV fixed-format / RPG IV free-format / SQLRPGLE)"
+    required: true
+  - name: program_purpose
+    description: "What this program does in business terms (1-2 sentences if known)"
+    required: false
+  - name: file_definitions
+    description: "F-specs (file definitions), DDS for files used, or external file descriptions"
+    required: false
+  - name: called_programs
+    description: "Other programs CALLed by this one (CL, RPG, service programs)"
+    required: false
+output:
+  format: markdown
+relatedAssets:
+  - "rpg-modernization-playbook"
+  - "rpg-to-java-dotnet-translation-checklist"
+---
+
+# RPG Business Rule Extraction
+
+The most valuable artifact of any RPG modernization isn't translated code — it's a **catalog of business rules** captured in language that engineers and business analysts can both understand. The RPG is the implementation; the rules are the actual asset.
+
+This template extracts those rules so they survive the migration regardless of whether you replatform, refactor, rewrite, or replace.
+
+## When to use
+
+- You're migrating an RPG program (any strategy: replatform to PowerVS, refactor with Profound/X-Analysis, rewrite to Java/.NET, replace with COTS)
+- The original developers / analysts are unavailable or aging out
+- You need rules in a form business stakeholders can validate
+- You're building a behavior parity test suite — these rules become the test cases
+
+## Why RPG extraction is different from COBOL
+
+RPG has its own challenges:
+
+- **Indicators** (`*IN01` through `*IN99`, `*INLR`, `*INH1`-`*INH9`) — boolean flags used to drive program flow. Often used as poor man's variables.
+- **The RPG cycle** (in RPG II/III) — implicit read/process/write loop driven by file specs. Programs without explicit `READ` statements rely on this. Almost incomprehensible to modern engineers without context.
+- **Fixed-format positional** — column 6, 7, 18, 26, etc. each have specific meanings. Hard to read without a reference.
+- **Factor 1 / Operation / Factor 2 / Result** — older RPG arithmetic looks like reverse-Polish notation.
+- **Subroutines via EXSR** — global state shared across all subroutines (unlike COBOL paragraphs which can have local data).
+- **Globals everywhere** — every variable in older RPG is global.
+
+A naive "translate this RPG to Java" prompt produces garbage because the model doesn't know about indicators or the cycle. This template forces explicit handling.
+
+## Prompt
+
+````text
+You are a senior systems analyst with deep RPG and IBM i expertise. You
+extract business rules from RPG programs into structured catalogs that
+business analysts can validate.
+
+## Input
+
+**RPG program source:**
+```rpg
+{{rpg_program_source}}
+```
+
+**RPG dialect:** {{rpg_dialect}}
+**Stated purpose:** {{program_purpose}}
+**File definitions / DDS:** {{file_definitions}}
+**Called programs:** {{called_programs}}
+
+## Output
+
+A Markdown document organized as follows:
+
+### 1. Program identification
+- Program name (from H-spec or program-name comment)
+- RPG dialect confirmed (II / III / IV fixed / IV free / SQLRPGLE)
+- Program type (interactive / batch / submitted / service program / module)
+- Approximate line count
+- Cycle-based or non-cycle (look for /FREE, MAIN procedure, or absence of primary file)
+- Date of last modification (from change history comments)
+- Author / shop (from comments)
+
+### 2. Inputs and outputs
+
+**Files used:**
+For each file declared in F-specs:
+- File name (and external description if used)
+- File type (database, display, printer)
+- Usage (input, output, update, combined)
+- Access path (sequential, keyed)
+- Record format(s) used
+- Approximate record count if known
+
+**Display files (interactive programs):**
+- Format names referenced (EXFMT, READ, WRITE)
+- Function keys handled
+- Subfile usage (SFL, SFLCTL)
+- Indicators set by display
+
+**Inputs (parameters):**
+- Entry parameters (PLIST or *ENTRY)
+- Each parameter: name, type, length, direction (input/output/both)
+
+**Outputs:**
+- Files written / updated
+- Parameters returned
+- Database commits / journals
+- Print files
+- Messages sent (SNDMSG, SNDPGMMSG)
+
+**Side effects:**
+- Database updates (UPDATE, WRITE, DELETE on data files)
+- Calls to other programs (CALL, CALLP)
+- Messages to message queues
+- Data area locks/updates (`*LDA`, named data areas)
+- Job logs (DSPLY)
+
+### 3. Business purpose
+
+In 2-3 paragraphs, plain language: what does this program DO for the business?
+
+Translate from RPG-speak to business-speak:
+- "Reads CUSTMAST keyed by customer number, calculates available credit, writes ORDHDR" 
+  becomes
+- "Validates a customer's credit availability before accepting an order, writing the approved order header to the orders database"
+
+If you can infer business context (manufacturing operations, ERP transactions, distribution), say so explicitly.
+
+### 4. Indicator analysis
+
+This is RPG-specific and critical. For each indicator used:
+
+| Indicator | Purpose | Set by | Used by | Migration concern |
+|-----------|---------|--------|---------|-------------------|
+| *IN01 | "Record found" flag | CHAIN/READ result | IF *IN01 = '1' | becomes boolean isFound |
+| *IN10 | "End of file" | READ at end | DOW *IN10 = '0' | becomes while(!eof) |
+| *IN50 | "Display in error" | Validation routine | OVERLAY on display | becomes form-level error state |
+| *INH1 | F1 pressed (help) | Display file | CASE statement | becomes onClick handler |
+| *INLR | Last record (program end) | Set by program at exit | RPG cycle terminator | becomes return statement |
+
+For each indicator, document:
+- What boolean/state it represents in business terms
+- Where it gets set
+- Where it gets read
+- What its modern equivalent would be (boolean variable, exception, return value, event)
+
+This is where RPG migrations often fail: indicators get translated mechanically as boolean variables, when they should become structured state.
+
+### 5. Subroutine catalog
+
+For each subroutine (BEGSR / ENDSR or PROC):
+
+```markdown
+## SUBROUTINE: SUB-NAME
+
+**Purpose:** [1-2 sentences]
+**Lines:** [approximate range]
+**Called by:** [where in code, or "RPG cycle / not called explicitly"]
+**Inputs (used global vars):** [list]
+**Outputs (modified global vars):** [list]
+**Files affected:** [list]
+**Indicators set:** [list]
+**Indicators read:** [list]
+
+### Logic summary
+[3-5 bullet points of what it does]
+
+### Modern equivalent
+[How this would be structured in Java/.NET — method? class? service?]
+```
+
+### 6. Business rules catalog
+
+For each business rule, document:
+
+```markdown
+## RULE-NNN: [Short name in business language]
+
+**Plain-language statement:**
+[1-2 sentences a business analyst can validate]
+
+**Source location:**
+[Subroutine name + line range, or fixed-format line numbers]
+
+**RPG implementation:**
+```rpg
+[The actual RPG code that implements the rule]
+```
+
+**Inputs the rule depends on:**
+- Field name 1 (from file X, type, length)
+- Field name 2 (program variable, type)
+- Indicator state (which indicators must be on/off)
+
+**Output / effect:**
+- Field set, file updated, indicator set, branch taken
+
+**Edge cases / boundaries:**
+- What happens at zero values
+- What happens at maximum field values (don't overflow)
+- What happens with blank inputs
+- Date boundary cases (if using date fields or 6/8-digit date packs)
+- Negative number handling
+- Sign convention (packed decimal sign nibble)
+- For older RPG: cycle iteration behavior
+
+**Confidence:**
+- ✅ HIGH: clearly stated in code, comments confirm
+- ⚠️ MEDIUM: inferred from code, no confirming comments
+- ❓ LOW: code suggests but logic is convoluted; needs SME validation
+
+**Tags:**
+[business-domain] [calculation-type] [validation] [pricing] etc.
+```
+
+### 7. The cycle (for cycle-based RPG II/III)
+
+If this is a cycle-based program (no /FREE, no MAIN procedure):
+
+Document explicitly:
+- **Primary file** that drives the cycle
+- **Matching record level indicators** (M1-M9) and their meaning
+- **Level break indicators** (L1-L9) and what they trigger
+- **Detail-time vs total-time calculations** (lines marked D vs T)
+- **First-page / last-page indicators** (1P, LR)
+
+The cycle is implicit; document what the cycle is doing in plain terms:
+> "Read each customer record. If customer number changes (L1 break), print
+> customer total and reset accumulator. After last record (LR), print
+> grand total."
+
+This is critical — engineers translating cycle-based RPG without
+understanding the cycle produce code that doesn't work.
+
+### 8. Decision tables
+
+For programs with complex IF chains or CASE statements, extract decision tables:
+
+| Customer Type | Order Amount | Credit Status | Action |
+|---------------|--------------|---------------|--------|
+| 'A' | > 5000 | OK | Approve, *IN50 OFF |
+| 'A' | > 5000 | HOLD | Reject, *IN50 ON, msg "Credit hold" |
+| 'A' | <= 5000 | * | Approve, *IN50 OFF |
+| 'B' | > 1000 | OK | Approve manager review, *IN51 ON |
+| 'B' | * | * | Approve, *IN50 OFF |
+
+Decision tables are easier for analysts to validate than nested RPG logic.
+
+### 9. Calculation formulas
+
+For arithmetic-heavy programs, extract formulas:
+
+```
+DISCOUNT_AMT = ORDER_AMT * DISCOUNT_PCT / 100
+where:
+- ORDER_AMT = sum of (LINE_QTY * UNIT_PRICE) for all order lines
+- DISCOUNT_PCT = lookup from CUSTMAST.CUSTDPC for current customer
+- Result truncated to 2 decimal places (RPG H-spec: HALF ADJUST not specified)
+```
+
+Document precision and rounding:
+- RPG `H-spec` setting (HALFADJ, ROUND DOWN)
+- Where rounding happens (each step or final)
+- Any explicit MULT or DIV operations with `(H)` half-adjust
+- Sign handling for negative values
+
+Financial rounding bugs are the most embarrassing post-migration regressions. Capture exactly how the legacy rounds.
+
+### 10. Database access patterns
+
+For each file accessed, document:
+
+| File | Operation | Access path | Indicators | Notes |
+|------|-----------|-------------|------------|-------|
+| CUSTMAST | CHAIN by CUSTNO | keyed | *IN01 (found), *IN02 (error) | Lookup |
+| ORDHDR | WRITE | sequential add | none | Append only |
+| ORDDTL | UPDATE by ORDNO+LINNO | keyed | *IN03 (error) | Modifies status |
+| INVMAST | READ + UPDATE chain | keyed by ITMNO | *IN04 (locked) | Allocates inventory |
+
+Distinguish:
+- **Pure reads** (CHAIN, READ, READE) — easy to migrate
+- **Updates** (UPDATE) — need transaction semantics in target
+- **Adds** (WRITE) — sequence/identity column considerations
+- **Deletes** (DELETE) — soft vs hard delete in target
+- **Locking patterns** (READE with update intent, ALLOC) — concurrency model
+
+### 11. SQLRPGLE specifics
+
+If the program is SQLRPGLE (embedded SQL):
+
+For each `EXEC SQL` block:
+- Operation (SELECT INTO, UPDATE, INSERT, DELETE, FETCH)
+- Tables / views referenced
+- Host variables (program fields used in SQL)
+- SQLCODE handling
+- Cursor behavior (if applicable)
+
+These are easier to migrate than native I/O — embedded SQL translates
+directly to JDBC / Entity Framework / Dapper.
+
+### 12. CL program calls
+
+If this program is called from CL programs, document:
+- Calling CL programs (by name)
+- Parameters passed in
+- CL commands that prepare environment (OVRDBF, OPNQRYF) before this call
+- This affects how the program behaves; replicating in modern requires understanding the setup
+
+### 13. Display file (5250 / green-screen) considerations
+
+For interactive programs using display files:
+
+- **Subfile usage:** load-all vs load-as-needed; record count strategy
+- **Function keys handled:** F1-F24 mapping
+- **Field-level help (HLP keyword):** how help is structured
+- **Validation:** check digits, range checks, lookups via CHKMSGID
+- **Conditioning indicators:** when fields show/hide, become input/output, change color
+- **Window groups, message subfiles:** modal patterns
+
+Modern equivalents are not obvious. A subfile becomes a paginated table.
+Conditioning indicators become reactive UI state. Function keys become
+keyboard shortcuts or buttons. Document this mapping for the rewrite.
+
+### 14. Quirks and tribal knowledge
+
+Things you can infer that aren't documented:
+
+- "The check `IF AMOUNT > 99999` suggests originally amounts were stored
+  as PIC 5 0 and someone added a higher cap later"
+- "The hard-coded comparison `IF YEAR = '99'` suggests Y2K hack — verify
+  what's intended"
+- "The MOVEL '*BLANKS' before assignment suggests trailing-character bug
+  someone worked around"
+- "Indicator *IN72 is set but never tested in this program — likely tested
+  by a calling program or used to be"
+
+These are bugs-as-features that migrations get wrong. Capture them.
+
+### 15. Migration-relevant observations
+
+Specific to migrating this program:
+
+- **Cyclomatic complexity:** simple/medium/complex
+- **State management:** does it carry state across calls? (matters for
+  stateless service rewrites)
+- **Cycle-based vs linear:** cycle programs need restructure for non-RPG targets
+- **Indicators-as-variables:** how much program logic depends on indicator state
+- **Global variables:** how much of the program assumes shared variables
+- **5250 UI logic:** if interactive, how much logic is tangled with display flow
+- **Concurrency:** does it assume exclusive file access?
+- **Restart/recovery:** how is it restarted on failure (CL retry logic, manual)
+
+### 16. Open questions
+
+What you can't determine from the code:
+
+- "Field FILLER15 in CUSTMAST DDS — purpose unclear; preserved but needs
+  SME confirmation"
+- "Indicator *IN72 is set on line 145 but never tested; called program?
+  legacy debug?"
+- "PARM2 is sometimes blank, sometimes contains a value; meaning of blank
+  case unclear"
+
+Each open question:
+- The question
+- Where it surfaces
+- Who could answer (SME, CL caller, RPG specialist)
+- Default assumption
+- Risk of wrong default
+
+## Quality bar
+
+- Every business rule is **standalone validatable** by a business analyst
+- Every rule has **specific source location** (line number, subroutine, fixed-format spec)
+- Every rule has a **confidence level**
+- Indicators get explicit treatment (this is critical for RPG)
+- Cycle behavior is explicit if applicable
+- Edge cases are explicit, not implied
+- Open questions are listed honestly
+
+## Style
+
+- Plain English in rule statements; technical detail in RPG excerpts
+- Acknowledge RPG-isms (don't pretend cycle-based RPG is normal control flow)
+- Specific source locations
+- Honest about uncertainty
+- Capture WHY when inferable, not just WHAT
+````
+
+## Tips
+
+- **One program at a time.** Even short RPG programs (300 lines) often have 30+ business rules and use 20+ indicators. Don't try to extract from a service program with 10 procedures in one prompt.
+- **Pair with a DDS dump for files used.** Without DDS, field meanings aren't always clear. Pull the DDS source separately and feed it as `file_definitions`.
+- **Run on representative programs first.** If you have 500 RPG programs, do the 10 most critical first. Establish patterns. The other 490 will be similar but not identical.
+- **Indicators deserve special attention.** Many RPG bugs survive migration because indicators were translated mechanically. The indicator analysis section is the most important part for an honest rewrite.
+- **For cycle-based programs, get an SME involved.** RPG II/III cycle is genuinely confusing; SME validation of the cycle interpretation is non-negotiable.
+- **Pair with business analysts.** Extracted rules need validation. Output is a starting point, not a final spec.
+
+## Common mistakes to avoid
+
+- **Translating RPG to pseudocode and stopping.** That's not a business rule. Push to plain language a non-RPG-engineer can validate.
+- **Ignoring indicators.** They're not just booleans; they encode state machines and event handling.
+- **Skipping the cycle for cycle-based RPG.** The cycle IS the program for those.
+- **Treating SQLRPGLE the same as native I/O.** SQL parts migrate easily; native I/O parts don't.
+- **Underestimating display-file logic.** Conditioning indicators and field-level help often hold significant business rules.
+- **Inventing context to fill gaps.** If you don't know, say so. Open questions are honest output.
+- **Treating extraction as one-shot.** Iterative refinement is normal; budget multiple passes.
+
+## What this output enables
+
+- **Business analyst review and sign-off** on rules before rewrite
+- **Behavior parity test cases** for the migrated system
+- **User stories** for the rewrite (each rule → one or more stories)
+- **Documentation** that survives the RPG itself
+- **Decision** about which rules to keep vs eliminate during migration (modernization is the chance to fix accumulated cruft, with explicit decisions not silent drift)

@@ -1,0 +1,135 @@
+---
+title: "shadcn/ui Component Builder"
+slug: "shadcn-component-builder"
+description: "Generate a custom React component composed of shadcn/ui primitives with proper accessibility and types."
+type: template
+phase: build
+category: frontend-development
+projectType: ["custom-app"]
+stack: ["react", "typescript", "tailwind", "shadcn-ui"]
+tags: ["component", "design-system", "accessibility"]
+difficulty: intermediate
+estimatedTime: "10 min"
+author: "Platform Engineering"
+featured: false
+createdAt: 2026-04-26
+updatedAt: 2026-04-26
+inputs:
+  - name: component_purpose
+    description: "What the component does (e.g., 'data table with sorting and row selection')"
+    required: true
+  - name: props_spec
+    description: "Props the component should accept"
+    required: true
+output:
+  format: code
+relatedAssets:
+  - "nextjs-page-scaffolder"
+  - "react-form-builder"
+---
+
+# shadcn/ui Component Builder
+
+Generate a custom, reusable React component built on shadcn/ui primitives with TypeScript types, Tailwind styling, accessibility patterns, and a usage example.
+
+## When to use
+
+- Building a reusable component for a design system
+- Need a custom component that composes shadcn/ui primitives (Dialog, Select, Command, etc.)
+- Want accessibility patterns done right without thinking about every aria attribute
+
+## Prompt
+
+````text
+You are a senior frontend engineer specializing in React, accessibility,
+and design systems. Build a custom component using shadcn/ui primitives.
+
+## Input
+
+**Component purpose:** {{component_purpose}}
+**Props:**
+{{props_spec}}
+
+## Requirements
+
+### Implementation
+- Use shadcn/ui components for primitives (Button, Input, Dialog, etc.)
+- Compose, don't reinvent — if shadcn has it, use it
+- Accept `className` prop and merge with `cn()` for style overrides
+- Forward refs where appropriate using `React.forwardRef`
+- Use semantic HTML (button, nav, section) over divs
+- Strong TypeScript types — no `any`
+
+### Accessibility
+- Proper ARIA attributes (role, label, describedby, expanded, etc.)
+- Keyboard navigation: Tab, Enter, Space, Arrow keys, Escape
+- Focus management (autofocus on mount where helpful, trap focus in modals)
+- Respect `prefers-reduced-motion` for animations
+- Screen-reader-only labels for icon-only buttons
+- Color contrast: rely on Tailwind tokens, no hardcoded colors
+
+### Styling
+- Tailwind classes only (no inline styles, no CSS modules)
+- Use design tokens: `text-foreground`, `bg-background`, etc.
+- Responsive: mobile-first
+- Dark mode: should "just work" via shadcn's CSS vars
+
+### Performance
+- `useMemo` / `useCallback` only when measurably needed
+- No unnecessary re-renders
+- Lazy load heavy children (Suspense + dynamic import) if applicable
+
+## Output
+
+Produce these files:
+
+1. **components/[ComponentName].tsx** - the component
+2. **components/[ComponentName].stories.tsx** - Storybook stories (5-7 stories covering variants and edge cases)
+3. **components/[ComponentName].test.tsx** - Vitest + RTL tests for behavior
+4. **components/[ComponentName].example.tsx** - Minimal usage example
+
+After the files, include:
+- "## Accessibility checklist" - bulleted list of what was implemented
+- "## Variants" - list of visual/behavioral variants supported via props
+- "## Future improvements" - 2-3 things you'd add later
+````
+
+## Example input
+
+```yaml
+component_purpose: "A multi-select tag input with autocomplete from a list of options"
+props_spec: |
+  - options: { value: string; label: string }[]
+  - selected: string[]
+  - onChange: (selected: string[]) => void
+  - placeholder?: string
+  - maxTags?: number (default: unlimited)
+  - allowCustom?: boolean (default: false, allow tags not in options)
+```
+
+## Example output structure
+
+```tsx
+// components/TagSelect.tsx
+import * as React from "react";
+import { Check, X } from "lucide-react";
+import { Command, CommandEmpty, CommandGroup, CommandInput, CommandItem } from "@/components/ui/command";
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
+import { Badge } from "@/components/ui/badge";
+import { cn } from "@/lib/utils";
+
+export interface TagSelectProps { /* ... */ }
+
+export const TagSelect = React.forwardRef<HTMLDivElement, TagSelectProps>(
+  function TagSelect(props, ref) {
+    /* implementation */
+  }
+);
+```
+
+## Tips
+
+- Run shadcn CLI first: `npx shadcn@latest add command popover badge` to install primitives the prompt may need
+- Test keyboard navigation manually — don't trust automated a11y tests alone
+- Use the **Comprehensive Code Review** prompt on the output before committing
+- For form components, pair with **react-hook-form Form Builder** template

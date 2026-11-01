@@ -1,0 +1,195 @@
+---
+title: "User Story Generator — Enterprise"
+slug: "user-story-enterprise"
+description: "Generate an enterprise-grade user story with compliance, security, integration, performance, and audit requirements baked in."
+type: template
+phase: discover
+category: user-stories
+projectType: ["custom-app"]
+stack: []
+tags: ["agile", "enterprise", "compliance", "security", "audit", "requirements"]
+difficulty: advanced
+estimatedTime: "15 min"
+author: "Platform Engineering"
+createdAt: 2026-04-26
+updatedAt: 2026-04-26
+inputs:
+  - name: requirements
+    description: "The requirement, ticket, or feature brief to convert"
+    required: true
+  - name: regulatory_context
+    description: "Applicable regulations (e.g. GDPR, HIPAA, SOC2, PCI-DSS) — comma separated"
+    required: false
+  - name: enterprise_systems
+    description: "Existing enterprise systems this must integrate with (SSO, audit log, MDM, etc.)"
+    required: false
+output:
+  format: json
+relatedAssets:
+  - "user-story-from-prd"
+  - "user-story-api"
+  - "user-story-gherkin"
+  - "adr-generator"
+---
+
+# User Story Generator — Enterprise
+
+Generate a user story tuned for regulated, large-scale environments — banks, healthcare, government, anywhere a story can't ship without satisfying compliance, security, audit, and integration concerns. Output is structured JSON that gives reviewers a single object to scan for risk.
+
+## When to use
+
+- The work touches PII, PHI, payment data, or auditable transactions
+- You need to capture compliance / security / audit requirements upfront, not retrofit them
+- The story will be reviewed by InfoSec, Legal, or Compliance as part of definition-of-ready
+
+## Prompt
+
+```text
+You are an enterprise business analyst with expertise in large-scale system
+requirements and user-story creation for regulated environments.
+
+Convert the following requirement into a comprehensive enterprise user story.
+
+## Requirements
+
+{{requirements}}
+
+## Regulatory context
+
+{{regulatory_context}}
+
+## Existing enterprise systems to integrate with
+
+{{enterprise_systems}}
+
+## Template Type
+
+Enterprise (Regulated / Large-Scale)
+
+## Output requirements
+
+Return ONLY a valid JSON object with exactly this structure — no markdown
+fences, no commentary, no leading or trailing text:
+
+{
+  "title": "Clear and concise title of the user story",
+  "description": "User story in the format: As a <role>, I want to <do something> so that <benefit>",
+  "acceptance_criteria": [
+    "List of acceptance criteria as separate strings — testable, measurable"
+  ],
+  "velocity_points": "Estimated story points as a string (1-13)",
+  "priority": "High | Medium | Low",
+  "template_type": "Enterprise",
+  "user_role": "Specific role / persona — be precise (e.g. 'Branch teller with elevated permissions')",
+  "business_value": "One sentence: the measurable business value",
+  "compliance_requirements": [
+    "Regulations that apply and what compliance with each looks like for THIS story"
+  ],
+  "security_considerations": [
+    "Auth, authorization, encryption (in transit + at rest), secret handling, threat-model notes"
+  ],
+  "data_classification": "Public | Internal | Confidential | Restricted — and what data falls under it",
+  "integration_points": [
+    "Each external system this story touches and what flows in/out"
+  ],
+  "performance_requirements": "Latency, throughput, concurrency, peak-load expectations",
+  "scalability_notes": "What needs to hold true at 10x and 100x today's load",
+  "audit_requirements": [
+    "Events that must be logged, retention period, who can read them"
+  ],
+  "approvals_needed": [
+    "InfoSec / Legal / Compliance / Architecture review checkpoints"
+  ],
+  "rollback_plan": "How this is reverted safely if something goes wrong post-deploy",
+  "definition_of_done": [
+    "Concrete checks — review sign-offs, audit log verified, perf test passed, etc."
+  ]
+}
+
+## Style guide
+
+- Be specific. "Logs are kept secure" is not an audit requirement; "WORM-stored
+  for 7 years, accessible only via the SOC console" is.
+- Compliance items should reference the actual control or article when known
+  (e.g. GDPR Art. 17, SOC2 CC7.2, PCI-DSS 8.2).
+- If a system isn't listed in `enterprise_systems` but is needed, add it under
+  `integration_points` and call out the dependency.
+- Velocity points still cap at 13. If the story needs more, split it — large
+  enterprise stories usually fail review for being too big.
+
+## Hard rules
+
+1. Output is a single JSON object — no surrounding text, no markdown fences.
+2. Use double quotes for all strings.
+3. Every array field must be an array of strings (or objects where specified).
+4. priority must be exactly one of: "High", "Medium", "Low".
+5. velocity_points must be a string ("1" through "13").
+6. data_classification must be one of: "Public", "Internal", "Confidential", "Restricted".
+7. No trailing commas. All brackets balanced.
+```
+
+## Example output
+
+```json
+{
+  "title": "Issue refund to original payment method (in-branch)",
+  "description": "As a branch teller with refund permissions, I want to issue a refund back to the customer's original payment method so that the customer doesn't have to wait for a check or store credit.",
+  "acceptance_criteria": [
+    "Refund cannot exceed the original captured amount minus prior refunds",
+    "Teller must re-authenticate with step-up MFA before the refund is submitted",
+    "Refund is reflected in the customer's statement within 1 business day",
+    "Failed refunds surface a customer-facing reason and a back-office retry option"
+  ],
+  "velocity_points": "8",
+  "priority": "High",
+  "template_type": "Enterprise",
+  "user_role": "Branch teller with 'refund.issue' permission, working at a physical branch terminal",
+  "business_value": "Reduces refund-related support volume by 40% by eliminating the manual operations queue.",
+  "compliance_requirements": [
+    "PCI-DSS 4.0 §3 — original payment instrument data must remain tokenized end-to-end",
+    "SOX — every refund must produce an immutable audit record traceable to the teller and supervisor",
+    "Reg E — disputed-charge refunds must be processed within regulatory timelines"
+  ],
+  "security_considerations": [
+    "Step-up MFA required immediately before submission (TOTP or hardware key, not SMS)",
+    "Refund tokens never logged in plaintext — only the masked PAN and tokenized handle",
+    "Branch terminal must be enrolled in MDM and on the corporate VPN to call the API",
+    "Threat: a teller laundering refunds to themselves — covered by independent reconciliation job"
+  ],
+  "data_classification": "Restricted (cardholder data + financial transaction record)",
+  "integration_points": [
+    "Payment gateway — POST /refunds with tokenized handle",
+    "Core banking ledger — write refund entry and trigger statement update",
+    "Identity provider — step-up MFA challenge",
+    "Enterprise audit log — write immutable record (WORM)",
+    "Customer communications — trigger refund-issued email"
+  ],
+  "performance_requirements": "p95 < 1.5s for the submit + ack round trip; sustained 5 RPS per branch with 200 branches concurrent",
+  "scalability_notes": "Holds at 10x — gateway is per-region. At 100x, would need to shard the audit log writer; currently single-writer.",
+  "audit_requirements": [
+    "Log: teller id, supervisor approval id (if amount > $500), original txn id, refund amount, channel, timestamp, terminal id",
+    "Retention: 7 years, WORM",
+    "Access: SOC analysts and Internal Audit only, via the audit console (not direct DB)"
+  ],
+  "approvals_needed": [
+    "InfoSec — step-up MFA flow review",
+    "Compliance — PCI scope confirmation",
+    "Legal — Reg E timeline alignment",
+    "Architecture — payment-gateway integration sign-off"
+  ],
+  "rollback_plan": "Feature-flag the new path; if the daily reconciliation job flags a discrepancy, flip the flag off and route all refunds back to the legacy back-office queue. No DB schema rollback needed — refund records are additive.",
+  "definition_of_done": [
+    "All acceptance criteria pass in staging with a Restricted-data scrubbed dataset",
+    "Penetration test of the step-up MFA flow signed off",
+    "Audit records visible in the audit console within 60 seconds of issuance",
+    "Reconciliation job runs green for 7 consecutive days in staging",
+    "Rollout plan approved by branch operations director"
+  ]
+}
+```
+
+## Tips
+
+- Pair with the **ADR Generator** template to capture the architectural decisions this story implies.
+- Don't skip `rollback_plan` — for regulated work, "we'll figure it out" is what gets the deploy gated.
+- If your `regulatory_context` includes more than two regimes, consider splitting the story by regime.

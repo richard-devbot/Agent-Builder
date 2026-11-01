@@ -1,0 +1,202 @@
+---
+title: "Jira Ticket Manager Skill"
+slug: "jira-ticket-manager"
+description: "Claude Code skill for creating, updating, and querying Jira tickets via the Jira MCP server."
+type: skill
+phase: discover
+category: jira-tickets
+projectType: ["custom-app", "etl"]
+stack: ["claude-code", "mcp"]
+tags: ["jira", "agile", "automation"]
+difficulty: intermediate
+estimatedTime: "5 min setup"
+author: "Platform Engineering"
+featured: true
+createdAt: 2026-04-26
+updatedAt: 2026-04-26
+skillName: "jira-ticket-manager"
+requires:
+  - mcp-server: jira
+files:
+  - SKILL.md
+  - templates/story-template.md
+  - templates/bug-template.md
+relatedAssets:
+  - "jira-mcp"
+  - "user-story-from-prd"
+---
+
+# Jira Ticket Manager Skill
+
+A Claude Code skill that triggers automatically when you ask Claude Code to work with Jira tickets. It standardizes ticket creation, applies your organisation's templates, and uses the Jira MCP server under the hood.
+
+## When it triggers
+
+This skill activates when Claude Code detects:
+- Requests to create, update, or query Jira tickets
+- Mentions of ticket keys (e.g., `PROJ-123`)
+- References to "epic", "story", "bug" in a Jira context
+
+## What it does
+
+- Creates tickets with consistent formatting and required fields
+- Applies the right template based on issue type (story vs. bug vs. task)
+- Links tickets to epics automatically when context implies it
+- Adds standard labels (e.g., `platform`, `auto-created`)
+- Handles bulk operations (e.g., "create stories for each requirement in this PRD")
+
+## Installation
+
+1. Make sure you have the **Jira MCP** server configured (see related: `jira-mcp`)
+2. Copy this skill folder to `~/.claude/skills/jira-ticket-manager/`
+3. Restart Claude Code
+
+## SKILL.md content
+
+```markdown
+---
+name: jira-ticket-manager
+description: |
+  Use this skill when the user wants to create, update, or query Jira
+  tickets — including stories, bugs, tasks, and epics. Triggers on mentions
+  of ticket creation, ticket keys (PROJ-123 format), or Jira-specific
+  workflows like sprint planning, backlog grooming, or epic breakdown.
+  Also use for bulk ticket operations like "create stories for each item
+  in this list".
+---
+
+# Jira Ticket Manager
+
+You help users manage Jira tickets following your organisation's conventions.
+
+## Standard ticket structure
+
+Every ticket you create must include:
+- **Summary:** Imperative voice, <80 chars (e.g., "Add password reset endpoint")
+- **Description:** Use the appropriate template (see `templates/`)
+- **Issue type:** Story | Bug | Task | Epic | Spike
+- **Priority:** P0 | P1 | P2 | P3
+- **Labels:** Always include `platform`. Add domain labels as appropriate.
+- **Components:** Match to existing Jira components in the project.
+- **Story points** (for stories): Use Fibonacci (1, 2, 3, 5, 8, 13).
+
+## Workflows
+
+### Creating a single story
+
+1. If the user provides a user story in "As a... I want... So that..." format, use it directly.
+2. Otherwise, ask 1-2 clarifying questions to fill the template.
+3. Apply `templates/story-template.md`.
+4. Suggest a parent epic if the description matches an existing one.
+5. Confirm before creating.
+
+### Creating a bug
+
+1. Apply `templates/bug-template.md`.
+2. Require: steps to reproduce, expected vs actual, environment.
+3. Auto-set priority based on described impact.
+4. Confirm before creating.
+
+### Bulk creation from a PRD or list
+
+1. Parse the input.
+2. Show a preview table of what will be created.
+3. Get explicit confirmation.
+4. Create one at a time, reporting progress.
+5. At the end, output a summary with all ticket links.
+
+## Conventions
+
+- Never create tickets in `DONE` status.
+- Never modify tickets created by humans without confirmation.
+- When updating, always show the diff before applying.
+- For "find" operations, prefer JQL precision over fuzzy search.
+
+## Anti-patterns
+
+- Don't create tickets without descriptions.
+- Don't use vague summaries like "Fix bug" or "Update code".
+- Don't bypass the template even for "quick" tickets.
+- Don't auto-assign tickets unless the user specifies an assignee.
+```
+
+## Templates
+
+### story-template.md
+
+```markdown
+## User Story
+
+As a [persona]
+I want [capability]
+So that [benefit]
+
+## Acceptance Criteria
+
+- [ ] Given... When... Then...
+- [ ] Given... When... Then...
+
+## Technical Notes
+
+- API endpoints affected:
+- Database changes:
+- Dependencies:
+
+## Out of Scope
+
+-
+
+## Definition of Done
+
+- [ ] Code merged to main
+- [ ] Unit tests added
+- [ ] Documentation updated
+- [ ] Deployed to staging
+- [ ] PM/QA acceptance
+```
+
+### bug-template.md
+
+```markdown
+## Summary
+
+[One-line description]
+
+## Steps to Reproduce
+
+1.
+2.
+3.
+
+## Expected Behavior
+
+## Actual Behavior
+
+## Environment
+
+- App version:
+- Browser/OS:
+- User account:
+
+## Screenshots / Logs
+
+[Attach or paste]
+
+## Impact
+
+- Users affected:
+- Workaround available:
+- Severity: [Blocker | Critical | Major | Minor]
+```
+
+## Tips
+
+- Pair with the **User Story Generator** template — feed the output directly into this skill
+- Configure your Jira project's components in the MCP server to match what the skill expects
+- For sprint planning, use `bulk creation from a PRD` to seed an entire sprint quickly
+
+## Limitations
+
+- Does not currently handle Jira Service Desk tickets (different schema)
+- Multi-project links require manual specification
+- Custom fields beyond the templates require manual entry

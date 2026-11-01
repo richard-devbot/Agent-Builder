@@ -1,0 +1,440 @@
+---
+title: "VSAM / IMS to Relational Database Mapping"
+slug: "vsam-to-relational-mapping"
+description: "Map mainframe data structures (VSAM, IMS, IDMS, flat files) to a normalized relational schema, preserving keys, relationships, and access patterns."
+type: template
+phase: design
+category: database-design
+projectType: ["custom-app", "etl"]
+stack: ["mainframe", "cobol", "postgres", "sql"]
+tags: ["migration", "cobol", "vsam", "ims", "mainframe", "data"]
+difficulty: advanced
+estimatedTime: "1-2 days per major dataset"
+author: "Platform Engineering"
+featured: false
+createdAt: 2026-04-26
+updatedAt: 2026-04-26
+inputs:
+  - name: data_source_description
+    description: "Type and structure of the source (VSAM KSDS, ESDS, IMS DBD, IDMS schema, flat file with copybook)"
+    required: true
+  - name: copybook_or_schema
+    description: "The COBOL copybook, IMS DBD, IDMS schema, or file layout"
+    required: true
+  - name: access_patterns
+    description: "How the data is currently accessed (sequential reads, primary key lookups, alternate index, join patterns)"
+    required: true
+  - name: target_engine
+    description: "Target relational engine (Postgres / SQL Server / Azure SQL / Oracle)"
+    required: true
+  - name: data_volume
+    description: "Approximate record count and growth rate"
+    required: false
+output:
+  format: code
+relatedAssets:
+  - "cobol-modernization-playbook"
+  - "data-migration-plan"
+  - "sql-server-schema-translator"
+---
+
+# VSAM / IMS to Relational Database Mapping
+
+Mainframe data structures are alien to most modern engineers. VSAM, IMS, IDMS, and flat files with COBOL copybooks have decades of accumulated structural quirks: REDEFINES clauses, OCCURS DEPENDING ON, packed decimal types, sign conventions, EBCDIC encoding. Translating these to a normalized relational schema is a discipline of its own.
+
+This template handles the translation: source structure analysis, type mapping, normalization decisions, key preservation, and migration script generation.
+
+## When to use
+
+- Migrating COBOL data sources (VSAM, IMS, IDMS, sequential files) to a relational DB
+- The new application uses standard SQL access patterns
+- You need a clean schema, not a dump of raw mainframe records
+
+## Why this is non-trivial
+
+Mainframe data has features that don't translate cleanly:
+
+- **Packed decimal (COMP-3):** numeric values stored 2 digits per byte plus sign nibble
+- **Binary (COMP, COMP-4):** word-aligned binary integers
+- **Display (zoned decimal):** sign embedded in last byte's high nibble
+- **Signed vs unsigned:** assumed by program, not declared in schema
+- **REDEFINES:** same bytes mean different things based on a discriminator
+- **OCCURS DEPENDING ON:** variable-length arrays whose count is in another field
+- **Implicit decimal:** PIC 9(7)V99 = 7 digits, 2 implied decimals (no actual decimal point in storage)
+- **EBCDIC encoding:** characters may not be ASCII; collation differs
+- **Packed signs:** C/D/F nibbles for positive/negative/unsigned
+- **Truncation by usage:** different programs may interpret the same bytes differently
+
+A naive byte-for-byte translation misses these. This template forces explicit handling.
+
+## Prompt
+
+````text
+You are a senior data architect with deep mainframe and modern database
+expertise. Translate the source data structure to a normalized relational
+schema, handling type and encoding nuances explicitly.
+
+## Input
+
+**Source description:**
+{{data_source_description}}
+
+**Copybook / schema:**
+```
+{{copybook_or_schema}}
+```
+
+**Access patterns:**
+{{access_patterns}}
+
+**Target engine:** {{target_engine}}
+**Data volume:** {{data_volume}}
+
+## Output
+
+A multi-section deliverable:
+
+### 1. Source structure analysis
+
+Document what you see in the source:
+
+**For VSAM:**
+- KSDS / ESDS / RRDS / LDS classification
+- Primary key (and length, position)
+- Alternate indexes (if AIX defined)
+- Record format (fixed / variable length)
+- Logical record size
+- Estimated record count
+
+**For IMS DBD:**
+- Database type (HDAM, HIDAM, HISAM)
+- Root segment
+- Hierarchy of child segments (with cardinalities)
+- Search keys and pointer types
+- Concatenated keys
+- Logical relationships (logical parent/child cross-DBD)
+
+**For IDMS schema:**
+- Records and sets (CODASYL network)
+- Owner-member relationships
+- CALC vs VIA records
+- Set order (FIRST, LAST, SORTED, NEXT, PRIOR)
+
+**For flat files:**
+- Fixed-length vs variable-length
+- Sort order (if any)
+- Record types (if multiple in same file, distinguished by record-type field)
+
+### 2. Field-by-field analysis
+
+For every field in the copybook:
+
+| Position | Field name | COBOL definition | Storage type | Logical type | Target SQL type | Notes |
+|----------|------------|--------------------|---------------|----------------|------------------|-------|
+| 1-10 | CUST-ID | PIC X(10) | DISPLAY (10 bytes) | string | VARCHAR(10) | Primary key |
+| 11-13 | CUST-AGE | PIC 9(3) | DISPLAY (3 bytes) | unsigned integer | SMALLINT | |
+| 14-17 | CUST-BAL | PIC S9(7)V99 COMP-3 | Packed decimal (4 bytes) | signed decimal | DECIMAL(9,2) | |
+| 18-22 | CUST-CTR | PIC S9(9) COMP | Binary (4 bytes) | signed integer | INTEGER | |
+| 23-30 | CUST-EFF | PIC X(8) | DISPLAY (8 bytes) | string YYYYMMDD | DATE | Parse to DATE; reject invalid |
+| 31-50 | FILLER | PIC X(20) | DISPLAY (20 bytes) | unused | (skip) | Often padding or future use |
+
+Map each COBOL type to target SQL type explicitly:
+
+| COBOL definition | Storage | Target SQL (Postgres) | Target SQL (SQL Server) |
+|-------------------|---------|-------------------------|---------------------------|
+| `PIC X(n)` | n bytes DISPLAY | VARCHAR(n) | VARCHAR(n) |
+| `PIC A(n)` | n bytes DISPLAY (alpha) | CHAR(n) | CHAR(n) |
+| `PIC 9(n)` | n bytes DISPLAY | NUMERIC(n) or INTEGER | NUMERIC(n) or INT |
+| `PIC 9(n)V9(d)` | n+d bytes DISPLAY | NUMERIC(n+d, d) | DECIMAL(n+d, d) |
+| `PIC S9(n)` SIGN LEADING | n+1 bytes | NUMERIC(n) | NUMERIC(n) |
+| `PIC 9(n) COMP` | varies (binary) | INTEGER / BIGINT | INT / BIGINT |
+| `PIC 9(n) COMP-3` | (n+1)/2 rounded up | NUMERIC(n) | NUMERIC(n) |
+| `PIC S9(n)V9(d) COMP-3` | (n+d+1)/2 rounded up | NUMERIC(n+d, d) | DECIMAL(n+d, d) |
+| `PIC X(n) DATE` (informally) | 8 bytes for YYYYMMDD | DATE | DATE |
+
+Special cases:
+- **`OCCURS n TIMES`** → child table (one row per occurrence)
+- **`OCCURS DEPENDING ON`** → child table with sequence number
+- **`REDEFINES`** → discriminated union; decide per case (keep as one column with type tag, or split into multiple tables)
+- **`88 level (condition names)`** → CHECK constraints or enum domain
+- **`FILLER`** → drop unless verified to carry meaning
+
+### 3. Normalization decisions
+
+For each repeating group or hierarchy:
+
+**Repeating groups (OCCURS):**
+
+```cobol
+01 CUSTOMER-RECORD.
+   05 CUST-ID            PIC X(10).
+   05 CUST-NAME          PIC X(50).
+   05 CUST-PHONES OCCURS 5 TIMES.
+      10 PHONE-TYPE      PIC X(10).
+      10 PHONE-NUMBER    PIC X(20).
+```
+
+Translates to:
+
+```sql
+CREATE TABLE customers (
+    cust_id VARCHAR(10) PRIMARY KEY,
+    cust_name VARCHAR(50)
+);
+
+CREATE TABLE customer_phones (
+    cust_id VARCHAR(10) REFERENCES customers(cust_id),
+    phone_seq SMALLINT NOT NULL,
+    phone_type VARCHAR(10),
+    phone_number VARCHAR(20),
+    PRIMARY KEY (cust_id, phone_seq)
+);
+```
+
+Don't keep arrays as columns. Always normalize.
+
+**Hierarchical (IMS) → relational:**
+
+IMS hierarchy:
+```
+CUSTOMER (root)
+  ├── ADDRESS (segment, 1:N)
+  │     └── ADDRESS-HISTORY (segment, 1:N)
+  └── ORDER (segment, 1:N)
+        └── ORDER-LINE (segment, 1:N)
+```
+
+Becomes:
+```sql
+CREATE TABLE customers ( cust_id ... );
+CREATE TABLE addresses ( cust_id REFERENCES customers, addr_id, ... );
+CREATE TABLE address_history ( cust_id, addr_id, hist_seq, ... FK to addresses );
+CREATE TABLE orders ( cust_id REFERENCES customers, order_id, ... );
+CREATE TABLE order_lines ( cust_id, order_id, line_no, ... FK to orders );
+```
+
+Each segment becomes a table; parent keys propagate.
+
+**CODASYL (IDMS) → relational:**
+
+Owner-member sets become foreign keys. CALC records get explicit primary
+keys. Set order becomes ORDER BY in queries.
+
+### 4. Key strategy
+
+For each source key, decide target strategy:
+
+| Source key | Type | Length | Recommended target |
+|------------|------|--------|---------------------|
+| CUST-ID (KSDS primary key) | character | 10 | Keep as VARCHAR(10) PK; or replace with surrogate UUID + keep as alternate key |
+| Concatenated key (CUST-ID + EFF-DT) | composite | 18 | Composite PK, or surrogate + unique constraint |
+| RBA / RRN | physical pointer | varies | Drop; modern DBs don't expose physical pointers |
+
+**Surrogate vs natural keys:**
+- **Keep natural keys** if external systems reference them (downstream consumers, reports, mainframe-still-running)
+- **Add surrogate UUIDs** for new system internal use; map at ingestion
+- **Document** the decision in the schema with comments
+
+### 5. Encoding and character set
+
+EBCDIC → UTF-8 conversion:
+
+- Most EBCDIC code pages convert losslessly to UTF-8
+- Exceptions: certain shop-specific characters, hex non-printable values
+- Sort order changes: EBCDIC sorts numbers AFTER letters; ASCII sorts numbers BEFORE letters
+  - This affects any program assuming ordering
+  - Document affected fields and any ORDER BY queries
+
+For each VARCHAR field, decide:
+- Trim trailing spaces (mainframe pads with spaces, SQL doesn't usually)
+- Normalize case (mainframe often UPPER; modern often mixed)
+- Handle low-values / high-values (X'00' / X'FF' should become NULL or empty)
+
+### 6. Sign conventions
+
+For signed numbers (`PIC S9(n)`):
+
+- **Sign separate (LEADING / TRAILING):** sign in its own byte
+- **Sign embedded:** sign in last byte's high nibble (zoned decimal)
+- **COMP-3:** sign in last nibble (C = positive, D = negative, F = unsigned positive)
+
+In the migration ETL, every signed COBOL value must be correctly interpreted.
+Document the convention used per field.
+
+### 7. Implicit decimal handling
+
+`PIC 9(7)V99` is 7 digits + 2 implied decimal places, stored as 9 bytes
+(in DISPLAY) with NO actual decimal point. The program knows; the bytes
+don't.
+
+Migration:
+- Read raw bytes
+- Insert decimal point at correct position
+- Store as DECIMAL(9, 2)
+- Test boundary values: 9999999.99 (max), -9999999.99 (min for signed), 0.00
+
+Banker's rounding vs away-from-zero: legacy COBOL typically uses
+half-away-from-zero. Document the rounding convention; implement to match.
+
+### 8. NULL handling
+
+COBOL doesn't have NULL. Conventions for "no value":
+
+- All spaces (SPACES) — for character fields
+- All zeros (ZEROES) — for numeric fields
+- LOW-VALUES (X'00' bytes) — sentinel
+- HIGH-VALUES (X'FF' bytes) — sentinel
+- Specific magic numbers (e.g., 9999-12-31 = "no expiry")
+
+For each field, decide:
+- What "no value" looks like in source
+- Whether target should be NULL or use sentinel
+- Migration ETL must convert correctly
+
+### 9. Schema DDL output
+
+Generate the target SQL DDL. Include:
+
+```sql
+-- Schema for migrated CUSTOMER data
+-- Source: VSAM KSDS CUST.MASTER, copybook CUSTREC
+-- Migration date: [date]
+-- Original record count: [count]
+
+CREATE TABLE customers (
+    cust_id VARCHAR(10) PRIMARY KEY,
+    cust_name VARCHAR(50) NOT NULL,
+    cust_age SMALLINT,
+    cust_balance DECIMAL(9,2) NOT NULL DEFAULT 0,
+    cust_counter INTEGER,
+    cust_effective_date DATE NOT NULL,
+    -- Migrated from PIC X(20) FILLER; verified unused
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+
+    CONSTRAINT chk_age_valid CHECK (cust_age IS NULL OR cust_age BETWEEN 0 AND 150),
+    CONSTRAINT chk_balance_range CHECK (cust_balance BETWEEN -9999999.99 AND 9999999.99)
+);
+
+-- Index supporting alternate access pattern (was AIX in VSAM)
+CREATE INDEX idx_customers_effective_date ON customers(cust_effective_date);
+
+-- Child table for OCCURS 5 TIMES
+CREATE TABLE customer_phones (
+    cust_id VARCHAR(10) NOT NULL REFERENCES customers(cust_id) ON DELETE CASCADE,
+    phone_seq SMALLINT NOT NULL CHECK (phone_seq BETWEEN 1 AND 5),
+    phone_type VARCHAR(10) CHECK (phone_type IN ('HOME', 'WORK', 'MOBILE', 'FAX', 'OTHER')),
+    phone_number VARCHAR(20),
+    PRIMARY KEY (cust_id, phone_seq)
+);
+
+COMMENT ON TABLE customers IS
+    'Migrated from VSAM CUST.MASTER. See migration log [date] for details.';
+COMMENT ON COLUMN customers.cust_id IS
+    'Original VSAM key, 10-char alphanumeric. Preserved as-is for downstream compatibility.';
+```
+
+Add comments documenting the source for every table and important column.
+
+### 10. ETL strategy
+
+For the data movement itself:
+
+**One-time backfill:**
+- Tool: AWS DMS / pgloader / custom Python+cobol-py / IBM Data Replication
+- Volume estimate and time
+- Validation checkpoints
+
+**Ongoing sync (if needed):**
+- CDC via IBM CDC, Qlik Replicate, or polling-based ETL
+- Latency tolerance
+- Conflict resolution (if dual-write)
+
+**Validation queries:**
+```sql
+-- Row count parity
+SELECT COUNT(*) FROM customers;
+-- Expected: [count from source]
+
+-- Aggregate parity
+SELECT SUM(cust_balance) FROM customers;
+-- Expected: [sum from source]
+
+-- Distribution parity
+SELECT cust_effective_date, COUNT(*)
+FROM customers
+GROUP BY cust_effective_date
+ORDER BY cust_effective_date;
+
+-- Spot-check sampling
+SELECT * FROM customers WHERE cust_id IN ('SAMPLE001', 'SAMPLE002', ...);
+```
+
+### 11. Indexes for access patterns
+
+Map source access patterns to target indexes:
+
+| Source pattern | Target index |
+|----------------|---------------|
+| VSAM primary key (KSDS) | PRIMARY KEY (already covered) |
+| VSAM AIX (alternate index) | CREATE INDEX |
+| IDMS CALC record access | PRIMARY KEY |
+| IMS secondary index | CREATE INDEX |
+| Sequential read by sort order | Index on the sort key |
+| Range queries (BETWEEN) | B-tree index, ordered |
+
+Don't blindly add indexes for every old access path. Verify the new
+application actually uses them; unused indexes cost write performance.
+
+### 12. Open questions
+
+Things you can't determine from the schema alone:
+
+- "Field FILLER PIC X(50) at offset 200 — purpose unknown; preserved as
+  filler_unused VARCHAR(50). Recommend SME confirmation before dropping."
+- "PIC 9(4) field appears to encode bit flags; need program code review
+  to determine which bits mean what."
+- "REDEFINES clause has 3 alternative views; discriminator field unclear.
+  Need to inspect program to determine which view applies when."
+
+Each open question:
+- Where it surfaces
+- Who could answer (SME, program code review, operational data sample)
+- Default assumption
+- Risk of wrong default
+
+## Quality bar
+
+- Every COBOL field has an explicit target type (no "depends")
+- Encoding handling is documented (EBCDIC → UTF-8)
+- Sign and decimal conventions are explicit
+- NULLs / sentinels are addressed
+- DDL is valid for target engine
+- Validation queries are provided
+- Open questions listed honestly
+
+## Style
+
+- Specific to the actual copybook provided
+- Match recommendations to actual target_engine
+- Honest about ambiguity
+- Include comments in DDL for traceability
+````
+
+## Tips
+
+- **One copybook at a time.** Even seemingly small copybooks (30 fields) often expand to 5-10 tables after normalization.
+- **Validate against actual data.** Synthetic tests miss real-world quirks; use a sample of production data to verify type assumptions.
+- **Don't blindly preserve FILLER.** Some FILLERs carry meaning (especially older copybooks where space was reused over time); some are genuinely unused. Audit carefully.
+- **Pair with the Business Rule Extraction template.** Schema captures structure; rule extraction captures meaning.
+- **Plan for the long tail.** Mainframe data shops often have hundreds of copybooks; this template handles one at a time. Budget accordingly.
+
+## Common mistakes to avoid
+
+- **Dumping VSAM records as JSON in a single column.** Defeats the purpose of moving to relational.
+- **Ignoring encoding.** EBCDIC → UTF-8 issues surface days later as bug reports.
+- **Treating COMP-3 as text.** Packed decimal needs explicit interpretation; treating as ASCII produces garbage.
+- **Skipping the sign convention check.** Negative values in COBOL aren't always obvious.
+- **Adding an index for every old access path.** Some VSAM AIXes are dead; new app may not use them.
+- **Forgetting the implicit decimal point.** PIC 9(7)V99 doesn't have a `.` in storage.
+- **Missing OCCURS DEPENDING ON edge cases.** Variable-length arrays change interpretation based on a count field.

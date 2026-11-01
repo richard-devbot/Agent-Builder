@@ -1,0 +1,141 @@
+---
+title: "Production Dockerfile Generator"
+slug: "dockerfile-production"
+description: "Generate a multi-stage, security-hardened Dockerfile with minimal image size."
+type: template
+phase: deploy
+category: dockerization
+projectType: ["custom-app"]
+stack: ["docker"]
+tags: ["containerization", "security", "ci-cd"]
+difficulty: intermediate
+estimatedTime: "10 min"
+author: "Platform Engineering"
+featured: false
+createdAt: 2026-04-26
+updatedAt: 2026-04-26
+inputs:
+  - name: app_type
+    description: "App type (e.g., nodejs, python-fastapi, java-spring, nextjs)"
+    required: true
+  - name: package_manager
+    description: "Package manager (npm, pnpm, yarn, pip, poetry, maven, gradle)"
+    required: true
+  - name: app_port
+    description: "Port the app listens on"
+    required: true
+output:
+  format: code
+relatedAssets:
+  - "github-actions-ci"
+  - "kubernetes-deployment"
+---
+
+# Production Dockerfile Generator
+
+Generate a production-grade Dockerfile that uses multi-stage builds, runs as a non-root user, leverages BuildKit cache mounts, and produces a minimal final image.
+
+## When to use
+
+- Containerizing a new service
+- Optimizing an existing Dockerfile that's too large or insecure
+- Setting up a service for Kubernetes deployment
+
+## Prompt
+
+````text
+You are a senior platform engineer specializing in container security and
+optimization. Generate a production-ready Dockerfile.
+
+## Input
+
+**App type:** {{app_type}}
+**Package manager:** {{package_manager}}
+**App port:** {{app_port}}
+
+## Requirements
+
+The Dockerfile must:
+
+### Build stage
+- Use specific version tags, never `:latest`
+- Use slim or distroless base images where appropriate
+- Leverage BuildKit cache mounts for the package manager cache
+- Install dependencies in a separate layer from app code (for cache reuse)
+- Run any build steps (compile, bundle) in the build stage
+
+### Runtime stage
+- Use a minimal base image (distroless or alpine)
+- Copy only the artifacts needed at runtime
+- Run as a non-root user with UID >= 10000
+- Set WORKDIR explicitly
+- Use ENTRYPOINT for the main process, CMD for default args
+- Include a HEALTHCHECK
+- Set NODE_ENV=production / equivalent for the runtime
+- Expose the app port
+
+### Security
+- No secrets baked in
+- No development tools in the final image
+- Drop all linux capabilities (in container runtime config, but document)
+- Read-only root filesystem compatible
+
+### Reproducibility
+- Pin OS-level package versions if installing any
+- Lock package manager versions
+
+## Output
+
+Provide:
+
+1. **Dockerfile** - the full file with comments explaining each section
+2. **.dockerignore** - aggressive ignore list
+3. **Build commands** - example BuildKit commands for local + CI
+4. **Image size expectation** - rough estimate after optimization
+5. **Notes** - 3-5 things the reader should know about the choices made
+````
+
+## Example output (Node.js)
+
+```dockerfile
+# syntax=docker/dockerfile:1.7
+
+# ---- Build stage ----
+FROM node:20.18-bookworm-slim AS build
+WORKDIR /app
+
+# Install pnpm
+RUN corepack enable && corepack prepare pnpm@9.12.0 --activate
+
+# Cache deps separately from source
+COPY pnpm-lock.yaml package.json ./
+RUN --mount=type=cache,id=pnpm,target=/root/.local/share/pnpm/store \
+    pnpm install --frozen-lockfile
+
+COPY . .
+RUN pnpm build && pnpm prune --prod
+
+# ---- Runtime stage ----
+FROM gcr.io/distroless/nodejs20-debian12:nonroot AS runtime
+WORKDIR /app
+
+COPY --from=build --chown=nonroot:nonroot /app/node_modules ./node_modules
+COPY --from=build --chown=nonroot:nonroot /app/dist ./dist
+COPY --from=build --chown=nonroot:nonroot /app/package.json ./
+
+USER nonroot
+EXPOSE 3000
+ENV NODE_ENV=production
+
+HEALTHCHECK --interval=30s --timeout=3s CMD ["node", "dist/health-check.js"]
+
+ENTRYPOINT ["node", "dist/server.js"]
+```
+
+## Tips
+
+- Distroless images are smaller AND more secure than alpine for most apps
+- Use `--mount=type=cache` to dramatically speed up CI builds
+- Test your image with `docker scout cves <image>` for vulnerabilities
+- Pair with the **GitHub Actions CI** template for end-to-end build/push pipeline
+- For Java apps, consider GraalVM native-image for 10x smaller, faster-starting containers

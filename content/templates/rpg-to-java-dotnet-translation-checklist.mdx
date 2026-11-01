@@ -1,0 +1,701 @@
+---
+title: "RPG to Java/.NET Translation Checklist"
+slug: "rpg-to-java-dotnet-translation-checklist"
+description: "Pattern-by-pattern translation guide for RPG IV constructs to modern Java or .NET — including indicators, the cycle, native I/O, and the patterns that should be replaced rather than translated."
+type: template
+phase: build
+category: backend-development
+projectType: ["custom-app"]
+stack: ["rpg", "ibm-i", "java", "dotnet"]
+tags: ["migration", "rpg", "as400", "ibm-i", "java", "dotnet", "translation"]
+difficulty: advanced
+estimatedTime: "reference document"
+author: "Platform Engineering"
+featured: false
+createdAt: 2026-04-26
+updatedAt: 2026-04-26
+inputs:
+  - name: rpg_construct
+    description: "Specific RPG pattern, statement, or section to translate"
+    required: true
+  - name: rpg_dialect
+    description: "RPG dialect (RPG IV fixed / RPG IV free / SQLRPGLE / RPG II/III)"
+    required: true
+  - name: target_language
+    description: "Target language (Java 17+ / Java 21 / .NET 8 / Spring Boot)"
+    required: true
+  - name: surrounding_context
+    description: "What else is in this program (helps decide between literal vs idiomatic translation)"
+    required: false
+output:
+  format: code
+relatedAssets:
+  - "rpg-modernization-playbook"
+  - "rpg-business-rule-extraction"
+---
+
+# RPG to Java/.NET Translation Checklist
+
+A reference for translating RPG IV constructs to idiomatic Java or .NET. Used either as a lookup (translating a specific pattern) or as input to AI-assisted rewriting.
+
+This template is **prescriptive about what to translate** and **explicit about what NOT to translate** — many RPG patterns (indicators-as-state, the cycle, working-storage globals) should be replaced entirely rather than ported.
+
+## When to use
+
+- During the rewrite phase of an RPG modernization
+- When the team has questions about specific construct translations
+- As input for code review of AI-translated RPG
+- As training material for engineers new to RPG who need to read it
+
+## RPG dialect matters
+
+Translation strategy differs by dialect:
+
+- **RPG II / III (cycle-based, fixed-format)** — usually easier to *understand the intent* than to translate literally. The cycle, indicators, and column-based syntax are alien. Often best rewritten from extracted business rules.
+- **RPG IV fixed-format** — translates more directly. F-specs, D-specs, C-specs map to file/field/calc structures.
+- **RPG IV /FREE format** — closest to modern languages. Direct translation works for most patterns.
+- **SQLRPGLE** — embedded SQL portions translate cleanly to JDBC / EF / Dapper. Native I/O portions need care.
+
+Specify dialect in your input.
+
+## Prompt
+
+````text
+You translate RPG constructs to idiomatic Java or .NET. You explain what
+the RPG is doing, give the modern equivalent, and flag patterns that
+should be replaced entirely rather than ported.
+
+## Input
+
+**RPG construct:**
+```rpg
+{{rpg_construct}}
+```
+
+**RPG dialect:** {{rpg_dialect}}
+**Target language:** {{target_language}}
+**Context:** {{surrounding_context}}
+
+## Output
+
+For each construct, provide:
+
+### 1. What it does
+1-2 sentences in plain language. Include indicator effects if applicable.
+
+### 2. Modern equivalent
+The idiomatic translation in target language. Don't translate literally —
+translate the intent.
+
+### 3. Notes
+- Behavior differences from RPG semantics
+- Edge cases that work differently
+- Patterns to avoid
+
+### 4. Common gotchas
+What goes wrong in this translation that we've seen before.
+
+## Reference: Common RPG → Java/.NET translations
+
+### Variable declaration
+
+**RPG IV (fixed-format D-specs):**
+```rpg
+D Customer        DS
+D  CustNo                       7P 0
+D  CustName                    50A
+D  CustAge                      3S 0
+D  CustBalance                  9P 2
+D Counter         S              5P 0 INZ(0)
+D MaxRetries      C              CONST(3)
+```
+
+**RPG IV /FREE:**
+```rpg
+dcl-ds Customer;
+    custNo packed(7);
+    custName char(50);
+    custAge zoned(3);
+    custBalance packed(9:2);
+end-ds;
+
+dcl-s counter packed(5) inz(0);
+dcl-c maxRetries 3;
+```
+
+**Java:**
+```java
+public record Customer(
+    long custNo,         // packed 7,0 → fits in long
+    String custName,     // char(50) → String (trim trailing spaces at boundary)
+    int custAge,         // zoned 3 → int
+    BigDecimal custBalance  // packed 9,2 → ALWAYS BigDecimal for decimals
+) {}
+
+private int counter = 0;
+private static final int MAX_RETRIES = 3;
+```
+
+**.NET / C#:**
+```csharp
+public record Customer(
+    long CustNo,
+    string CustName,
+    int CustAge,
+    decimal CustBalance
+);
+
+private int counter = 0;
+private const int MAX_RETRIES = 3;
+```
+
+**Notes:**
+- **Use `BigDecimal` (Java) or `decimal` (C#) for ALL packed/zoned decimal fields with decimals.** Floating point will produce penny errors that destroy financial parity.
+- For RPG `CHAR` types, decide: trim trailing spaces at boundary (most cases) or preserve fixed-length (rare, only if downstream consumers require it).
+
+---
+
+### Indicators (the big one)
+
+This is where most RPG migrations go wrong. **Don't translate indicators as boolean variables literally.** Translate the *state they represent*.
+
+**RPG (anti-pattern: indicators as variables):**
+```rpg
+C                   CHAIN     CustNo        CUSTMAST                    01
+C                   IF        *IN01 = *ON
+C                   EVAL      *IN50 = *OFF
+C                   ELSE
+C                   EVAL      *IN50 = *ON
+C                   ENDIF
+```
+
+**Bad translation (don't do this):**
+```java
+boolean in01 = false;
+boolean in50 = false;
+Customer found = customerRepo.findByCustNo(custNo);
+if (found != null) {
+    in01 = true;
+}
+if (in01) {
+    in50 = false;
+} else {
+    in50 = true;
+}
+```
+
+**Good translation (translate the intent):**
+```java
+Optional<Customer> customer = customerRepo.findByCustNo(custNo);
+boolean displayInError = customer.isEmpty();
+```
+
+For each indicator in the original, identify what state it represents:
+- "Record found" → `Optional.isPresent()` or specific result type
+- "End of file" → loop termination via Stream/Iterator
+- "Display error" → form-level validation state
+- "Function key X pressed" → event/handler dispatch
+- "Last record processed" → return statement (replaces *INLR)
+
+Use the **RPG Business Rule Extraction template** to identify indicator
+intents BEFORE translating.
+
+---
+
+### IF / ELSE
+
+**RPG IV /FREE:**
+```rpg
+if customerAge >= 65;
+    discountType = 'SENIOR';
+elseif customerAge >= 18;
+    discountType = 'ADULT';
+else;
+    discountType = 'MINOR';
+endif;
+```
+
+**Java:**
+```java
+String discountType =
+    customerAge >= 65 ? "SENIOR" :
+    customerAge >= 18 ? "ADULT" :
+                        "MINOR";
+
+// Better — use enum:
+public enum DiscountType { SENIOR, ADULT, MINOR }
+
+DiscountType discountType =
+    customerAge >= 65 ? DiscountType.SENIOR :
+    customerAge >= 18 ? DiscountType.ADULT :
+                        DiscountType.MINOR;
+```
+
+---
+
+### SELECT / WHEN (case statement)
+
+**RPG IV /FREE:**
+```rpg
+select;
+    when customerType = 'A' and balance > 1000;
+        discount = balance * 0.05;
+    when customerType = 'A';
+        discount = balance * 0.02;
+    when customerType = 'B';
+        discount = balance * 0.03;
+    other;
+        discount = 0;
+endsl;
+```
+
+**Java (modern, switch expression):**
+```java
+BigDecimal discount = switch (customerType) {
+    case "A" -> balance.compareTo(new BigDecimal("1000")) > 0
+        ? balance.multiply(new BigDecimal("0.05"))
+        : balance.multiply(new BigDecimal("0.02"));
+    case "B" -> balance.multiply(new BigDecimal("0.03"));
+    default -> BigDecimal.ZERO;
+};
+```
+
+**Notes:**
+- Don't use `>` operator on BigDecimal; use `compareTo() > 0`
+- Use named constants for percentages, not inline literals
+
+---
+
+### DOW / DOU loops
+
+**RPG IV /FREE:**
+```rpg
+dow not eof(CUSTMAST);
+    read CUSTMAST;
+    if not eof(CUSTMAST);
+        processCustomer();
+    endif;
+enddo;
+```
+
+**Java (modern with stream):**
+```java
+customerRepository.streamAll()
+    .forEach(this::processCustomer);
+```
+
+**Java (traditional loop equivalent):**
+```java
+try (var iterator = customerRepository.iterateAll()) {
+    while (iterator.hasNext()) {
+        Customer customer = iterator.next();
+        processCustomer(customer);
+    }
+}
+```
+
+---
+
+### EXSR (subroutine call)
+
+**RPG IV (fixed):**
+```rpg
+C                   EXSR      ProcessCust
+*
+C     ProcessCust   BEGSR
+C                   ... logic ...
+C                   ENDSR
+```
+
+**RPG IV /FREE:**
+```rpg
+exsr processCust;
+
+begsr processCust;
+    // ... logic
+endsr;
+```
+
+**Java:**
+```java
+processCust();
+
+private void processCust() {
+    // ... logic
+}
+```
+
+**Notes:**
+- RPG subroutines share all globals; Java methods get explicit parameters
+- This is a chance to make data flow explicit
+- For complex programs, use proper class hierarchy: each major subroutine becomes a method on a service class
+
+---
+
+### CHAIN (lookup by key)
+
+**RPG IV /FREE:**
+```rpg
+chain custNo CUSTMAST;
+if %found(CUSTMAST);
+    // record found, fields populated
+    custName = CUSTNAME;
+else;
+    // not found
+endif;
+```
+
+**Java (Spring Data JPA):**
+```java
+@Repository
+interface CustomerRepository extends JpaRepository<Customer, Long> {
+    Optional<Customer> findByCustNo(long custNo);
+}
+
+// Usage:
+Optional<Customer> customer = customerRepository.findByCustNo(custNo);
+if (customer.isPresent()) {
+    String custName = customer.get().getCustName();
+} else {
+    // not found
+}
+```
+
+**Java (with `orElseThrow` for required lookups):**
+```java
+Customer customer = customerRepository.findByCustNo(custNo)
+    .orElseThrow(() -> new CustomerNotFoundException(custNo));
+```
+
+---
+
+### READ / READE / SETLL / READP (sequential I/O)
+
+**RPG IV /FREE:**
+```rpg
+setll custNo CUSTMAST;
+reade custNo CUSTMAST;
+dow not %eof(CUSTMAST);
+    processOrder(orderNo);
+    reade custNo CUSTMAST;
+enddo;
+```
+
+**Java (Spring Data with derived query):**
+```java
+List<Order> orders = orderRepository.findByCustNoOrderByOrderDate(custNo);
+orders.forEach(this::processOrder);
+```
+
+**Java (streaming for large result sets):**
+```java
+try (Stream<Order> stream = orderRepository.streamByCustNo(custNo)) {
+    stream.forEach(this::processOrder);
+}
+```
+
+---
+
+### WRITE / UPDATE / DELETE
+
+**RPG IV /FREE:**
+```rpg
+// Write new record
+write CUSTREC CUSTMAST;
+
+// Update existing record (after CHAIN)
+update CUSTREC CUSTMAST;
+
+// Delete (after CHAIN)
+delete CUSTREC CUSTMAST;
+```
+
+**Java:**
+```java
+// Write
+Customer newCustomer = new Customer(custNo, name, age, balance);
+customerRepository.save(newCustomer);
+
+// Update
+customerRepository.findByCustNo(custNo).ifPresent(c -> {
+    c.setCustName(name);
+    customerRepository.save(c);
+});
+
+// Delete
+customerRepository.deleteById(custNo);
+```
+
+**Notes:**
+- RPG's UPDATE assumes you previously CHAINed the record (locking it). Modern ORMs use optimistic locking via @Version.
+- Watch for race conditions if multiple users can update — modern code needs explicit handling.
+
+---
+
+### MOVE statement
+
+**RPG IV (fixed):**
+```rpg
+C                   MOVE      *BLANKS       PrintLine
+C                   MOVEL     CustName      PrintLine
+C                   MOVE      Counter       PrintCount
+```
+
+**RPG IV /FREE:**
+```rpg
+printLine = *blanks;
+%subst(printLine:1:%len(custName)) = custName;
+printCount = %char(counter);
+```
+
+**Java:**
+```java
+String printLine = " ".repeat(50);  // matches *BLANKS
+printLine = custName + " ".repeat(50 - custName.length());  // MOVEL behavior
+String printCount = String.valueOf(counter);
+```
+
+**Notes:**
+- RPG's MOVE / MOVEL has specific positional semantics for fixed-length fields
+- In Java, just use String + format
+- **MOVE *BLANKS** doesn't have a direct equivalent — usually means "clear the field" — translate as empty string or null
+- **MOVE *ZEROS** → 0
+- **MOVE *HIVAL** / **MOVE *LOVAL** → no clean equivalent; usually sentinels for "no value" — replace with null/Optional
+
+---
+
+### Decimal precision (the most important RPG → Java translation issue)
+
+**RPG:**
+```rpg
+D Amount          S              9P 2     // packed decimal 9,2
+D Rate            S              7P 4     // packed decimal 7,4
+D Total           S             12P 2
+*
+C                   EVAL      Total = Amount * Rate
+```
+
+**Java — DO:**
+```java
+BigDecimal amount;
+BigDecimal rate;
+BigDecimal total = amount.multiply(rate)
+    .setScale(2, RoundingMode.HALF_UP);
+```
+
+**Java — DO NOT:**
+```java
+double amount;   // FLOATING POINT WILL PRODUCE WRONG NUMBERS
+double rate;     // SAME
+```
+
+**Why:**
+- RPG packed decimal is exact; double/float aren't
+- 0.1 + 0.2 in double = 0.30000000000000004
+- Financial migrations using double produce penny-off errors that DESTROY trust
+
+**Always BigDecimal for:**
+- Money amounts
+- Percentages and rates
+- Quantities with fractions (weight, distance)
+- Anything RPG stored as packed (P) or zoned (S) with decimals
+
+**Rounding:**
+- RPG defaults to truncation; H-spec setting `HALFADJ` enables half-adjust rounding
+- Java `BigDecimal.setScale(scale, RoundingMode.HALF_UP)` matches RPG HALFADJ
+- For divisions specifically, ALWAYS specify scale and rounding mode or you'll get ArithmeticException
+
+---
+
+### File I/O - Native vs SQL
+
+**Native I/O (RPG CHAIN/READ/WRITE) → ORM:**
+- Spring Data JPA / Hibernate (Java)
+- Entity Framework Core (.NET)
+- Dapper for simpler scenarios
+
+**Embedded SQL (SQLRPGLE) → JDBC / direct SQL:**
+```rpg
+exec sql
+    select cust_name, balance
+    into :custName, :balance
+    from custmast
+    where cust_no = :custNo;
+```
+
+**Java (modern):**
+```java
+@Query("SELECT c.custName, c.balance FROM Customer c WHERE c.custNo = :custNo")
+List<CustomerSummary> findCustomerSummary(@Param("custNo") long custNo);
+```
+
+Or with JdbcTemplate:
+```java
+String sql = "SELECT cust_name, balance FROM customers WHERE cust_no = ?";
+return jdbcTemplate.queryForObject(sql, CustomerSummary.class, custNo);
+```
+
+---
+
+### MONITOR / ON-ERROR (error handling)
+
+**RPG IV /FREE:**
+```rpg
+monitor;
+    chain custNo CUSTMAST;
+    if not %found;
+        // not found logic
+    endif;
+on-error 1218;  // record locked
+    // wait and retry
+on-error;
+    // generic error
+endmon;
+```
+
+**Java:**
+```java
+try {
+    Customer customer = customerRepository.findByCustNo(custNo)
+        .orElseThrow(() -> new CustomerNotFoundException(custNo));
+    // ... use customer
+} catch (PessimisticLockingFailureException e) {
+    // retry logic
+} catch (DataAccessException e) {
+    // generic error
+}
+```
+
+**Notes:**
+- RPG's MONITOR / ON-ERROR is a clean pattern; translates well to try/catch
+- Don't catch generic Exception; catch specific types
+- Don't swallow exceptions silently (sometimes seen in RPG too — anti-pattern)
+
+---
+
+### Calling other programs (CALL / CALLP)
+
+**RPG IV /FREE:**
+```rpg
+callp BillCalc(custNo : amount : result);
+```
+
+**Java (depending on what BILLCALC does):**
+
+Option A: another method on same service:
+```java
+result = billCalcService.calculate(custNo, amount);
+```
+
+Option B: another microservice via REST:
+```java
+result = billCalcClient.calculate(custNo, amount);
+```
+
+Option C: queued / async invocation:
+```java
+billCalcQueue.send(new CalculationRequest(custNo, amount));
+```
+
+The right choice depends on the architecture decisions made in Phase 3 of the playbook.
+
+---
+
+### Display files (5250 / green-screen UIs)
+
+This is where RPG migrations get hard. Display files have:
+- Subfiles (paginated lists)
+- Function key handlers
+- Conditioning indicators that show/hide/color fields
+- Field-level help (HLP keyword)
+- Validation rules in DDS
+
+**Don't translate display files literally to web.** Redesign for web:
+- Subfile → server-side paginated table (DataTable, AG-Grid, etc.)
+- Function keys → keyboard shortcuts + buttons
+- Conditioning indicators → reactive component state (showIf, classList)
+- Field-level help → tooltips or inline help text
+- DDS validation → form validation library (Yup, Zod, FluentValidation)
+
+For each display file used, document the modern equivalent UI design
+SEPARATELY from the program logic translation. They're two different
+migration tracks.
+
+---
+
+### Patterns NOT to translate (replace instead)
+
+#### Indicators as flags
+**Rule:** Don't translate `*IN01`-`*IN99` as boolean variables. Translate the state they represent.
+
+#### The RPG cycle (RPG II/III)
+**Rule:** For cycle-based programs, don't try to "preserve the cycle." Use the extracted business rules and rewrite linearly.
+
+#### GOTO statements
+**Rule:** Refactor to method calls or structured control flow.
+
+#### Working storage as global state
+**Rule:** Don't translate as static fields or shared instance variables. Use proper dependency injection and explicit method parameters.
+
+#### File overrides via OVRDBF in CL
+**Rule:** Don't translate as runtime configuration changes. Use connection routing or schema selection at the architecture level.
+
+#### Embedded SQL with concatenated strings
+**Rule:** Never reproduce. Use parameterized queries, JPA, or query builders.
+
+#### CL programs orchestrating RPG
+**Rule:** Translate to modern orchestration (Spring Batch / Step Functions / Airflow). See `as400-cl-program-decomposition` template.
+
+#### Status flag checking (SQLCODE / `%error`)
+**Rule:** Use try/catch with specific exception types.
+
+---
+
+### Idiomatic notes per target
+
+**For Java:**
+- Use records for value objects
+- Use sealed types for discriminated unions
+- Use Streams and Optional for null-safe collection processing
+- Use BigDecimal for ALL financial values
+- Spring Batch for batch jobs; Spring Data for DB access
+- Spring Boot for service apps
+
+**For .NET / C#:**
+- Use records for value objects
+- Use pattern matching (`switch` expressions)
+- Use Nullable reference types for null safety
+- Use `decimal` for financial values (NEVER float/double)
+- Use Entity Framework Core for DB access (or Dapper for simpler scenarios)
+- Use background services / hosted services for batch
+
+## Style
+
+- Always show what the RPG is doing first
+- Provide both literal and idiomatic Java/.NET when they differ
+- Flag patterns that should be replaced rather than translated
+- Use BigDecimal religiously for RPG packed/zoned decimals with decimal places
+- Honest about edge cases (rounding, indicator semantics, encoding)
+````
+
+## Tips
+
+- **Use BigDecimal religiously.** Every financial migration that uses `double` produces wrong numbers. This is the single most important translation rule.
+- **Don't translate indicators mechanically.** The indicator's intent matters more than its name. Use the Business Rule Extraction template first to identify intent.
+- **For cycle-based RPG II/III, don't translate the cycle.** Translate the extracted business rules. The cycle is an implementation detail.
+- **For batch programs, use Spring Batch (Java) or Hosted Services (.NET).** Don't reimplement what's solved.
+- **For SQLRPGLE, the SQL parts translate cleanly.** Native I/O parts are the hard part.
+- **Pair with the Business Rule Extraction template.** Translation handles the how; rule extraction handles the what.
+
+## Common mistakes to avoid
+
+- Using `double` for money (will produce wrong sums)
+- Translating indicators as boolean variables (loses intent)
+- Translating subroutine names literally (`processCust1000` is awful; use `processCustomer()`)
+- Preserving RPG's status-flag-check pattern in Java (use exceptions)
+- Translating cycle-based RPG by trying to keep the cycle
+- Keeping working-storage as static fields (causes subtle bugs)
+- Not setting explicit RoundingMode on BigDecimal divisions (throws ArithmeticException)
+- Treating RPG files as a sequence of bytes in Java (use proper readers / ORMs)
+- Translating display files as literal web pages (redesign for web)
+- Forgetting CCSID / EBCDIC encoding when reading from IBM i directly

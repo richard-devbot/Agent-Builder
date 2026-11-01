@@ -1,0 +1,307 @@
+---
+title: "COBOL Business Rule Extraction"
+slug: "cobol-business-rule-extraction"
+description: "Extract business rules from COBOL programs into a structured catalog that survives the migration — even if the original COBOL doesn't."
+type: template
+phase: discover
+category: product-briefs
+projectType: ["custom-app"]
+stack: ["cobol", "mainframe"]
+tags: ["migration", "cobol", "mainframe", "business-rules", "discovery"]
+difficulty: advanced
+estimatedTime: "varies (per program)"
+author: "Platform Engineering"
+featured: true
+createdAt: 2026-04-26
+updatedAt: 2026-04-26
+inputs:
+  - name: cobol_program_source
+    description: "The COBOL program source code (or a representative section)"
+    required: true
+  - name: program_purpose
+    description: "What this program does in business terms (1-2 sentences if known)"
+    required: false
+  - name: copy_books_referenced
+    description: "List of COPY books (data structure / record layouts) the program uses"
+    required: false
+  - name: data_sources
+    description: "Files or DB tables the program reads/writes (DDNAMEs, file names, table names)"
+    required: false
+output:
+  format: markdown
+relatedAssets:
+  - "cobol-modernization-playbook"
+  - "legacy-code-analyzer-skill"
+  - "cobol-to-java-translation-checklist"
+---
+
+# COBOL Business Rule Extraction
+
+The most valuable artifact of any COBOL migration isn't translated code — it's a **catalog of business rules** captured in language that engineers and business analysts can both understand. The COBOL is the implementation; the rules are the actual asset.
+
+This template extracts those rules so they survive the migration regardless of which target stack you pick.
+
+## When to use
+
+- You're migrating a COBOL program (any strategy: replatform, refactor, rewrite, replace)
+- The original developers / analysts are unavailable or unreliable
+- You need rules in a form business stakeholders can validate
+- You're building a behavior parity test suite — these rules become the test cases
+
+## Prompt
+
+````text
+You are a senior systems analyst with deep COBOL expertise and experience
+extracting business rules from legacy mainframe code. You translate code
+into rules a business analyst can validate.
+
+## Input
+
+**COBOL program source:**
+```cobol
+{{cobol_program_source}}
+```
+
+**Stated purpose:** {{program_purpose}}
+**Copy books referenced:** {{copy_books_referenced}}
+**Data sources:** {{data_sources}}
+
+## Output
+
+A Markdown document organized as follows:
+
+### 1. Program identification
+- Program ID (from PROGRAM-ID)
+- Program type (batch / online CICS / utility / subroutine)
+- Approximate line count
+- Approximate cyclomatic complexity (branches, perform-thru chains)
+- Date of last modification (from change history comments if present)
+- Author / shop (from comments)
+
+### 2. Inputs and outputs
+
+**Inputs:**
+For each, document:
+- Source (DDNAME, file name, DB2 table, CICS map, parameter)
+- Format (record layout summary, key fields)
+- Volume (rows/records per run, if known or inferable)
+- Encoding (EBCDIC, packed decimal, COMP-3, COMP, DISPLAY)
+- Source system (which other system produces this)
+
+**Outputs:**
+Same structure. Add: who consumes the output downstream.
+
+**Side effects:**
+- Database updates (DB2, IMS, IDMS calls)
+- File writes
+- CICS commands (terminal output, queue writes, links to other transactions)
+- Calls to other programs (CALL statements)
+- MQ / message queue operations
+- Audit / log writes
+
+### 3. Business purpose
+
+In 2-3 paragraphs, plain language: what does this program DO for the business?
+
+Translate from "this program reads file X and writes file Y" to "this
+program calculates monthly customer billing and produces invoices."
+
+If you can infer business context (insurance claim adjudication, payroll
+calculation, inventory replenishment, etc.), say so explicitly. If you
+can't, say so explicitly — don't invent.
+
+### 4. Business rules catalog
+
+This is the core. Extract each business rule as a discrete, validatable
+statement.
+
+For each rule, document:
+
+```markdown
+## RULE-NNN: [Short name in business language]
+
+**Plain-language statement:**
+[1-2 sentences a business analyst can validate]
+
+**Source location:**
+[Paragraph name + line range, or PROCEDURE DIVISION section reference]
+
+**COBOL implementation:**
+```cobol
+[The actual COBOL code that implements the rule]
+```
+
+**Inputs the rule depends on:**
+- Field name 1 (from record X, type Y)
+- Field name 2 (from record X, type Y)
+
+**Output / effect:**
+- Field set, file written, branch taken, error returned
+
+**Edge cases / boundaries:**
+- What happens at zero values
+- What happens at maximum values
+- What happens when input is missing/spaces/low-values/high-values
+- Date boundary cases (year-end, month-end, leap year)
+- Negative number handling
+- Sign convention (separate sign? embedded in last digit?)
+
+**Confidence:**
+- ✅ HIGH: clearly stated in code, comments confirm
+- ⚠️ MEDIUM: inferred from code, no confirming comments
+- ❓ LOW: code suggests but logic is convoluted; needs SME validation
+
+**Tags:**
+[business-domain] [calculation-type] [regulatory] [tax] [billing] etc.
+```
+
+### 5. Decision tables
+
+For programs with complex EVALUATE statements or nested IFs, extract as
+decision tables:
+
+| Condition 1 | Condition 2 | Condition 3 | Action |
+|-------------|-------------|-------------|--------|
+| customer_type = 'A' | balance > 1000 | not delinquent | apply 5% discount |
+| customer_type = 'A' | balance > 1000 | delinquent | apply 0% discount |
+| customer_type = 'B' | any | not delinquent | apply 3% discount |
+| ... | ... | ... | ... |
+
+Decision tables are easier for business analysts to validate than nested
+COBOL. Build one for each major branching section.
+
+### 6. Calculation formulas
+
+For programs with mathematical logic, extract formulas:
+
+```
+LATE_FEE = OUTSTANDING_BALANCE × DAYS_LATE × DAILY_RATE
+where:
+- OUTSTANDING_BALANCE = current invoice amount minus payments received
+- DAYS_LATE = today's date minus invoice due date (only if positive)
+- DAILY_RATE = 0.0001 (sourced from rate table, RT-LATE-DAILY-RATE)
+- Cap: LATE_FEE cannot exceed 25% of OUTSTANDING_BALANCE
+```
+
+Document the formula AND the precision/rounding rules:
+- Where does rounding happen?
+- Is it banker's rounding, away-from-zero, half-up?
+- What's the precision (2 decimals, 4 decimals)?
+- Currency handling (if multi-currency)
+
+This matters enormously for migrations — financial rounding bugs are
+the most embarrassing post-migration regressions.
+
+### 7. State and lookup tables
+
+If the program uses internal tables (REDEFINES, OCCURS), document them:
+
+| Table | Purpose | Source | Rows |
+|-------|---------|--------|------|
+| RT-TAX-RATES | State tax rate by state code | DB2 table TAX_RATES | ~50 |
+| WS-PRODUCT-CODES | Hard-coded product types | inline in WORKING-STORAGE | ~20 |
+
+For hard-coded tables (in WORKING-STORAGE), capture all values — they're
+business rules even if buried in source.
+
+### 8. External program calls
+
+For each `CALL 'PROGRAM-NAME'` or CICS LINK:
+
+| Called program | Purpose | Inputs passed | Outputs received | Migration concern |
+|----------------|---------|---------------|------------------|-------------------|
+| RATELOOKUP | Get tax rate | state, taxable amount | tax amount, rate | Must migrate or stub |
+| LOGAUDIT | Write audit record | user ID, action, timestamp | success indicator | Replace with modern logging |
+
+For each, decide: migrate it, stub it, or replace with modern equivalent.
+
+### 9. Quirks and tribal knowledge
+
+Things you can infer from the code that aren't documented:
+
+- "The check for `IF AMOUNT > 9999999` suggests originally amounts were
+  stored as PIC 9(7) and someone added a higher cap later"
+- "The `MOVE LOW-VALUES` then `MOVE` pattern suggests a legacy bug where
+  trailing whitespace caused issues — keep this pattern in target"
+- "The `COMPUTE FOO = BAR * 1.0` (multiplying by 1.0) is forcing a type
+  conversion; document the type semantics for the target"
+- "The hard-coded date '12/31/9999' is being used as 'no expiry' — handle
+  in target with NULL or sentinel"
+
+These are the bugs-as-features that migrations get wrong. Capture them.
+
+### 10. Migration-relevant observations
+
+Specific to migrating this program:
+
+- **Rule complexity:** simple/medium/complex (drives translation effort)
+- **State management:** does it carry state across invocations? (matters for
+  stateless web rewrite)
+- **Performance assumptions:** are sequential file reads being optimized
+  for tape access patterns? (translate to indexed reads in target)
+- **Concurrency:** does the program assume exclusive access to files/data?
+- **Error handling:** how are errors propagated — return codes, abends, files?
+- **Restart logic:** can the program be restarted from a checkpoint after failure?
+
+### 11. Open questions
+
+What you can't determine from the code:
+
+- "Field FILLER PIC X(50) at offset 200 — purpose unclear; preserving but
+  needs SME confirmation"
+- "Branch on line 4521 only fires for `STATUS-CODE = 99` — never seen in
+  test data; what's this case?"
+- "The hardcoded value `47` in IF-statement on line 6234 — magic number;
+  meaning unknown"
+
+Each open question:
+- The question
+- Where it surfaces in the code
+- Who could answer (SME, operations, business stakeholder)
+- Default assumption if no answer (and risk of that assumption)
+
+## Quality bar
+
+- Each rule is **standalone validatable** by a business analyst
+- Each rule has a **specific COBOL source location** (line number or paragraph)
+- Each rule has a **confidence level**
+- Edge cases are explicit, not implied
+- Decision tables are exhaustive (all condition combinations covered)
+- Open questions are listed honestly — don't fabricate to look complete
+- Output is structured Markdown that can be turned into:
+  - Behavior parity test cases
+  - User stories for the rewrite
+  - Documentation for the new system
+
+## Style
+
+- Plain English in rule statements; technical detail in COBOL excerpts
+- Specific line numbers, not "around line 100"
+- Honest about uncertainty
+- Capture the WHY when inferable, not just the WHAT
+````
+
+## Tips
+
+- **One program at a time.** Even short COBOL programs (200 lines) often produce 30+ business rules. Don't try to extract from a whole copybook hierarchy in one prompt.
+- **Run on representative programs first.** If you have 500 COBOL programs, extract from the 10 most critical first; that establishes the pattern and reveals the volume of work.
+- **Pair with business analysts.** Extracted rules need validation. The output of this template is a starting point for analyst review, not a final spec.
+- **Keep the catalog versioned.** Business rules evolve. The catalog is the spec for the new system; treat it like code.
+- **Cross-reference rules across programs.** The same rule (e.g., "customer credit check") often appears in multiple programs with subtle variations. Document those variations explicitly.
+
+## Common mistakes to avoid
+
+- **Translating COBOL to pseudocode and stopping there.** Pseudocode isn't a business rule. Push to plain language.
+- **Skipping edge cases.** "What happens at zero" is where regression bugs live.
+- **Assuming comments are accurate.** They often aren't.
+- **Inventing context to fill in gaps.** If you don't know, say so. Open questions are honest output.
+- **Treating this as one-shot.** Rule extraction is iterative — first pass identifies most rules, validation passes catch the missing ones.
+- **Ignoring REDEFINES and OCCURS.** Field overlays and arrays often hide complex business meaning.
+
+## What this output enables
+
+- **Business analyst review and sign-off** on the rules before rewrite
+- **Behavior parity test cases** for the migrated system
+- **User stories** for the rewrite (each rule → one or more stories)
+- **Documentation** that survives the COBOL itself
+- **Decision** about which rules to keep, change, or eliminate during migration (modernization is the chance to fix accumulated cruft — but only with explicit decisions, not silent drift)

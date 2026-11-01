@@ -1,0 +1,179 @@
+---
+title: "Playwright MCP — Browser Automation"
+slug: "playwright-mcp"
+description: "Set up Microsoft's official Playwright MCP server so Claude Code can drive a real browser — navigate, click, fill forms, run the test cases you generated."
+type: mcp-config
+phase: test
+category: e2e-testing
+projectType: ["custom-app"]
+stack: ["playwright", "claude-code", "mcp"]
+tags: ["playwright", "browser-automation", "e2e", "mcp", "qa"]
+difficulty: beginner
+estimatedTime: "10 min setup"
+author: "Platform Engineering"
+featured: true
+createdAt: 2026-04-26
+updatedAt: 2026-04-26
+serverName: "playwright"
+configFormat: "claude-code"
+envVars:
+  - name: PLAYWRIGHT_HEADLESS
+    description: "Run headless (true) or with a visible browser window (false)"
+    example: "false"
+  - name: PLAYWRIGHT_BROWSER
+    description: "Browser to launch — chromium / firefox / webkit"
+    example: "chromium"
+  - name: PLAYWRIGHT_BASE_URL
+    description: "Base URL appended to relative paths in navigate calls (optional)"
+    example: "http://localhost:3000"
+relatedAssets:
+  - "test-case-comprehensive"
+  - "test-cases-from-user-story"
+  - "test-automation-script"
+---
+
+# Playwright MCP — Browser Automation
+
+Microsoft's official Playwright MCP server gives Claude Code the ability to drive a real Chromium / Firefox / WebKit browser via the Playwright API — navigate URLs, click elements, fill forms, take screenshots, run assertions, and extract content. Pair it with the test-case templates and Claude Code can execute the test cases it just generated.
+
+## What you can do once configured
+
+- "Open `http://localhost:3000` and take a screenshot of the home page"
+- "Walk through TC-FIN8751-001: navigate to /course/python-fundamentals, click Add to cart, verify the cart icon shows 1"
+- "Run the smoke tests from `output/test-cases/checkout_test_cases.md` against staging and report pass/fail"
+- "Open `https://app.example.com/login`, sign in as the QA user, navigate to /reports, and tell me how long the page takes to render"
+- "Take an accessibility snapshot of /pricing — list any landmarks that lack labels"
+
+## Setup
+
+### Step 1: Install the MCP server (one time)
+
+Microsoft publishes the official server as `@playwright/mcp` on npm. The first run via `npx` will install it on demand — no global install required.
+
+Optionally, pre-install it to make first-run faster:
+
+```bash
+# Install Playwright + the MCP server globally
+npm install -g @playwright/mcp
+
+# Install the browser binaries Playwright drives
+npx playwright install --with-deps
+```
+
+If you only run the MCP via `npx -y @playwright/mcp` (the config below), you only need the browser binaries:
+
+```bash
+npx playwright install --with-deps
+```
+
+### Step 2: Add the MCP config to Claude Code
+
+Edit `~/.config/claude-code/mcp.json` (or wherever your Claude Code config lives) and add:
+
+```json
+{
+  "mcpServers": {
+    "playwright": {
+      "command": "npx",
+      "args": ["-y", "@playwright/mcp@latest"],
+      "env": {
+        "PLAYWRIGHT_HEADLESS": "false",
+        "PLAYWRIGHT_BROWSER": "chromium",
+        "PLAYWRIGHT_BASE_URL": "http://localhost:3000"
+      }
+    }
+  }
+}
+```
+
+For CI / headless use, flip `PLAYWRIGHT_HEADLESS` to `"true"` and remove `PLAYWRIGHT_BASE_URL` if you'll always pass full URLs.
+
+### Step 3: Restart Claude Code
+
+Quit and relaunch. The Playwright tools should now be available in the chat.
+
+### Step 4: Test it
+
+Ask Claude Code: "Open https://example.com and tell me what the H1 says."
+
+If a Chromium window opens (or — in headless mode — Claude reports back "Example Domain"), you're set.
+
+## Available tools (provided by the MCP server)
+
+| Tool | What it does |
+|---|---|
+| `browser_navigate` | Open a URL; supports relative paths if `PLAYWRIGHT_BASE_URL` is set |
+| `browser_snapshot` | Accessibility tree of the current page (preferred over screenshots for LLMs) |
+| `browser_take_screenshot` | PNG of the viewport or full page |
+| `browser_click` | Click an element by accessible name, role, or ref |
+| `browser_type` | Type text into a focused element or selector |
+| `browser_fill` | Set the value of a form field |
+| `browser_select_option` | Pick an `<option>` in a `<select>` |
+| `browser_hover` | Hover an element (triggers tooltips, dropdowns) |
+| `browser_press_key` | Press a single key (Enter, Escape, Tab, etc.) |
+| `browser_wait_for` | Wait for text or a selector to appear / disappear |
+| `browser_evaluate` | Run JS in the page context — returns the result |
+| `browser_console_messages` | Read recent console output |
+| `browser_network_requests` | Inspect requests since page load (URLs, statuses) |
+| `browser_tabs` | List / switch / close browser tabs |
+| `browser_close` | Close the browser |
+
+The exact tool names vary slightly by `@playwright/mcp` version — `npx -y @playwright/mcp@latest --help` lists the current set.
+
+## Recommended pairings
+
+- **Test Cases — Comprehensive** template — generates the test cases; this MCP runs them.
+- **Test Automation Script** template — generates a Playwright `.spec.ts` for any single TC; this MCP can rehearse it interactively before you commit it.
+- **User Story Elaboration — Detailed** — give Claude the elaborated story plus this MCP and it can verify each AC in the running app.
+
+## Common workflows
+
+### Walk a single test case
+
+> Read `output/test-cases/checkout_test_cases.md`. Execute TC-FIN8751-001
+> against `http://localhost:3000` using the Playwright MCP. Report
+> pass / fail per step.
+
+### Run a regression suite as a smoke test
+
+> Read every TC marked Critical in `output/regression-bed/regression_master.md`.
+> For each, execute the steps via the Playwright MCP against staging.
+> Output a results table with pass / fail / time.
+
+### Author a new test case from a real flow
+
+> Open `http://localhost:3000/checkout`. Walk the happy-path flow you'd
+> expect a B2C user to take. As you go, capture the steps you took and
+> the assertions that should hold. Output a TC in the format from the
+> Test Cases — Comprehensive template.
+
+## Troubleshooting
+
+**"Browser launch fails / `Executable doesn't exist`"**
+Run `npx playwright install --with-deps` once. The server uses the same browser binaries Playwright tests use.
+
+**"Headed mode opens but the browser is empty / blank"**
+Some Linux systems need extra system packages. `npx playwright install-deps` (note: `install-deps`, separate from `install`) installs them.
+
+**"Tool not found: browser_navigate"**
+Pin a known-good version: replace `@playwright/mcp@latest` with `@playwright/mcp@<specific>` in the config and restart Claude Code. The tool surface evolves between releases.
+
+**"It clicks the wrong element"**
+The MCP prefers accessibility-tree references (from `browser_snapshot`). Pass it accessible names ("Click the button labelled 'Add to cart'") rather than CSS selectors. CSS still works but is more brittle.
+
+**"It can't see the form value I just typed"**
+Some React inputs need a real `change` event. Use `browser_type` (synthesises keystrokes) over `browser_fill` (sets value directly) for components that listen to keystroke events.
+
+## Security notes
+
+- Headed mode opens a real browser window. Don't point it at sensitive sites without thinking through what's on screen.
+- The MCP runs locally — credentials you type into pages stay on your machine, but the browser session is just a normal browser, so cookies, sessions, and saved passwords behave normally.
+- For CI: always use `PLAYWRIGHT_HEADLESS=true` and a dedicated test account, not your personal one.
+- Don't point the MCP at production sites unless you mean to. Test against staging or local.
+
+## Customization
+
+- **Change browser:** `PLAYWRIGHT_BROWSER=firefox` or `webkit`. All three are installed by `npx playwright install`.
+- **Persistent profile:** add `--user-data-dir=/path/to/profile` to the args; the browser keeps cookies / sessions across runs.
+- **Slow motion (for demos):** add `PLAYWRIGHT_SLOW_MO=500` (ms) to the env — every action pauses 0.5s so a human can follow along.
+- **Trace recording:** add `--save-trace=./trace.zip` to the args — Claude Code's actions become a Playwright trace you can replay in `npx playwright show-trace`.

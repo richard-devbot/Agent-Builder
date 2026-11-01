@@ -1,0 +1,247 @@
+---
+title: "User Story Elaboration — Detailed Markdown"
+slug: "user-story-elaboration-detailed"
+description: "Expand a one-line story into a fully elaborated markdown story — header, background, 6+ ACs, out-of-scope, technical notes, dependencies, and DoD. Ready to paste into Jira or Confluence."
+type: template
+phase: discover
+category: user-stories
+projectType: ["custom-app"]
+stack: []
+tags: ["agile", "scrum", "elaboration", "ready-for-jira"]
+difficulty: intermediate
+estimatedTime: "15 min"
+author: "Platform Engineering"
+createdAt: 2026-04-26
+updatedAt: 2026-04-26
+inputs:
+  - name: one_liner
+    description: "The original one-line story or ticket title"
+    required: true
+  - name: story_id
+    description: "Story / ticket ID (e.g. FIN-8751) — used in the header and AC numbering"
+    required: false
+  - name: epic_context
+    description: "Parent epic ID + name (optional)"
+    required: false
+  - name: project_context
+    description: "What system, integration, current state, target state — anything the model can't infer from the one-liner"
+    required: false
+output:
+  format: markdown
+relatedAssets:
+  - "user-story-from-prd"
+  - "user-story-api"
+  - "user-story-ui"
+  - "user-story-gherkin"
+  - "test-case-comprehensive"
+  - "jira-push-bulk"
+---
+
+# User Story Elaboration — Detailed Markdown
+
+Use this when a one-liner needs to become a fully elaborated story that's ready for engineering refinement, QA, and Jira. Output is a structured markdown document — every section filled, no skipped fields, ready to paste into a Jira description or a Confluence page.
+
+This template differs from the JSON-output user-story generators (`user-story-api`, `user-story-ui`, `user-story-gherkin`) — those produce machine-parseable specs for tooling. This one produces a human-readable elaboration with tables, narrative context, and a definition-of-done checklist.
+
+## When to use
+
+- A backlog ticket has a title but no body, and refinement is in 3 days
+- You want every team member to elaborate stories the same way
+- The story will be reviewed by humans (PO, tech lead, QA) before development starts
+- The output goes into Jira / Confluence as the story body
+
+## Prompt
+
+```text
+You are an expert Agile Business Analyst. Elaborate the following one-line
+story into a fully detailed Agile user story using the exact markdown
+template below. Fill every section. Never leave a section blank — write
+"Not applicable" or "⚠️ UNCLEAR: <reason>" if you genuinely don't know.
+
+## Inputs
+
+**One-liner:** {{one_liner}}
+
+**Story ID:** {{story_id}}
+
+**Epic context:** {{epic_context}}
+
+**Project context:** {{project_context}}
+
+## Output requirements
+
+Return ONLY the markdown document below — no surrounding commentary, no
+"here's your story:" preamble, no closing notes.
+
+---
+
+## 📋 Story Header
+
+| Field | Value |
+|---|---|
+| **Story ID** | <use the input or leave as TBD> |
+| **Epic** | <epic name + ID if known, else "TBD"> |
+| **Sprint** | TBD |
+| **Priority** | <High / Medium / Low — infer from one-liner urgency> |
+| **Story Points** | TBD — for dev to estimate |
+| **Status** | Backlog |
+
+---
+
+## 🗣️ User Story Statement
+
+> **As a** <specific persona — be precise, not "user">
+> **I want** <specific capability or action>
+> **So that** <business benefit or user outcome>
+
+---
+
+## 📖 Background & Context
+
+<2-4 sentences. Explain WHY this story exists. Reference the current state
+and target state when relevant. Don't repeat the AS/I-WANT/SO-THAT —
+this is the surrounding context.>
+
+---
+
+## ✅ Acceptance Criteria
+
+> Format: Given <precondition> / When <action> / Then <expected outcome>
+> Minimum 6 criteria. Each must be independently testable.
+> Always include at least one error / edge-case AC.
+
+**AC-1: <Short title>**
+- **Given** ...
+- **When** ...
+- **Then** ...
+
+**AC-2: <Short title>**
+- **Given** ...
+- **When** ...
+- **Then** ...
+
+**AC-3: <Short title>**
+- **Given** ...
+- **When** ...
+- **Then** ...
+
+**AC-4: <Short title>**
+- **Given** ...
+- **When** ...
+- **Then** ...
+
+**AC-5: <Short title>**
+- **Given** ...
+- **When** ...
+- **Then** ...
+
+**AC-6: <Short title — error / edge case>**
+- **Given** ...
+- **When** ...
+- **Then** ...
+
+---
+
+## 🚫 Out of Scope
+
+<List at least 3 things this story explicitly does NOT cover. Link to the
+story that covers it if known. This is the section that prevents scope
+creep.>
+
+- ❌ <Item 1> → Covered in <story ID if known>
+- ❌ <Item 2>
+- ❌ <Item 3>
+
+---
+
+## 🔧 Technical Notes
+
+| Area | Detail |
+|---|---|
+| **APIs / Endpoints** | <Specific endpoints, e.g. POST /carts/:id/line-items> |
+| **Data entities** | <Domain entities involved> |
+| **UI components** | <Component names or "Not applicable"> |
+| **Integrations** | <Third-party services if any> |
+| **Existing-system impact** | <Does this affect legacy pages / services / batches?> |
+| **Feature flags** | <Flag name if gated> |
+
+---
+
+## 🔗 Dependencies
+
+| Dependency | Story / Team | Status |
+|---|---|---|
+| <e.g. Auth tokens issued by IDP> | <Story ID or team name> | <Done / In Progress / Blocked> |
+
+---
+
+## ☑️ Definition of Done
+
+- [ ] Code implemented and peer-reviewed
+- [ ] Unit tests written and passing
+- [ ] Integration tests passing in the appropriate sandbox
+- [ ] Acceptance criteria verified by QA
+- [ ] No regressions on adjacent flows
+- [ ] Deployed to <staging environment name>
+- [ ] Product Owner sign-off
+- [ ] Jira story updated to "Dev Complete"
+
+---
+
+## Style guide
+
+- Personas: be specific. "B2B procurement admin with multi-SKU PO authority"
+  beats "user".
+- ACs: each verifies one behavior. Don't AND multiple checks.
+- Out of Scope: name what's NOT in the story to head off scope arguments.
+- Technical Notes: link real endpoints / components / flags. If you don't
+  know, write "TBD — see <person/team>", never guess.
+- Definition of Done: keep the standard items; add story-specific ones
+  (e.g. "Accessibility audit passed", "Data migration script tested").
+```
+
+## Example output (excerpt)
+
+```markdown
+## 📋 Story Header
+
+| Field | Value |
+|---|---|
+| **Story ID** | FIN-8751 |
+| **Epic** | EPIC-204 — Cart & Checkout Migration |
+| **Sprint** | TBD |
+| **Priority** | High |
+| **Story Points** | TBD |
+| **Status** | Backlog |
+
+## 🗣️ User Story Statement
+
+> **As a** B2C individual subscriber on the Pluralsight web app
+> **I want** to add a Pluralsight subscription to my cart from any course detail page
+> **So that** I can purchase it without navigating away and losing my browsing context.
+
+## 📖 Background & Context
+
+Today, clicking "Subscribe" from a course detail page redirects to a
+legacy AEM checkout page — losing the user's session context and
+producing a measurable drop in conversion. As part of the commercetools
+migration, we're replacing the cart with a CT-backed React widget that
+appears inline on the course page, so the user stays where they are.
+
+## ✅ Acceptance Criteria
+
+**AC-1: Add subscription to cart from a course page**
+- **Given** I am viewing a course detail page and not signed in
+- **When** I click "Add to cart" on the subscription tile
+- **Then** the cart icon updates to show "1 item" and a slide-in confirms
+  "Added — Pluralsight Personal · $29/mo"
+
+[... AC-2 through AC-6 ...]
+```
+
+## Tips
+
+- Pair this with the **Test Case Comprehensive** template — paste the elaborated story in and get the matching multi-category test cases.
+- For Jira upload, run the **Jira Push (Bulk)** skill against `output/[STORY_ID]_elaborated.md`.
+- If the story crosses backend + frontend, generate the elaboration here, then run the **API** and **UI** generators on the same one-liner to get the corresponding tickets.
+- For regulated environments, use the **Enterprise** user-story variant instead — it adds compliance, security, and audit sections.

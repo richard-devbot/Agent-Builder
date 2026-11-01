@@ -1,0 +1,336 @@
+---
+title: "Coexistence Architecture ADR"
+slug: "coexistence-architecture-adr"
+description: "Document the architecture decisions for running legacy and new systems in parallel during migration: routing, auth, data, and sessions."
+type: template
+phase: design
+category: adr
+projectType: ["custom-app"]
+stack: []
+tags: ["migration", "architecture", "adr", "coexistence"]
+difficulty: advanced
+estimatedTime: "1 day"
+author: "Platform Engineering"
+featured: false
+createdAt: 2026-04-26
+updatedAt: 2026-04-26
+inputs:
+  - name: legacy_app_summary
+    description: "What the legacy app is, where it's hosted, current users"
+    required: true
+  - name: target_app_summary
+    description: "Target architecture being built"
+    required: true
+  - name: cross_cutting_concerns
+    description: "Specific concerns to address (e.g., 'shared SSO needed', 'common DB during transition')"
+    required: false
+output:
+  format: markdown
+relatedAssets:
+  - "strangler-fig-migration-plan"
+  - "adr-generator"
+  - "auth-migration-strategy"
+---
+
+# Coexistence Architecture ADR
+
+The strangler fig pattern requires both old and new to run together — sometimes for months. The hardest decisions in any migration are the ones about coexistence: how do users sign in to both? How does data flow? How do URLs work? Who owns the session?
+
+This template generates an Architecture Decision Record specifically for these coexistence concerns.
+
+## When to use
+
+- After the Strangler Fig Plan, before slice 1 development
+- When stakeholders need a clear picture of how old and new will coexist
+- For each major coexistence concern (multiple ADRs from this template are common)
+
+## Prompt
+
+````text
+You are a principal architect documenting decisions for a system migration
+that will run legacy and new systems in parallel for an extended period.
+Generate a comprehensive coexistence ADR.
+
+## Input
+
+**Legacy app:** {{legacy_app_summary}}
+**Target app:** {{target_app_summary}}
+**Specific concerns:** {{cross_cutting_concerns}}
+
+## Output
+
+Generate a Markdown ADR (or set of related ADRs) covering each coexistence
+concern below. Use the Michael Nygard format (status, context, decision,
+consequences) for each.
+
+## Concerns to address
+
+### 1. Routing layer
+
+Who decides whether a request goes to legacy or new?
+
+Options:
+
+**A. Reverse proxy in front of both** (e.g., NGINX, Azure Front Door, AWS ALB)
+- Routes by path prefix or feature flag
+- Both legacy and new are unaware of each other
+- Pros: clean, easy to roll back per-route
+- Cons: another component to manage, latency added
+
+**B. Legacy app routes to new app** (legacy embeds links/redirects)
+- Legacy app gets minor updates to redirect specific paths
+- Pros: no proxy needed, simple
+- Cons: requires legacy code changes; can't fully retire legacy until last route migrates
+
+**C. New app routes to legacy** (new app embeds legacy via iframe or proxy)
+- New app is the entry point; routes unimplemented features to legacy
+- Pros: users land on new app, legacy slowly disappears
+- Cons: iframe / proxy quirks, harder to make legacy + new look unified
+
+**D. DNS-based** (different subdomains for old vs new)
+- old.example.com vs app.example.com
+- Pros: simplest infra
+- Cons: visible to users (jarring URL changes), session bleed problems
+
+Recommend ONE based on the migration's specifics.
+
+### 2. Authentication & sessions
+
+How users authenticate and stay signed in across both systems.
+
+This is the hardest single coexistence concern. Document:
+
+- **Auth method during migration:** legacy auth, new auth, or both?
+- **SSO between legacy and new:** how a user signed into legacy is also signed into new
+- **Session storage:** shared session store (Redis), JWT-based, or each has its own?
+- **Login flow:** users land on legacy login, new login, or chooser?
+- **Logout flow:** logging out one logs out both?
+- **Password resets:** which system handles them during migration?
+- **Session timeouts:** consistency between systems
+- **MFA:** if MFA is added to new but not legacy (or vice versa), what happens?
+
+Common patterns:
+
+**Pattern A: Legacy is auth source of truth (early migration)**
+- Legacy handles login, issues a token (JWT) that new app accepts
+- New app validates token via legacy's identity endpoint
+- Pros: minimal change
+- Cons: legacy stays alive until all auth migrated
+
+**Pattern B: New is auth source of truth (later migration)**
+- New app handles login, issues a token that legacy accepts
+- Legacy gets a small library to validate tokens
+- Pros: finishes auth migration early
+- Cons: requires legacy code change
+
+**Pattern C: Identity provider in front (best long-term)**
+- Use an IdP (Azure AD, Okta, Auth0) — both legacy and new are clients
+- Legacy and new both validate IdP tokens
+- Pros: cleanest, supports many apps
+- Cons: requires IdP integration on both sides, more upfront work
+
+Document the chosen pattern in detail.
+
+### 3. Data layer
+
+How new and legacy share or coordinate data.
+
+Options:
+
+**A. Shared database, both read/write**
+- Both apps point at the same DB
+- Pros: simplest, data is always in sync
+- Cons: schema can't change without coordination; locks risk; can't refactor data model
+
+**B. Shared database, one writes / other reads**
+- E.g., legacy writes, new reads (or vice versa)
+- Pros: clear ownership of writes
+- Cons: still single schema, still no schema flexibility
+
+**C. Separate databases, dual-write**
+- Both apps have their own DB; one or both writes to both DBs
+- Pros: schema flexibility; clean migration end-state
+- Cons: dual-write complexity, possible drift, transaction boundaries
+
+**D. Separate databases, CDC sync**
+- Legacy DB streams changes to new DB via Change Data Capture
+- Pros: legacy unchanged; near-real-time sync
+- Cons: needs CDC tool, eventual consistency
+
+**E. New app calls legacy API for data**
+- New app doesn't have its own DB; goes through legacy
+- Pros: no data sync issues
+- Cons: legacy stays the bottleneck; new app inherits legacy's performance
+
+For each option, list:
+- Schema evolution strategy during transition
+- What happens when legacy and new disagree
+- Performance implications
+- Cost of cleanup at end of migration
+
+### 4. URL strategy
+
+How URLs work during migration.
+
+Options:
+
+**A. Same URLs, different backends** (proxy decides)
+- Users see the same URLs throughout
+- Pros: zero user friction
+- Cons: URLs locked in (can't redesign URL structure during migration)
+
+**B. New URLs for new app**
+- /v2/* or /new/* prefix for new features
+- Pros: clear separation, easier debugging
+- Cons: visible to users; SEO impact if public-facing
+
+**C. New URLs with redirects from old**
+- 301/302 from legacy URLs to new
+- Pros: SEO preserved, no broken bookmarks
+- Cons: requires legacy modifications
+
+For SEO-sensitive apps, document the SEO impact of URL changes.
+For internal apps, URL aesthetics matter less.
+
+### 5. UI consistency
+
+Both apps will be visible to users during migration. How do we avoid jarring transitions?
+
+- **Visual design:** same design system in both, or distinct?
+- **Header/footer:** shared chrome via proxy or include?
+- **Navigation:** unified menu, or separate?
+- **Branding:** same logo, colors, fonts?
+
+Decide: are we hiding the migration from users (everything looks consistent) or making it visible ("you've been upgraded to the new experience")?
+
+### 6. Background work
+
+Scheduled jobs, queue workers, scheduled reports. Where do they live?
+
+- **Scheduled jobs (cron, SQL Agent):** stay in legacy, move to new, or both?
+- **Async workers:** if legacy uses MSMQ and new uses Azure Service Bus, do they share queues during migration?
+- **Email senders:** which system sends emails to users? (Common pitfall: both send the same email twice)
+- **Webhook handlers:** which system receives external webhooks during migration?
+
+For each, document the decision and the cutover plan for moving it.
+
+### 7. Observability
+
+Both systems need visibility:
+
+- **Logs:** centralized (e.g., to Application Insights, Datadog, ELK)?
+- **Metrics:** per-system or unified dashboards?
+- **Traces:** distributed tracing across both? (Critical for debugging dual-system flows)
+- **Alerts:** who gets paged for what?
+
+Without unified observability, debugging coexistence issues is painful.
+
+### 8. Configuration management
+
+If a feature flag is set in legacy, does it apply in new? Configuration drift between systems is a real problem.
+
+- **Feature flags:** shared flag service or per-app?
+- **Environment config:** how secrets/config are shared?
+- **Customer configuration:** if customers configure tenants, how does config sync?
+
+### 9. Performance and capacity
+
+Both systems must run with adequate capacity during migration:
+
+- **Capacity planning:** running 2 systems = 2x load on shared resources (DB)
+- **Cost:** running 2 systems = ~1.5-2x infrastructure cost during migration
+- **Migration cost premium:** plan for the cost; communicate to leadership
+
+### 10. Compliance and audit
+
+If legacy meets a compliance bar (HIPAA, SOC 2, PCI), the new system must too — and during migration, the combined system must.
+
+- **Audit logs:** combined or per-system?
+- **Data residency:** does the new system meet the same residency rules?
+- **Encryption:** consistent across both?
+- **Compliance certifications:** does the new system inherit, need re-cert, or break compliance?
+
+Document a checklist of compliance requirements and confirm both systems meet each.
+
+### 11. Customer / tenant migration
+
+If multi-tenant, can different tenants be on different systems?
+
+- Per-tenant migration: tenant A on new, tenant B on legacy
+- Tenant config: which system is each tenant on?
+- Cross-tenant features: do they work across the boundary?
+
+If single-tenant, this section is N/A.
+
+### 12. Decommissioning criteria
+
+When can the legacy system finally be turned off?
+
+For each capability migrated:
+- Traffic to legacy = 0% for N consecutive days
+- All audit logs show no calls to legacy
+- All scheduled jobs migrated
+- All integrations updated to point at new
+
+When the legacy system is fully dark:
+- DNS / proxy routes removed
+- Legacy infrastructure decommissioned
+- Legacy code archived (don't delete; archive)
+- Stakeholder sign-off captured
+
+## Format
+
+For each concern, produce a section like this:
+
+```markdown
+## [Concern name]
+
+### Status
+Accepted | Proposed | Superseded by ADR-NNN
+
+### Context
+[The situation we face for this concern, in 2-3 paragraphs]
+
+### Decision
+[The decision we made, in plain language]
+
+### Consequences
+
+**Positive:**
+- ...
+
+**Negative:**
+- ...
+
+**Neutral:**
+- ...
+
+### Alternatives considered
+- [Alternative 1] — rejected because [reason]
+- [Alternative 2] — rejected because [reason]
+```
+
+## Output
+
+Either:
+- One mega-ADR with all concerns as sections, OR
+- One ADR per concern, numbered (preferred for traceability)
+
+For complex migrations, prefer per-concern ADRs. They can be reviewed and accepted independently.
+````
+
+## Tips
+
+- **Authentication is the hardest part.** Get it right early. Wrong auth decisions create months of pain.
+- **Document trade-offs, not just decisions.** Future engineers need to know what you considered.
+- **Update the ADR if reality diverges.** Don't let the ADR become fiction.
+- **Write for an engineer who joins in 6 months.** They need to understand the choices.
+- **Pair with the ADR Generator template** if this is a single-decision-per-ADR situation.
+
+## Common mistakes to avoid
+
+- Skipping auth strategy ("we'll figure it out") — you won't, and it'll hurt
+- Coexistence approach that requires changing legacy heavily (defeats the purpose)
+- Not planning the decommission criteria (legacy lives forever)
+- Underestimating capacity needs during dual-running
+- Splitting compliance across systems without explicit verification

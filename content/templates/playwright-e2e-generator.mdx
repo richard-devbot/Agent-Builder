@@ -1,0 +1,183 @@
+---
+title: "Playwright E2E Test Generator"
+slug: "playwright-e2e-generator"
+description: "Generate Playwright end-to-end tests from user stories with proper page objects, fixtures, and CI-ready setup."
+type: template
+phase: test
+category: e2e-testing
+projectType: ["custom-app"]
+stack: ["typescript"]
+tags: ["e2e", "testing", "playwright", "automation"]
+difficulty: intermediate
+estimatedTime: "30 min"
+author: "Platform Engineering"
+featured: true
+createdAt: 2026-04-26
+updatedAt: 2026-04-26
+inputs:
+  - name: user_flow
+    description: "The user flow to test (e.g., user story or feature description)"
+    required: true
+  - name: app_url
+    description: "Base URL of the app under test (e.g., http://localhost:3000)"
+    required: true
+  - name: auth_state
+    description: "Auth state needed (none / logged-in-as-admin / logged-in-as-user)"
+    required: false
+output:
+  format: code
+relatedAssets:
+  - "user-story-from-prd"
+  - "vitest-unit-test-generator"
+---
+
+# Playwright E2E Test Generator
+
+Generate maintainable Playwright end-to-end tests using the page object pattern. Tests cover happy path, key error states, and edge cases — and run reliably in CI without flaking.
+
+## When to use
+
+- Adding E2E coverage for a critical user flow
+- Setting up Playwright on a new project
+- Need to test a multi-step flow (signup → onboarding → first action)
+- Want tests that survive UI refactors
+
+## Prompt
+
+````text
+You are a senior QA engineer specializing in Playwright. Generate a complete
+Playwright test suite for the user flow below using the page object pattern.
+
+## Input
+
+**User flow:** {{user_flow}}
+**Base URL:** {{app_url}}
+**Auth state:** {{auth_state}}
+
+## Files to generate
+
+### 1. Page object(s) — `tests/pages/[PageName].page.ts`
+For each distinct page in the flow:
+- Class with constructor receiving `Page`
+- Locators as readonly properties using `page.getByRole()`, `page.getByLabel()`, `page.getByTestId()` (NEVER raw CSS unless absolutely necessary)
+- Action methods: `fillEmail(email)`, `clickSubmit()`, `expectErrorMessage(text)`
+- Assertions live in the page object methods, not in tests
+- One page object per route/screen
+
+### 2. Test specs — `tests/specs/[flow-name].spec.ts`
+The actual test file:
+- `test.describe()` group per logical scenario
+- Each `test()` has a clear name in the form "user [does X] when [condition]"
+- Tests are independent — no `test.use()` shared state across tests
+- Setup data via fixtures or test.beforeEach (not direct DB poking unless necessary)
+- Cleanup runs even on failure (test.afterEach)
+
+### 3. Fixtures — `tests/fixtures/index.ts`
+Custom fixtures for:
+- `authedPage` — pre-authenticated page object
+- `adminPage` — admin-authenticated page object (if applicable)
+- `testUser` — fresh test user created per test
+- Cleanup fixtures auto-run on teardown
+
+### 4. Auth setup — `tests/auth/auth.setup.ts`
+Playwright project setup that signs in once and stores state:
+- Uses `setup` project pattern from Playwright docs
+- Saves auth state to `.auth/user.json`
+- Tests load this state via `storageState` config
+- Faster than logging in per test
+
+### 5. `playwright.config.ts`
+- Multiple projects: `chromium`, `firefox`, `webkit` (or just chromium for speed)
+- Setup project for auth
+- `use.baseURL` set
+- `reporter` set to `'html'` locally, `'github'` in CI
+- `retries: process.env.CI ? 2 : 0`
+- `workers: process.env.CI ? 1 : undefined` (parallel locally, serial in CI for stability)
+- Trace on first retry, screenshot on failure, video off (or 'retain-on-failure')
+
+## Test scenarios to cover
+
+For the flow provided, generate tests for:
+
+1. **Happy path** — flow completes successfully
+2. **Validation errors** — required fields, format errors
+3. **Server errors** — handle gracefully (mock the failure response)
+4. **Auth boundaries** — unauthenticated user gets redirected
+5. **Edge cases** — special characters, max-length input, slow network
+6. **Accessibility** — at least one keyboard-only navigation test
+7. **Browser back/forward** — state survives navigation
+
+## Locator priority (use in this order)
+
+1. `getByRole('button', { name: 'Submit' })` — most resilient
+2. `getByLabel('Email')` — for form fields
+3. `getByPlaceholder('your@email.com')` — only if no label
+4. `getByText('Welcome back')` — for visible text content
+5. `getByTestId('submit-button')` — when none of the above work
+6. CSS selectors — LAST RESORT, fragile
+
+## Wait strategies
+
+- Never use `page.waitForTimeout(N)` — flaky and slow
+- Use `expect(locator).toBeVisible()` — auto-waits up to timeout
+- Use `page.waitForResponse(url)` for API calls
+- Use `page.waitForURL(pattern)` for navigation
+- Use `expect.poll()` for custom polling
+
+## Standards
+
+- TypeScript strict
+- No `any`, no `as` casts (except for narrowing)
+- Tests under 30 lines each — if longer, extract helpers
+- Page objects are stateless beyond their `page` reference
+- No shared mutable state between tests
+- Test names describe behavior, not implementation
+
+## Anti-patterns to avoid
+
+- Hardcoded waits (`page.waitForTimeout(2000)`)
+- CSS selectors when role/label work
+- Tests that depend on previous test state
+- Asserting on raw HTML structure
+- Multiple `expect()` chained without retries on the locator
+- Using `force: true` to dismiss broken tests
+
+## Output
+
+For each file:
+1. Full file path
+2. Complete code in fenced code block
+
+After the files:
+- **"## Setup steps"** — what to install and configure
+- **"## Running locally"** — commands to run tests
+- **"## CI integration"** — sample GitHub Actions / Azure Pipelines step
+- **"## Debugging tips"** — how to use trace viewer, headed mode, codegen
+````
+
+## Example input
+
+```yaml
+user_flow: |
+  As a customer, I want to sign in, navigate to my orders,
+  filter by 'Last 30 days', and download an invoice as PDF.
+app_url: "http://localhost:3000"
+auth_state: "logged-in-as-customer"
+```
+
+## Tips
+
+- Run `npx playwright codegen <url>` to record interactions and turn them into starter tests, then refactor into page objects
+- Use Playwright's trace viewer (`npx playwright show-trace trace.zip`) to debug flaky tests
+- Keep E2E tests for critical user flows (5-15 tests). Don't try to test every form field — that's unit/integration territory
+- Pair with the **Vitest Unit Test Generator** for non-UI logic
+- Set up visual regression with `expect(page).toHaveScreenshot()` for critical pages
+
+## Common mistakes to avoid
+
+- Treating E2E like unit tests (test 5 critical flows, not 500)
+- Not running tests in CI (they atrophy fast)
+- Sharing state between tests via DB pokes (creates ordering dependencies)
+- Hardcoded waits (slows the suite, causes flakes)
+- Not using auth state caching (login per test = slow)
+- Skipping the trace/video config (debugging without traces is painful)

@@ -1,0 +1,454 @@
+---
+title: "Compatibility Layer Generator Skill"
+slug: "compatibility-layer-generator-skill"
+description: "Claude Code skill that generates adapters, shims, and proxies for incremental coexistence between legacy and new systems."
+type: skill
+phase: build
+category: backend-development
+projectType: ["custom-app"]
+stack: ["claude-code", "dotnet"]
+tags: ["migration", "adapters", "shims", "coexistence"]
+difficulty: advanced
+estimatedTime: "5 min setup"
+author: "Platform Engineering"
+featured: false
+createdAt: 2026-04-26
+updatedAt: 2026-04-26
+skillName: "compatibility-layer-generator"
+requires: []
+files:
+  - SKILL.md
+relatedAssets:
+  - "coexistence-architecture-adr"
+  - "migration-planner-skill"
+---
+
+# Compatibility Layer Generator Skill
+
+When migrating incrementally, the new and old systems need to talk to each other. This skill generates the glue code: API adapters that translate legacy formats to new, shims that let new code call legacy systems, and proxies that route between them transparently.
+
+## When it triggers
+
+- "Generate an adapter for [legacy system]"
+- "I need a shim that lets the new code call the old API"
+- "Build a proxy layer for routing between [old] and [new]"
+- "How do I bridge the legacy auth to new auth"
+- "Create a translator between [old format] and [new format]"
+
+## Why a skill
+
+Compatibility layer code is high-volume and pattern-driven. Once you've written 3-4 adapters, you can write the rest with templates. Encoding those templates as a skill saves real engineering time during migration.
+
+## Installation
+
+1. Copy this skill folder to `~/.claude/skills/compatibility-layer-generator/`
+2. Restart Claude Code
+3. Try: "Generate an adapter that lets new code call the legacy customer SOAP service"
+
+## SKILL.md content
+
+```markdown
+---
+name: compatibility-layer-generator
+description: |
+  Use this skill when the user needs glue code between legacy and new
+  systems during migration. Triggers on: "generate adapter", "create
+  shim", "build proxy", "bridge old to new", "translate between [legacy
+  format] and [new format]", "wrap the legacy [API/service/database]".
+
+  Generates: API adapters, format translators, auth shims, data
+  reconciliation jobs, request proxies.
+
+  Do NOT use for: greenfield code (use spec-driven-builder), simple format
+  conversion in one direction (just a function), or end-state architecture
+  (this is for the migration period only).
+---
+
+# Compatibility Layer Generator
+
+You generate compatibility code that bridges legacy and new systems during
+migration. Your code is explicit about being temporary — the migration
+should kill it. You always include a clear path to deprecating the
+compatibility layer.
+
+## Categories of compatibility code
+
+### Category 1: API adapters
+
+The new system needs to call the legacy API (or vice versa). The adapter
+translates request/response formats and hides the legacy from the new
+codebase.
+
+**When new calls legacy:**
+- New system needs data the new DB doesn't have yet
+- New system invokes a legacy operation (e.g., legacy still owns auth)
+- New system reads from a legacy reporting table
+
+**When legacy calls new:**
+- Legacy needs a new capability that's been migrated
+- Legacy delegates a function to new (incrementally moving ownership)
+
+### Category 2: Format translators
+
+Pure transformation code. Old format → new format, or vice versa.
+
+Examples:
+- SOAP envelope → REST JSON body
+- Legacy DateTime format → ISO 8601
+- Legacy error codes → new HTTP status + error envelope
+- Legacy XML → JSON Schema-validated DTO
+
+### Category 3: Authentication shims
+
+The hardest. Make legacy auth tickets work with new system, or vice versa.
+
+Examples:
+- Legacy Forms Auth ticket → JWT
+- Legacy session cookie → modern session
+- AD group membership → JWT claims
+
+### Category 4: Data reconciliation jobs
+
+Background jobs that keep two systems in sync during migration.
+
+Examples:
+- Dual-write reconciliation (catches drift between two DBs)
+- CDC consumer (legacy DB → new DB stream)
+- Periodic full diff and repair
+
+### Category 5: Request proxies
+
+Routing layer that decides whether a request goes to new or legacy.
+
+Examples:
+- Path-based: `/api/v2/*` → new, `/api/*` → legacy
+- Header-based: requests with `X-Use-New: true` → new
+- Feature flag: per-user routing
+
+## Process when activated
+
+### Step 1: Identify category
+
+Match the user's request to one of the 5 categories above. If unclear, ask:
+
+> "I can build:
+> 1. API adapter (new calls legacy or vice versa)
+> 2. Format translator (XML → JSON, etc.)
+> 3. Auth shim (legacy ticket ↔ JWT)
+> 4. Data reconciliation job (sync between DBs)
+> 5. Request proxy (route between old and new)
+>
+> Which fits your need?"
+
+### Step 2: Get specifics
+
+For each category, ask for the specifics needed:
+
+**API adapter:**
+- Legacy API: URL, auth method, request/response format
+- New code consuming it: language/framework
+- Operations needed (subset of legacy or all)
+
+**Format translator:**
+- Source format with example
+- Target format with example
+- Tolerance for missing fields, default values
+
+**Auth shim:**
+- Legacy auth: format, signing method, claims
+- New auth: format, expected claims
+- Bidirectional or one-way
+
+**Data reconciliation:**
+- Source DB connection
+- Target DB connection
+- Tables in scope
+- Schedule (real-time, batch, periodic)
+- What to do on conflict (source wins / target wins / alert)
+
+**Request proxy:**
+- Routing rule
+- Source URL pattern
+- Old destination
+- New destination
+- Auth handling (forward token, replace, strip)
+
+### Step 3: Generate the code
+
+Generate complete, idiomatic code in the target language/framework:
+
+#### API adapter (C# / .NET example)
+
+```csharp
+// Adapters/Legacy/LegacyCustomerAdapter.cs
+public interface ILegacyCustomerAdapter
+{
+    Task<Customer?> GetCustomerAsync(Guid id, CancellationToken ct);
+    Task<IReadOnlyList<Customer>> SearchAsync(CustomerSearchCriteria criteria, CancellationToken ct);
+}
+
+public class LegacyCustomerAdapter : ILegacyCustomerAdapter
+{
+    private readonly HttpClient _httpClient;
+    private readonly ILogger<LegacyCustomerAdapter> _logger;
+
+    public LegacyCustomerAdapter(HttpClient httpClient, ILogger<LegacyCustomerAdapter> logger)
+    {
+        _httpClient = httpClient;
+        _logger = logger;
+    }
+
+    public async Task<Customer?> GetCustomerAsync(Guid id, CancellationToken ct)
+    {
+        // Legacy uses int IDs, not GUIDs - this conversion is part of the adapter
+        var legacyId = await _idTranslator.GetLegacyIdAsync(id, ct);
+        if (legacyId == null) return null;
+
+        var response = await _httpClient.GetAsync(
+            $"/api/customer.ashx?action=get&id={legacyId}",
+            ct);
+
+        if (response.StatusCode == HttpStatusCode.NotFound) return null;
+        response.EnsureSuccessStatusCode();
+
+        var legacy = await response.Content.ReadFromJsonAsync<LegacyCustomerDto>(ct);
+
+        // Translation happens here, in the adapter
+        return new Customer
+        {
+            Id = id,
+            Name = legacy.CustName.Trim(),  // Legacy stores trailing whitespace
+            Email = legacy.EmailAddr.ToLowerInvariant(),  // Legacy is case-sensitive
+            CreatedAt = ParseLegacyDateTime(legacy.CreatedDt),  // "MM/dd/yyyy HH:mm" format
+            // Legacy uses 0/1 for active flag
+            IsActive = legacy.ActiveFlag == 1
+        };
+    }
+}
+
+// Critical: every adapter has a "deprecation marker"
+// When new system has its own customer data, this adapter goes away.
+// Tracking how to know:
+//
+// DEPRECATION CRITERIA:
+// - When the customers table in the new DB has all customers from legacy
+// - When no callers reference ILegacyCustomerAdapter for >7 days
+// - Then: delete this file, the registration in DI, and the legacy HTTP client config
+```
+
+For each adapter, include:
+1. The interface (so consumers don't depend on the legacy details)
+2. The implementation
+3. DI registration code
+4. Translation methods clearly documented
+5. **Deprecation criteria** — explicit about when this code goes away
+
+#### Format translator example
+
+```csharp
+// Adapters/Translators/LegacyOrderTranslator.cs
+public static class LegacyOrderTranslator
+{
+    public static Order FromLegacyXml(XDocument legacyXml)
+    {
+        var root = legacyXml.Root!;
+
+        return new Order
+        {
+            Id = Guid.Parse(root.Element("OrderGuid")!.Value),
+            // Legacy stores money as string with "$" prefix - clean it
+            Amount = decimal.Parse(
+                root.Element("Total")!.Value
+                    .Replace("$", "")
+                    .Replace(",", ""),
+                CultureInfo.InvariantCulture),
+            // Legacy date format: 6/4/2024 - parse as US format
+            OrderedAt = DateTimeOffset.ParseExact(
+                root.Element("OrderDate")!.Value,
+                "M/d/yyyy",
+                CultureInfo.InvariantCulture),
+            Status = MapLegacyStatus(root.Element("Status")!.Value),
+            Items = root.Elements("Item")
+                .Select(MapLegacyItem)
+                .ToList()
+        };
+    }
+
+    private static OrderStatus MapLegacyStatus(string legacy) => legacy switch
+    {
+        "P" => OrderStatus.Pending,
+        "S" => OrderStatus.Shipped,
+        "C" => OrderStatus.Cancelled,
+        "X" => OrderStatus.Refunded,  // Legacy uses X for refunded
+        _ => throw new InvalidOperationException($"Unknown legacy status: {legacy}")
+    };
+}
+```
+
+#### Auth shim example
+
+```csharp
+// Adapters/Auth/LegacyTicketToJwtShim.cs
+public class LegacyTicketToJwtShim
+{
+    private readonly byte[] _legacyMachineKey;
+    private readonly IJwtTokenIssuer _jwtIssuer;
+
+    // Validates a legacy Forms Auth ticket and issues a modern JWT
+    public string? ConvertLegacyTicket(string formsAuthTicket)
+    {
+        try
+        {
+            // Decrypt + verify using legacy machineKey
+            var ticket = FormsAuthentication.Decrypt(formsAuthTicket);
+            if (ticket == null || ticket.Expired) return null;
+
+            // Extract user info from legacy ticket
+            var legacyClaims = JsonConvert.DeserializeObject<LegacyUserData>(ticket.UserData);
+
+            // Issue modern JWT with mapped claims
+            return _jwtIssuer.Issue(new ClaimsPrincipal(new ClaimsIdentity(new[]
+            {
+                new Claim(ClaimTypes.NameIdentifier, legacyClaims.UserId),
+                new Claim(ClaimTypes.Email, legacyClaims.Email),
+                new Claim(ClaimTypes.Role, string.Join(",", legacyClaims.Roles))
+            })));
+        }
+        catch
+        {
+            // Don't leak details about why ticket failed
+            return null;
+        }
+    }
+}
+```
+
+### Step 4: Always include deprecation plan
+
+Every compatibility layer is technical debt by definition. For each piece
+of code generated, include:
+
+```csharp
+// ============================================================================
+// COMPATIBILITY LAYER - TEMPORARY CODE
+// ============================================================================
+// This code exists to bridge legacy and new systems during migration.
+//
+// DEPRECATION CRITERIA:
+// - [Specific condition 1]
+// - [Specific condition 2]
+//
+// REMOVAL CHECKLIST when criteria met:
+// 1. Verify zero callers (search for [type name])
+// 2. Remove DI registration in [file]
+// 3. Delete this file
+// 4. Remove tests for this adapter
+// 5. Remove [legacy HTTP client config / connection string / etc.]
+//
+// Owner: [team]
+// Created: [date]
+// Last reviewed: [date - update when revisited]
+// ============================================================================
+```
+
+This makes the technical debt visible and explicitly removable, instead of
+"the new system depends on this thing nobody understands anymore."
+
+### Step 5: Add tests
+
+For each adapter / translator / shim, generate tests:
+
+- **Happy path:** common input maps to expected output
+- **Edge cases:** missing fields, malformed data, boundary values
+- **Error handling:** what happens when legacy is down? Times out?
+- **Format quirks:** the trailing whitespace, the case sensitivity, the
+  date format issues — all tested explicitly
+
+These tests serve double duty: they validate the adapter, AND they
+document the legacy quirks for anyone working on the migration.
+
+### Step 6: Configuration and DI
+
+Generate the wire-up code:
+
+```csharp
+// Program.cs / Startup.cs
+services.AddHttpClient<ILegacyCustomerAdapter, LegacyCustomerAdapter>(client =>
+{
+    client.BaseAddress = new Uri(configuration["Legacy:CustomerApi"]!);
+    client.DefaultRequestHeaders.Add("X-Internal-Token",
+        configuration["Legacy:InternalToken"]);
+    client.Timeout = TimeSpan.FromSeconds(30);
+})
+.AddPolicyHandler(GetRetryPolicy())   // Polly retry
+.AddPolicyHandler(GetCircuitBreakerPolicy());
+```
+
+Always include:
+- Reasonable timeouts (legacy systems can hang)
+- Retry policy (legacy systems are flaky)
+- Circuit breaker (don't take down new system if legacy is dying)
+- Explicit error logging
+- Metric collection (so you can see the load on legacy)
+
+### Step 7: Observability
+
+The compatibility layer is where you'll spend the most debugging time
+during migration. Make it visible:
+
+- **Metrics:** count of calls, latency, error rate per adapter method
+- **Logs:** structured, with correlation IDs across legacy + new
+- **Traces:** distributed tracing including the legacy call
+
+Without this, debugging "why is the new system slow when calling legacy"
+is brutal.
+
+## Anti-patterns to avoid
+
+- **Adapters that leak legacy details into new code.** The whole point is
+  the new system shouldn't know about legacy quirks.
+- **Forgetting deprecation criteria.** Code with no removal plan stays
+  forever.
+- **Untested adapters.** They're the most likely place for subtle bugs.
+- **No timeouts on legacy calls.** Legacy hangs will take down new system.
+- **No circuit breaker.** When legacy degrades, new system shouldn't
+  multiply the problem.
+- **Adapter that does business logic.** Adapters translate; they don't
+  decide. Logic goes in services.
+
+## Output format
+
+For each piece of compatibility code:
+1. **The interface / contract** (consumer-facing)
+2. **The implementation** (with all the messy translation logic)
+3. **The DI / config wire-up**
+4. **Tests** (happy path, edge cases, error handling)
+5. **Deprecation criteria** (in a header comment)
+6. **Observability hooks** (metrics, logs)
+
+After the code, summarize:
+- What this enables
+- What's tested vs not
+- What infrastructure is needed (HTTP client, DB connection, etc.)
+- Estimated lifespan (how long this code is expected to live)
+```
+
+## Pairing with other skills
+
+- **Migration Planner Skill** identifies what compatibility code is needed
+- **Coexistence Architecture ADR** template documents which adapters exist
+- **Test Generator Skill** can extend test coverage on adapters
+
+## Tips
+
+- Compatibility code is meant to die. Mark it visibly so it's removed when no longer needed.
+- Resist the temptation to "improve" the legacy system through the adapter. Translate, don't improve.
+- Add observability heavily — you'll thank yourself when debugging.
+- Treat adapters as a separate package / project / namespace so they're clearly demarcated from new code.
+
+## Limitations
+
+- Best for .NET (where the patterns are encoded). For other stacks, the patterns generalize but the syntax differs.
+- Cannot infer legacy quirks from descriptions — needs concrete examples or access to legacy responses.
+- For very complex legacy logic embedded in stored procedures, the Stored Procedure to Service template is more appropriate.
+- Real-time bidirectional sync (CDC, dual-write) is complex enough to warrant dedicated tooling — this skill scaffolds, but expect to extend.

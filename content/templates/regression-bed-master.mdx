@@ -1,0 +1,231 @@
+---
+title: "Regression Test Bed — Master Suite"
+slug: "regression-bed-master"
+description: "Assemble per-program / per-component test cases into a single master regression suite — coverage summary, critical path, domain sections, end-to-end scenarios, run instructions."
+type: template
+phase: test
+category: integration-testing
+projectType: ["custom-app"]
+stack: []
+tags: ["regression", "test-suite", "release-readiness", "qa"]
+difficulty: advanced
+estimatedTime: "20 min initial assembly + ongoing additions"
+author: "Platform Engineering"
+createdAt: 2026-04-26
+updatedAt: 2026-04-26
+inputs:
+  - name: system_name
+    description: "Name of the system this regression bed covers (e.g. 'LifePro Insurance PAS' or 'Pluralsight Commerce')"
+    required: true
+  - name: domains
+    description: "Comma-separated list of functional domains (e.g. 'Policy, Billing, Claims, Reporting')"
+    required: true
+  - name: existing_test_files
+    description: "Paths or names of per-program / per-feature test case files to consolidate"
+    required: false
+  - name: critical_path_programs
+    description: "Programs / components whose tests must run first (shared utilities, auth, core flows)"
+    required: false
+output:
+  format: markdown
+relatedAssets:
+  - "test-case-comprehensive"
+  - "test-cases-from-user-story"
+  - "test-automation-script"
+  - "cobol-functional-spec"
+---
+
+# Regression Test Bed — Master Suite
+
+Build (and grow) a master regression suite that aggregates test cases from across your system. The suite is the single document that answers: *what gets re-run before a release, in what order, and how long does it take?*
+
+Use it for legacy modernization projects (where regression is the safety net while you re-platform), for any large monolith with ≥ 50 programs / components, or any release pipeline where regression-suite scope is currently "we run what we remember to run."
+
+## When to use
+
+- You're starting a regression-suite effort from scratch
+- You have per-program / per-feature test files and need them in one organized index
+- You need to publish "what we test before each release" to QA leadership or auditors
+- You're modernizing a legacy system and need to prove behavioral parity
+
+## Prompt
+
+```text
+You are a senior QA architect. Build (or grow) a master regression test
+bed for the system below. Consolidate test cases from per-program /
+per-feature files into one organized, runnable suite.
+
+## Inputs
+
+**System name:** {{system_name}}
+
+**Functional domains:** {{domains}}
+
+**Existing test files to consolidate:** {{existing_test_files}}
+
+**Critical-path programs / components (run first):** {{critical_path_programs}}
+
+## Output requirements
+
+Return ONLY the markdown document below. Do not include preamble or
+closing notes. Never duplicate full test-case detail in this document —
+link to the per-program / per-feature test file instead. Only include
+the regression-critical subset of each program's tests.
+
+---
+
+# {{system_name}} — Regression Test Bed (Master Suite)
+
+| Field | Value |
+|---|---|
+| **System** | {{system_name}} |
+| **Last Updated** | <today's date YYYY-MM-DD> |
+| **Total Programs / Components** | <count> |
+| **Total Regression Tests** | <count> |
+| **Estimated Run Time** | <hours — sum of per-test estimates> |
+
+## 📊 Coverage Summary
+
+| Domain | Programs | Regression Tests | Critical | High | Medium |
+|---|---|---|---|---|---|
+| <domain 1> | | | | | |
+| <domain 2> | | | | | |
+| **TOTAL** | | | | | |
+
+## 🔴 Critical Path — Run These First
+
+> Tests that must pass before the full regression suite runs.
+> Cover core system integrity and shared utilities.
+
+| TC ID | Program / Component | Title | Est. Time | Linked test file |
+|---|---|---|---|---|
+
+## Domain Sections
+
+For each domain in `{{domains}}`, render a section with this exact shape:
+
+### Domain: <NAME>
+
+> **Programs in this domain:** <comma-separated list>
+> **Test files:** `<path/to/file>` (etc.)
+
+#### Regression Tests
+
+| TC ID | Program | Title | Priority | Est. Time | Last Run | Status | Test file |
+|---|---|---|---|---|---|---|---|
+
+#### Domain-Level Integration Tests
+
+> Tests that span multiple programs within this domain.
+
+| TC ID | Programs Involved | Scenario | Priority |
+|---|---|---|---|
+
+## 🔗 End-to-End Scenarios
+
+> Cross-domain transactions — simulate real business journeys.
+
+### E2E-001: <Scenario name>
+
+| Step | Program / Component | Input | Expected Output |
+|---|---|---|---|
+| 1. | | | |
+| 2. | | | |
+| 3. | | | |
+
+[Add E2E-002, E2E-003, etc.]
+
+## 🚫 Known Exclusions
+
+> Tests out of scope for automated regression — manual or deferred.
+
+| Program / Component | Test | Reason | Owner |
+|---|---|---|---|
+
+## 📋 Regression Run Instructions
+
+### Pre-Run Checklist
+
+- [ ] Test data loaded to test datasets / databases
+- [ ] Baseline DB snapshot restored
+- [ ] Run scripts / JCL / pipelines reviewed for the test environment
+- [ ] Output capture enabled
+- [ ] Comparison files (expected output) in place
+
+### Run Order
+
+1. Critical Path tests (🔴 above)
+2. Shared / utility components — these are dependencies
+3. Domain sections in parallel where the environment allows
+4. End-to-End scenarios last
+
+### Pass / Fail Criteria
+
+- **Pass:** Return code = expected AND output matches expected exactly
+- **Warning:** Return code = expected with warnings AND output matches — investigate warnings
+- **Fail:** Return code > expected OR output mismatch OR abend
+
+### Defect Logging
+
+Log defects with: Program / Component | TC ID | Actual vs Expected | Output snippet | Date found
+
+## Style guide
+
+- Coverage Summary numbers must add up — it's the executive view.
+- Critical Path should be ≤ 10% of total tests; if it's more, you're
+  over-classifying and the "critical" signal loses meaning.
+- Every test row links back to the per-program / per-feature test file —
+  never duplicate the full TC body in the master suite.
+- E2E scenarios cross at least 2 domains; otherwise they belong in
+  Domain-Level Integration Tests.
+- Run-time estimates should be honest — they drive the release timeline.
+
+## Hard rules
+
+1. The Coverage Summary is the source of truth — keep it updated whenever you add a test.
+2. Each TC ID exists ONLY in the per-program / per-feature file. The master suite
+   only references it.
+3. Critical-Path tests are flagged in the per-program file as
+   regression-critical — never silently include or exclude.
+4. Known Exclusions must have a reason — "out of scope" is not enough.
+```
+
+## Example output (excerpt)
+
+```markdown
+# LifePro Insurance PAS — Regression Test Bed (Master Suite)
+
+| Field | Value |
+|---|---|
+| **System** | LifePro Insurance PAS (Customized) |
+| **Last Updated** | 2026-04-26 |
+| **Total Programs / Components** | 87 |
+| **Total Regression Tests** | 412 |
+| **Estimated Run Time** | 6.5 hours |
+
+## 📊 Coverage Summary
+
+| Domain | Programs | Regression Tests | Critical | High | Medium |
+|---|---|---|---|---|---|
+| Policy Administration | 22 | 118 | 12 | 64 | 42 |
+| Billing | 14 | 78 | 8 | 41 | 29 |
+| Claims | 18 | 96 | 9 | 52 | 35 |
+| Reporting / Batch | 9 | 28 | 2 | 14 | 12 |
+| Utility / Common | 7 | 19 | 7 | 12 | 0 |
+| **TOTAL** | **70** | **339** | **38** | **183** | **118** |
+
+## 🔴 Critical Path — Run These First
+
+| TC ID | Program | Title | Est. Time | Linked test file |
+|---|---|---|---|---|
+| TC-MMACMN01-001 | MMACMN01 | Date routine returns correct policy anniversary | 3 min | `output/test-cases/MMACMN01_test_cases.md` |
+| TC-MMASEC01-001 | MMASEC01 | Auth check rejects unknown user IDs | 4 min | `output/test-cases/MMASEC01_test_cases.md` |
+```
+
+## Tips
+
+- Treat the master suite as a living document — every new feature / program adds rows; every release run updates "Last Run" and "Status."
+- The Coverage Summary is the chart you put in front of leadership. Keep it accurate or stop showing it.
+- Pair with the **COBOL Functional Spec** template for legacy work — each spec produces test cases that flow into one of the domain sections.
+- For modern systems, the per-feature test files come from the **Test Cases — Comprehensive** template instead.
+- Periodically prune Known Exclusions — items there for "the third-party sandbox is unstable" become stale fast.

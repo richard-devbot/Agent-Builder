@@ -1,0 +1,115 @@
+---
+title: "PRD Generator"
+slug: "prd-generator"
+description: "Generate a comprehensive product requirements document from a problem statement."
+type: template
+phase: discover
+category: product-briefs
+projectType: ["custom-app"]
+stack: []
+tags: ["product-management", "requirements", "spec-driven"]
+difficulty: beginner
+estimatedTime: "20 min"
+author: "Platform Engineering"
+featured: true
+createdAt: 2026-04-26
+updatedAt: 2026-04-26
+inputs:
+  - name: problem_statement
+    description: "A 1-3 paragraph description of the problem to solve"
+    required: true
+  - name: stakeholders
+    description: "Key stakeholders and their roles"
+    required: false
+  - name: constraints
+    description: "Known technical, business, or timeline constraints"
+    required: false
+output:
+  format: markdown
+relatedAssets:
+  - "user-story-from-prd"
+  - "persona-generator"
+  - "tech-stack-selector"
+---
+
+# PRD Generator
+
+Generate a complete, well-structured Product Requirements Document from a problem statement. The output PRD becomes the input for downstream prompts (user stories, architecture, API design).
+
+## When to use
+
+- Starting a new project and need a solid spec
+- Have a rough idea but need to formalize it
+- Preparing for a kickoff meeting and want a strawman PRD
+
+## Prompt
+
+```text
+You are a senior product manager. Create a comprehensive Product Requirements
+Document (PRD) for the following project.
+
+## Input
+
+**Problem statement:**
+{{problem_statement}}
+
+**Stakeholders:**
+{{stakeholders}}
+
+**Known constraints:**
+{{constraints}}
+
+## Output requirements
+
+Produce a Markdown PRD with these sections in order:
+
+1. **Overview** - 2-3 sentence summary
+2. **Problem statement** - the "why" with concrete examples
+3. **Goals & non-goals** - bulleted, clear, measurable goals + explicit non-goals
+4. **Target users** - primary, secondary, tertiary user segments
+5. **Key user journeys** - 3-5 end-to-end flows in numbered steps
+6. **Functional requirements** - grouped into Must-have / Should-have / Nice-to-have
+7. **Non-functional requirements** - performance, security, accessibility, scale
+8. **Success metrics** - how we'll measure if this worked
+9. **Constraints & assumptions** - what we're taking as given
+10. **Out of scope** - explicit list of what this project will NOT do
+11. **Open questions** - decisions still needed, with proposed answers
+
+## Style guide
+
+- Use second-person voice ("the user wants...")
+- Numbers and metrics over adjectives ("loads in <2s" not "fast")
+- Concrete examples over abstractions
+- Call out risks and unknowns explicitly
+- If you have to assume something, label it "Assumption: ..."
+
+## Length
+
+- Target: 800-1500 words
+- If the problem is genuinely complex, go longer but stay structured
+```
+
+## Example output snippet
+
+```markdown
+# PRD - Customer Portal v1
+
+## 1. Overview
+
+A self-service customer portal that lets enterprise customers manage their
+subscriptions, view invoices, and submit support tickets without contacting
+their account manager.
+
+## 2. Problem statement
+
+Today, 40% of inbound account-manager requests are routine self-service
+tasks (password resets, invoice downloads, plan changes). This costs the
+support team ~120 hours/week and creates friction for customers who want
+quick answers...
+```
+
+## Tips
+
+- Be specific in your problem statement — the PRD quality matches the input quality
+- Include "what success looks like" in the input if you have it
+- Use this PRD as input for the **User Story Generator** template

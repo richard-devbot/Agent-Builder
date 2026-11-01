@@ -1,0 +1,194 @@
+---
+title: "Jira MCP"
+slug: "jira-mcp"
+description: "Pre-configured Jira MCP server for Claude Code with your organisation's standard project setup."
+type: mcp-config
+phase: discover
+category: jira-tickets
+projectType: ["custom-app", "etl"]
+stack: ["claude-code", "mcp"]
+tags: ["jira", "mcp", "integration"]
+difficulty: beginner
+estimatedTime: "5 min setup"
+author: "Platform Engineering"
+featured: true
+createdAt: 2026-04-26
+updatedAt: 2026-04-26
+serverName: "jira"
+configFormat: "claude-code"
+envVars:
+  - name: JIRA_HOST
+    description: "Your Jira Cloud instance URL (without https://)"
+    example: "your-org.atlassian.net"
+  - name: JIRA_EMAIL
+    description: "Your Atlassian account email"
+    example: "you@example.com"
+  - name: JIRA_API_TOKEN
+    description: "API token from id.atlassian.com → Security → Create and manage API tokens"
+    secret: true
+relatedAssets:
+  - "jira-ticket-manager"
+  - "jira-push-bulk"
+  - "user-story-elaboration-detailed"
+  - "test-case-comprehensive"
+---
+
+# Jira MCP
+
+A pre-configured Model Context Protocol (MCP) server config that lets Claude Code interact with Jira: create tickets, query the backlog, transition issues, and add comments — all from a chat.
+
+## What you can do once configured
+
+- "Create a story in PROJ for adding password reset"
+- "What are the unassigned P0 bugs in PROJ?"
+- "Move PROJ-123 to In Progress and assign to me"
+- "Show me everything in the current sprint"
+- "Add a comment to PROJ-456 saying we deployed the fix"
+
+## Setup
+
+### Step 1: Generate a Jira API token
+
+1. Go to https://id.atlassian.com/manage-profile/security/api-tokens
+2. Click "Create API token"
+3. Name it "Claude Code MCP"
+4. Copy the token immediately — you can't see it again
+
+### Step 2: Set environment variables
+
+Add these to your shell profile (`~/.zshrc` or `~/.bashrc`):
+
+```bash
+export JIRA_HOST="your-org.atlassian.net"
+export JIRA_EMAIL="you@example.com"
+export JIRA_API_TOKEN="your-token-from-step-1"
+```
+
+Reload: `source ~/.zshrc`
+
+### Step 3: Pick a Jira MCP server
+
+Three solid options as of 2026, in descending order of simplicity:
+
+| Option | Auth | Best for | Notes |
+|---|---|---|---|
+| **Atlassian Remote MCP** | OAuth via Atlassian Cloud | Anyone on Jira Cloud who wants zero local setup | Hosted by Atlassian; no `npx` process to manage |
+| **`mcp-atlassian`** (community, `pip` / `uv`) | API token (Cloud) or PAT (Server / DC) | Most teams — broadest coverage, supports both Cloud and Server / DC | Maintained Python project; supports Jira + Confluence in one server |
+| **`@modelcontextprotocol/server-atlassian`** (npm) | API token | Node-only shops who don't want Python on the dev machine | Smaller surface area than `mcp-atlassian` but no Python dep |
+
+### Step 4: Add the MCP config to Claude Code
+
+Edit `~/.config/claude-code/mcp.json` (or wherever your Claude Code config lives). Use ONE of the blocks below.
+
+#### Option A — `mcp-atlassian` (recommended for most teams)
+
+```json
+{
+  "mcpServers": {
+    "jira": {
+      "command": "uvx",
+      "args": ["mcp-atlassian"],
+      "env": {
+        "JIRA_URL": "https://${JIRA_HOST}",
+        "JIRA_USERNAME": "${JIRA_EMAIL}",
+        "JIRA_API_TOKEN": "${JIRA_API_TOKEN}"
+      }
+    }
+  }
+}
+```
+
+(Install `uv` first if needed: `curl -LsSf https://astral.sh/uv/install.sh | sh`. The `uvx` runner downloads `mcp-atlassian` on first run and caches it.)
+
+For Jira Server / Data Center, swap `JIRA_API_TOKEN` for `JIRA_PERSONAL_TOKEN` and use the personal access token from your Jira profile.
+
+#### Option B — Atlassian Remote MCP (Cloud only, OAuth)
+
+```json
+{
+  "mcpServers": {
+    "atlassian": {
+      "command": "npx",
+      "args": ["-y", "mcp-remote", "https://mcp.atlassian.com/v1/sse"]
+    }
+  }
+}
+```
+
+First time you call a Jira tool, `mcp-remote` opens a browser for OAuth. No tokens to manage; the browser session handles auth. Works only against Atlassian Cloud — not Server / DC.
+
+#### Option C — `@modelcontextprotocol/server-atlassian` (Node)
+
+```json
+{
+  "mcpServers": {
+    "jira": {
+      "command": "npx",
+      "args": ["-y", "@modelcontextprotocol/server-atlassian"],
+      "env": {
+        "ATLASSIAN_HOST": "${JIRA_HOST}",
+        "ATLASSIAN_EMAIL": "${JIRA_EMAIL}",
+        "ATLASSIAN_API_TOKEN": "${JIRA_API_TOKEN}"
+      }
+    }
+  }
+}
+```
+
+### Step 5: Restart Claude Code
+
+Quit and relaunch. The Jira tools should now be available.
+
+### Step 6: Test it
+
+Ask Claude Code: "List my Jira projects."
+
+If you see results, you're set. If not, see Troubleshooting below.
+
+## Available tools (provided by the MCP server)
+
+- `jira_search` - JQL-powered search
+- `jira_get_issue` - Fetch a specific ticket
+- `jira_create_issue` - Create a ticket
+- `jira_update_issue` - Update fields
+- `jira_transition_issue` - Move through workflow states
+- `jira_add_comment` - Add a comment
+- `jira_list_projects` - List accessible projects
+- `jira_list_sprints` - List sprints for a board
+
+## Recommended pairing
+
+Pair this MCP config with the **Jira Ticket Manager Skill** for a smoother experience. The skill applies your organisation's templates and conventions on top of the raw MCP tools.
+
+## Troubleshooting
+
+**"401 Unauthorized"**
+- Token may be wrong or expired
+- Email must match the token's owner
+- Some Jira instances require basic auth: `email:token` base64-encoded
+
+**"403 Forbidden"**
+- Your account may not have permission for that project
+- Check the project's "Browse projects" permission
+
+**"Cannot find Jira tools"**
+- MCP server didn't start; check Claude Code logs
+- Try running `npx -y @your-org/jira-mcp` manually to see errors
+
+**Tools work but writes fail**
+- Many Jira fields are required by the project's screen scheme
+- Add missing fields explicitly (priority, components, etc.)
+
+## Security notes
+
+- Treat your API token like a password
+- Never commit it to a repo
+- Rotate it every 90 days
+- Use a service account token for shared/CI use, not your personal token
+
+## Customization
+
+Most teams need to customize:
+- **Default project key:** Add `JIRA_DEFAULT_PROJECT` env var
+- **Custom fields:** Map them in `~/.config/claude-code/jira-fields.json`
+- **Issue type names:** If your Jira uses non-standard names (e.g., "Feature" instead of "Story"), configure in the same file

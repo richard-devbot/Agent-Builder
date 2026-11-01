@@ -1,0 +1,523 @@
+---
+title: "RPG / IBM i Modernization Playbook"
+slug: "rpg-modernization-playbook"
+description: "Modernize RPG / AS/400 / IBM i apps via the four strategies (replatform on PowerVS, refactor, rewrite, replace) — with a deep walkthrough of the rewrite path most projects need."
+type: playbook
+phase: design
+category: architecture
+projectType: ["custom-app"]
+stack: ["rpg", "ibm-i", "java", "dotnet"]
+tags: ["migration", "rpg", "as400", "ibm-i", "modernization"]
+difficulty: advanced
+estimatedTime: "4-8 quarters typical"
+totalEstimatedTime: "4-8 quarters minimum — multi-year for non-trivial apps"
+author: "Platform Engineering"
+featured: true
+createdAt: 2026-04-26
+updatedAt: 2026-04-27
+intakeFields:
+  - name: legacy_system_description
+    label: "Legacy system description"
+    type: textarea
+    required: true
+    placeholder: "Distribution ERP on IBM i Power9, RPG IV (mostly free-format), 1.2M LOC, 500 programs, 250 display files (5250 green screen), 80 batch jobs orchestrated by CL"
+  - name: data_storage
+    label: "Data storage"
+    type: text
+    required: true
+    placeholder: "DB2 for i, ~800 physical files, ~1500 logical files, ~500 GB total, journaling on all production files"
+  - name: code_volume
+    label: "Code volume"
+    type: text
+    required: true
+    placeholder: "RPG programs: 500. CL programs: 200. Service programs: 30. Display files: 250. Approximate LOC: 1.2M."
+  - name: business_criticality
+    label: "Business criticality"
+    type: textarea
+    required: true
+    placeholder: "Tier 1 — handles all order entry, inventory, shipping. ~10K orders/day. Downtime = lost revenue + customer dissatisfaction."
+  - name: target_runtime
+    label: "Preferred target runtime"
+    type: text
+    required: true
+    placeholder: "Java 21 + Spring Boot on Azure / .NET 8 / Both depending on subsystem"
+  - name: ui_modernization_scope
+    label: "UI modernization scope"
+    type: text
+    required: true
+    placeholder: "All 5250 green screens to web SPA / Hybrid (some 5250 retained for power users) / Mobile-first"
+  - name: timeline_driver
+    label: "What's driving the timeline?"
+    type: text
+    required: false
+    placeholder: "Hardware EOL in 24 months, RPG developer attrition, customer demand for modern UI"
+  - name: workforce_situation
+    label: "RPG / IBM i workforce situation"
+    type: textarea
+    required: false
+    placeholder: "8 RPG developers, 2 retiring next year; minimal pipeline; ops team also IBM i-only"
+steps:
+  - number: 1
+    title: "Audit and Inventory"
+    description: "Inventory programs, service programs, modules, CL programs, DDS / SQL files, display files (5250), job streams, data, environment dependencies, and people."
+    whatYoureDoing: "Produce a comprehensive IBM i inventory: RPG programs (II/III/IV, batch/interactive/service), service programs (*SRVPGM) with exported procedures, modules, CL programs, DDS/SQL physical and logical files, display files with subfile complexity, scheduled jobs, journaled data, library list / authority structure, and people (skills + retirement timeline). Use IBM i analysis tools (X-Analysis, ARCAD, AveriSource, IBM ADDI) to accelerate."
+    primaryAsset: "legacy-system-audit"
+    alternativeAssets:
+      - slug: "rpg-business-rule-extraction"
+        when: "Pulling rules out of representative programs as part of the audit"
+      - slug: "as400-cl-program-decomposition"
+        when: "CL job streams need decomposition into target-runtime equivalents (Spring Batch / Step Functions / Airflow)"
+      - slug: "db2-for-i-to-relational-mapping"
+        when: "Inventorying the DB2 for i schema as part of the audit"
+    relevantSkills:
+      - "legacy-code-analyzer-skill"
+      - "migration-planner-skill"
+    relevantMcpConfigs:
+      - "filesystem-mcp"
+      - "postgres-mcp"
+      - "confluence-mcp"
+    estimatedTime: "6-12 weeks"
+    definitionOfDone:
+      - "Complete program inventory (RPG, CL, modules)"
+      - "Service program / module inventory with exported procedures"
+      - "CL program inventory with orchestration map"
+      - "File inventory (PF, LF, display, print)"
+      - "Display file complexity assessment (subfile usage, conditioning indicators)"
+      - "Database schema documented"
+      - "Job scheduler dependencies"
+      - "Environment dependencies (authority, library list)"
+      - "Workforce assessment with retirement timeline"
+      - "Risk register with IBM i-specific risks"
+      - "Strategic recommendation confirmed (rewrite vs replatform vs refactor vs replace)"
+    commonPitfalls:
+      - "Underestimating display file count — each business workflow often has its own display file with 5-15 record formats"
+      - "Missing service programs — modular RPG uses service programs heavily; map exported procedures"
+      - "Skipping DDS analysis — older shops have heavy DDS investment; field metadata matters for migration"
+      - "Trusting documentation — almost always incomplete"
+      - "Not running automated analysis — manual analysis of 1M+ LOC takes too long"
+
+  - number: 2
+    title: "Business Rule Extraction"
+    description: "Convert each in-scope RPG program (and CL program) into structured business rule catalogs — including indicator analysis, the most RPG-specific concern."
+    whatYoureDoing: "For every program in scope, extract business rules using rpg-business-rule-extraction. Each program produces a 30-100 rule catalog plus indicator analysis (intent, not usage), subroutine catalog, decision tables, calculation formulas, and edge-case notes. CL programs often hide business rules in IF statements — use as400-cl-program-decomposition. Run iteratively: tooling → senior engineer → BA → SME sign-off."
+    primaryAsset: "rpg-business-rule-extraction"
+    alternativeAssets:
+      - slug: "as400-cl-program-decomposition"
+        when: "Extracting from CL programs (orchestration code that often hides business logic in IF statements)"
+      - slug: "rpg-to-java-dotnet-translation-checklist"
+        when: "Working through unfamiliar RPG idioms (cycle, indicators, RPG II/III) alongside the rule extraction"
+    relevantSkills:
+      - "legacy-code-analyzer-skill"
+      - "migration-planner-skill"
+    relevantMcpConfigs:
+      - "filesystem-mcp"
+      - "confluence-mcp"
+    estimatedTime: "3-6 quarters (the longest phase)"
+    definitionOfDone:
+      - "All in-scope programs have rule catalogs"
+      - "Rules validated by business analysts"
+      - "SMEs signed off on critical-path rules"
+      - "Indicator semantics documented (intent, not just usage)"
+      - "Decision tables built for complex branching"
+      - "Calculation formulas with rounding rules documented"
+      - "Cross-program rule duplications identified"
+      - "Open questions tracked and assigned"
+    commonPitfalls:
+      - "Treating indicators as boolean variables — they encode state machines; capture intent"
+      - "Skipping cycle analysis for RPG II/III — the cycle IS the program for those"
+      - "Letting CL programs go unanalyzed — they often hold business rules"
+      - "SME availability gaps — SMEs are the scarcest resource; lock in commitments"
+      - "Auto-extracted rules treated as final — human review is non-negotiable"
+
+  - number: 3
+    title: "Target Architecture Design"
+    description: "Design the modern target — including the 5250 UI strategy, which is the IBM i-specific architectural decision that drives much of the rest."
+    whatYoureDoing: "Capture target architecture as ADRs: monolith vs modular monolith vs microservices, 5250 UI strategy (web SPA / hybrid / mobile-first / Profound UI), sync vs event-driven, database strategy (DB2 for i → Postgres / Azure SQL / Aurora), batch architecture, online architecture, auth, cloud / hybrid choice, operational model. The 5250 decision is unique to IBM i and often the biggest call."
+    primaryAsset: "coexistence-architecture-adr"
+    alternativeAssets:
+      - slug: "adr-generator"
+        when: "You'd rather author each architectural decision as its own ADR rather than one combined document"
+    relevantSkills:
+      - "migration-planner-skill"
+      - "documentation-skill"
+    relevantMcpConfigs:
+      - "filesystem-mcp"
+    estimatedTime: "8-12 weeks"
+    definitionOfDone:
+      - "Target architecture documented end-to-end"
+      - "Monolith vs microservice decision with rationale"
+      - "5250 UI strategy decided (replace / hybrid / mobile-first / Profound UI)"
+      - "Database strategy decided"
+      - "Batch architecture decided (Spring Batch / Step Functions / Airflow)"
+      - "Online architecture decided (REST / GraphQL / event-driven)"
+      - "Mobile strategy if applicable"
+      - "Auth approach decided"
+      - "Cloud / hybrid decision made"
+      - "10-15 ADRs documenting key decisions"
+      - "Operational model defined"
+    commonPitfalls:
+      - "Premature microservices — RPG monoliths often work because of library-list-isolated transaction integrity"
+      - "Treating 5250 → web as an afterthought — UI redesign is its own significant work"
+      - "Skipping the mobile question — field workers / shop floor / sales reps have mobile use cases"
+      - "All-in on bleeding-edge tech — RPG stack was stable for decades; new stack should also bias toward stability"
+
+  - number: 4
+    title: "Data Migration Design"
+    description: "Plan how DB2 for i moves to a modern relational target. DB2 for i is more migration-friendly than VSAM/IMS but has its own quirks (multi-member files, logical-file roles, DDS extensions, CCSID, journaling)."
+    whatYoureDoing: "Use db2-for-i-to-relational-mapping per major schema. Decide whether logical files are indexes / views / joins. Handle multi-member files. Map DDS-defined columns (TEXT/COLHDG → comments, CHECK/RANGE → constraints). Plan CCSID / EBCDIC encoding. Pick ETL tooling (AWS DMS for DB2 for i, IBM CDC, Qlik Replicate, JDBC/ODBC ETL). Decide stored-procedure / trigger migration."
+    primaryAsset: "db2-for-i-to-relational-mapping"
+    alternativeAssets:
+      - slug: "data-migration-plan"
+        when: "You want one document covering the whole-system data movement strategy"
+      - slug: "sql-server-schema-translator"
+        when: "Some patterns (type mapping, identity → SERIAL, constraint translation) apply to DB2 for i too"
+      - slug: "database-migration-playbook"
+        when: "The data layer is complex enough to follow its own dedicated playbook in parallel"
+    relevantSkills:
+      - "data-validation-skill"
+      - "migration-planner-skill"
+      - "database-migration-skill"
+    relevantMcpConfigs:
+      - "postgres-mcp"
+      - "filesystem-mcp"
+    estimatedTime: "8-12 weeks"
+    definitionOfDone:
+      - "Schema mapping for all major files complete"
+      - "Multi-member file strategies decided"
+      - "Logical file translations classified (index / view / join)"
+      - "DDS extensions handled (TEXT/COLHDG → comments, CHECK/RANGE → constraints)"
+      - "CCSID encoding strategy"
+      - "Journaling / commitment control mapped to target equivalents"
+      - "ETL tool selected and validated on sample data"
+      - "Validation queries written"
+      - "Rollback strategy clear"
+    commonPitfalls:
+      - "Treating DB2 for i like SQL Server — it's relational, but has IBM i-specific features"
+      - "Missing multi-member files — they surface during migration if not caught upfront"
+      - "Ignoring CCSID — EBCDIC → UTF-8 issues surface as garbled characters days later"
+      - "Treating logical files as indexes universally — some are views, some are joins"
+      - "Underestimating volume — same trap as other migrations"
+
+  - number: 5
+    title: "Build the Coexistence Layer"
+    description: "Bridge IBM i and the new system: API gateway, data sync, federated auth, observability that spans both worlds. Easier than mainframe coexistence — IBM i has good ODBC/JDBC drivers and Integrated Web Services."
+    whatYoureDoing: "Stand up an API gateway in front of IBM i (Integrated Web Services exposes RPG as REST). Wire CDC or MQ-based data sync (IBM CDC / Qlik Replicate). Federate auth (Azure AD / Okta with IBM i LDAP). Centralize observability across both. Optionally use Profound UI to web-front 5250 screens during transition."
+    primaryAsset: "coexistence-architecture-adr"
+    alternativeAssets:
+      - slug: "auth-migration-strategy"
+        when: "The auth shim across IBM i user profiles + LDAP + cloud IdP is the hardest piece of coexistence"
+      - slug: "feature-flag-rollout-migration"
+        when: "Routing decisions handled by feature-flag system rather than gateway rules"
+    relevantSkills:
+      - "compatibility-layer-generator-skill"
+      - "migration-planner-skill"
+    relevantMcpConfigs:
+      - "azure-devops-mcp"
+      - "filesystem-mcp"
+    estimatedTime: "8-12 weeks"
+    definitionOfDone:
+      - "API gateway operational, routing to IBM i and the new system"
+      - "Data sync running and monitored (lag, error rate, drift detection)"
+      - "Auth federation working — single sign-in covers both"
+      - "Observability across both systems"
+      - "\"Hello world\" capability deployed end-to-end through the new system"
+    commonPitfalls:
+      - "Direct IBM i DB queries from the new app — tempting; produces tight coupling that's hard to break later"
+      - "Sync lag invisible — without monitoring, drift accumulates"
+      - "Auth federation half-done — either fully integrate or accept dual logins; partial integration is the worst case"
+      - "Forgetting to expose CL-orchestrated work — background jobs need orchestration too"
+
+  - number: 6
+    title: "Migrate the First Capability (Vertical Slice)"
+    description: "Ship one complete capability through the new stack. For RPG specifically, slice 1 should be read-only or low-stakes with limited 5250 redesign — exercise the infrastructure, not the riskiest UX."
+    whatYoureDoing: "Pick a small, contained capability (a reporting screen, a simple CRUD entity, an admin screen). Take the rule catalog from Phase 2 as the spec. Build the modern implementation, build behavior parity tests from extracted rules, deploy via feature flag in shadow mode (compare against IBM i for weeks), then canary to a small % of users."
+    primaryAsset: "feature-flag-rollout-migration"
+    alternativeAssets:
+      - slug: "behavior-parity-test-suite"
+        when: "Slice 1 is regulated and parity must be proven; expand the parity-test framework you built in earlier migrations"
+      - slug: "rpg-to-java-dotnet-translation-checklist"
+        when: "Implementation pattern reference while writing the new code"
+      - slug: "openapi-spec-generator"
+        when: "Slice exposes a public API; lock the contract first"
+      - slug: "react-form-builder"
+        when: "Slice 1 has a form-heavy UI replacing a 5250 input screen"
+    relevantSkills:
+      - "spec-driven-builder"
+      - "test-generator-skill"
+      - "code-reviewer-skill"
+      - "data-validation-skill"
+    relevantMcpConfigs:
+      - "azure-devops-mcp"
+      - "github-mcp"
+      - "filesystem-mcp"
+      - "postgres-mcp"
+    estimatedTime: "4-6 months for the first slice"
+    definitionOfDone:
+      - "Slice 1 implementation complete (frontend + API + DB)"
+      - "Parity tests pass against extracted rules"
+      - "Shadow mode running, comparing to IBM i"
+      - "Performance meets targets"
+      - "Internal validation passed"
+      - "Canary rollout to a small user set successful"
+      - "Stop conditions clear; rollback procedure tested"
+    commonPitfalls:
+      - "Slice 1 too big — should fail safely"
+      - "Skipping shadow mode — catches bugs that tests miss"
+      - "Replicating 5250 patterns in web — use slice 1 to establish modern UX patterns"
+      - "Performance neglect — ORM-based access can be slower than RPG native I/O on hot paths"
+
+  - number: 7
+    title: "Continue Migrating Slices"
+    description: "Migrate the remaining capabilities — backend, UI, and tests in parallel. Track progress visibly: % programs migrated, % transactions on new, % 5250 screens replaced, % users on new UI."
+    whatYoureDoing: "Slice by slice. Common slicing patterns: by module (orders → inventory → shipping), by user role (CS team → sales → warehouse), by interaction style (inquiries → transactions → batch), by location (multi-site rollout). UI work parallels backend work. Each slice has its own backend service, frontend, parity tests, and phased rollout."
+    primaryAsset: "feature-flag-rollout-migration"
+    alternativeAssets:
+      - slug: "rpg-to-java-dotnet-translation-checklist"
+        when: "Working through unfamiliar RPG idioms in a slice's source programs"
+      - slug: "as400-cl-program-decomposition"
+        when: "A slice's batch orchestration is buried in CL that needs explicit decomposition"
+      - slug: "shadcn-component-builder"
+        when: "Building reusable UI components for the SPA replacement"
+    relevantSkills:
+      - "spec-driven-builder"
+      - "migration-planner-skill"
+      - "test-generator-skill"
+      - "code-reviewer-skill"
+    relevantMcpConfigs:
+      - "azure-devops-mcp"
+      - "github-mcp"
+      - "filesystem-mcp"
+      - "postgres-mcp"
+    estimatedTime: "1-3 years (the dominant phase)"
+    definitionOfDone:
+      - "All capabilities have a modern equivalent"
+      - "IBM i traffic significantly reduced (target: &lt;10% of original)"
+      - "All scheduled batch migrated"
+      - "All integrations updated"
+      - "All users on the new UI (or hybrid is intentional)"
+    commonPitfalls:
+      - "Long-tail capabilities — last 10% takes 50% of the time"
+      - "Burnout — multi-year projects need rotation"
+      - "Scope creep — \"while we're rewriting it...\" → no"
+      - "Stalling on rare-but-critical edge cases — annual processes only run once a year"
+
+  - number: 8
+    title: "Decommission IBM i"
+    description: "Turn off IBM i. Sequence: read-only IBM i → selective subsystem shutdowns → data archive → hardware decommission (or contract termination if PowerVS) → license cancellation."
+    whatYoureDoing: "Block writes to IBM i (writes go to new). Disable subsystems, scheduled jobs, and IWS endpoints one at a time. Archive historical data to cheap, queryable storage for compliance. Decommission hardware (or terminate the PowerVS / Skytap contract). Cancel every IBM, third-party software, scheduling, and monitoring license explicitly."
+    primaryAsset: "migration-cutover-runbook"
+    alternativeAssets:
+      - slug: "migration-rollback-plan"
+        when: "Pre-flight check — make sure the rollback path is documented and rehearsed before the first shutdown"
+    relevantSkills:
+      - "migration-planner-skill"
+      - "documentation-skill"
+    relevantMcpConfigs:
+      - "azure-devops-mcp"
+      - "confluence-mcp"
+      - "filesystem-mcp"
+    estimatedTime: "4-12 months"
+    definitionOfDone:
+      - "IBM i write traffic = 0% for 30+ consecutive days"
+      - "All scheduled batch decommissioned"
+      - "All subsystems / services stopped"
+      - "All data archived to long-term storage"
+      - "All integrations confirmed off IBM i"
+      - "IBM i hardware decommissioned (or PowerVS / Skytap contract terminated)"
+      - "All vendor licenses cancelled"
+      - "Final cost reduction verified"
+    commonPitfalls:
+      - "Decommissioning too fast — read access for 6-12 months catches forgotten consumers"
+      - "No data archive — compliance requires keeping data; archive cheaply but accessibly"
+      - "Forgetting license costs — they keep billing until cancelled"
+      - "Missing integrations — manufacturing floor, EDI partners, custom interfaces all need explicit redirect"
+
+  - number: 9
+    title: "Workforce Transition"
+    description: "Capture institutional knowledge before retirement; retrain transferable RPG developers; transition operations; lead the culture change. Failed modernizations often fail here."
+    whatYoureDoing: "Run knowledge capture from retiring engineers (recorded interviews, paired programming, documentation). Many RPG developers can transition to Java / .NET with real training (not \"go take a course\"). Train IBM i ops teams on cloud / Linux / modern monitoring or plan for departures. Lead the cadence shift (deployments per day vs per quarter) and observability change (dashboards vs joblog)."
+    primaryAsset: "documentation-skill"
+    alternativeAssets:
+      - slug: "migration-planner-skill"
+        when: "Keeping the workforce-transition plan aligned with the technical migration plan in one place"
+    relevantSkills:
+      - "documentation-skill"
+      - "migration-planner-skill"
+    relevantMcpConfigs:
+      - "confluence-mcp"
+      - "filesystem-mcp"
+    estimatedTime: "Throughout the program, intensifying in the last 6-12 months"
+    definitionOfDone:
+      - "Knowledge capture from retiring engineers complete"
+      - "Retraining program for transferable engineers complete"
+      - "Operations team trained on the new stack"
+      - "HR plans for non-transferable roles documented and executed"
+      - "Culture transition managed (deployment cadence, observability practices)"
+    commonPitfalls:
+      - "Treating the RPG team as obstacles — they have decades of valuable knowledge. Bring them along"
+      - "No retraining budget — engineers can't pick up new skills off-hours"
+      - "Ignoring operations — IBM i ops and cloud ops are different jobs"
+      - "Same leadership running both old and new — patterns that ran IBM i for 20 years won't optimize the cloud-native target"
+
+  - number: 10
+    title: "Post-Migration Validation and Optimization"
+    description: "Verify the modernization actually delivered (cost, performance, reliability, agility, compliance). Then optimize the parts that were rushed."
+    whatYoureDoing: "Validate outcomes against the original business case. Are cost savings realized? Do hot paths perform acceptably (RPG was often optimized for IBM i; matching can be hard)? Is reliability matching IBM i (famously reliable)? Is the team shipping faster? Then optimize: rationalize cloud spend (30%+ savings is typical), refactor rushed code, address tech debt, establish new norms."
+    primaryAsset: "performance-profiler-skill"
+    alternativeAssets:
+      - slug: "documentation-skill"
+        when: "Driving the post-migration retrospective and the optimization roadmap"
+      - slug: "code-reviewer-skill"
+        when: "Auditing migration-era code for the rushed-but-shipped parts that need cleanup"
+      - slug: "regression-bed-master"
+        when: "Standing up a permanent regression bed for the modernized system"
+    relevantSkills:
+      - "performance-profiler-skill"
+      - "documentation-skill"
+      - "code-reviewer-skill"
+    relevantMcpConfigs:
+      - "azure-devops-mcp"
+      - "github-mcp"
+      - "postgres-mcp"
+    estimatedTime: "6-12 months post-cutover"
+    definitionOfDone:
+      - "Cost outcomes verified vs the original business case"
+      - "Performance targets met"
+      - "Reliability targets met"
+      - "Agility metrics established (deployment frequency, lead time, MTTR)"
+      - "Compliance review complete"
+      - "Optimization roadmap for the next 12 months"
+      - "Migration retrospective documented"
+    commonPitfalls:
+      - "Skipping validation — project ends at cutover; nobody verifies the business case actually realized"
+      - "No optimization phase — code shipped during migration is rushed; permanent if not refactored"
+      - "No retrospective — lessons not captured = repeated mistakes on the next migration"
+wrapUp:
+  deliverables:
+    - "IBM i decommissioned (hardware + licenses, or PowerVS / Skytap contract terminated)"
+    - "Modern stack running every core business capability"
+    - "Web / mobile UI replacing 5250 green screens (or intentional hybrid)"
+    - "Cost savings realized vs the IBM i baseline"
+    - "Validated business-rule catalogs at /docs/migration/rules/ (the most durable artifact)"
+    - "Workforce transitioned to new skills (or transitioned out, with knowledge captured)"
+    - "Audit, ADRs, parity tests, and cutover runbook in /docs/migration/"
+  nextSteps:
+    - title: "Run a 12-month optimization sprint"
+      description: "Most modernization code shipped quickly. Allocate a quarter to refactor the rushed parts and rationalize cloud spend."
+    - title: "Establish a regression bed for the new system"
+      description: "The behavior-parity tests you built were for the migration. Refactor them into a permanent regression suite."
+    - title: "Plan the mobile / field-worker rollout"
+      description: "5250 didn't reach mobile users; the new web / mobile stack does. Work out which workflows belong on phones / tablets."
+    - title: "Document the playbook updates for the next IBM i modernization"
+      description: "What surprised you? What would you do differently? Capture it while it's fresh — your firm will do this again."
+relatedAssets:
+  - "cobol-modernization-playbook"
+  - "aspnet-to-angular-dotnet-modernization-playbook"
+  - "vbnet-winforms-to-spa-migration-playbook"
+  - "database-migration-playbook"
+  - "legacy-system-audit"
+  - "rpg-business-rule-extraction"
+---
+
+# RPG / IBM i Modernization Playbook
+
+A 10-phase playbook for modernizing RPG applications off IBM i (AS/400, iSeries, Power systems). Like COBOL/mainframe modernization, this requires specialized knowledge — but with important differences. RPG IV is more modern than most COBOL, DB2 for i is integrated and more standard, and **5250 green-screen UIs are a significant migration concern unique to this platform**.
+
+This playbook walks through **strategy selection first** (the four canonical strategies adapted for IBM i), then deep-dives the **rewrite path** that most modernization projects take.
+
+## When to use this playbook
+
+- You have RPG applications on IBM i (Power systems, formerly AS/400 / iSeries)
+- Drivers include hardware EOL, workforce risk, agility, customer demand for modern UI, or cloud strategy
+- You're considering modernization but haven't committed to an approach
+- The project is multi-year (typical) — anything &lt;12 months should question scope
+
+## When NOT to use this playbook
+
+- IBM i is operationally fine and not under threat — modernization for its own sake rarely pays off
+- The RPG codebase is small (&lt;50K LOC, &lt;30 programs) — handle as a custom-app migration
+- You've already committed to a specific path (replatform via PowerVS, etc.) — see targeted resources for that approach
+
+## RPG vs COBOL: what's similar, what's different
+
+If you're applying lessons from [COBOL modernization](/playbook/cobol-modernization-playbook), expect overlap and differences:
+
+**Similar:** multi-year timelines (4-8 quarters minimum), strategy selection matters more than execution, business rule extraction is the highest-value upfront work, workforce transition is its own phase, specialist expertise required.
+
+**Different:**
+- **RPG IV is more modern.** RPG free-format reads similarly to other languages; cleaner translation than older COBOL.
+- **DB2 for i is integrated and more standard.** Easier to migrate than VSAM/IMS.
+- **5250 green screens are huge.** Subfile migration to web is its own discipline; UI work is significant.
+- **PowerVS is a real cloud option.** IBM i in IBM Cloud / Azure (via Skytap) is feasible (replatform without leaving IBM i).
+- **Replace strategy is more common.** SAP, JD Edwards, Infor, Workday all replace RPG-based ERP regularly.
+- **Vendor ecosystem is different.** IBM Power systems sales org is separate from IBM Z.
+
+## The four strategies (decide first)
+
+Before writing a line of code, determine which strategy fits. The 10 phases that follow assume you've chosen **rewrite** (the most common modernization path).
+
+### Strategy 1 — Replatform (lift-and-shift)
+
+Move IBM i workloads off owned hardware to **IBM PowerVS** (IBM i in IBM Cloud), **Skytap** (IBM i in Azure), or managed IBM i hosting. The RPG stays. The on-prem hardware goes.
+
+**Right when:** cost reduction is primary, code is well-understood and stable, no significant agility needs, low risk appetite, 12-24 month timeline available. **Wrong when:** you want to rewrite eventually, the application needs significant changes, vendor lock-in to PowerVS is unacceptable. Typical: $3-10M one-time, 30-50% cost savings, 2-4 year payback.
+
+### Strategy 2 — Refactor (automated translation)
+
+Use tooling (Fresche / X-Migrate, ARCAD Transformer, AveriSource, AWS Blu Age) to translate RPG / CL / DDS to Java or C#. Output is functional but not idiomatic.
+
+**Right when:** need off IBM i AND off RPG, can't spend years in rewrite, accept "ugly modern code" you'll improve. **Wrong when:** code quality matters from day 1, application needs restructuring, team can't accept tool-generated code. Typical: $400K-$1.5M tooling, $4-12M services.
+
+### Strategy 3 — Rewrite (reverse-engineer + re-implement)
+
+Understand rules, design from scratch, implement modern. Use RPG as the behavior reference. **The rest of this playbook focuses here.**
+
+**Right when:** architecture itself is part of the problem, want cloud-native patterns, have leadership support and multi-year appetite, sufficient SME availability. **Wrong when:** insufficient business-rule knowledge, tight timeline, no SME access, high regulatory burden requiring parity proof. Typical: $12-40M+, 3-6 years.
+
+### Strategy 4 — Replace (commercial off-the-shelf)
+
+Buy an ERP / vertical-industry product that does what your RPG does. Migrate data in. Retire RPG.
+
+**Right when:** mature COTS exists in your industry (distribution → SAP / Infor M3, manufacturing → JDE / SAP, banking → core banking COTS), customizations aren't truly differentiated. **Wrong when:** heavy customizations are differentiating, COTS doesn't fit the model. Typical: $400K-$8M/year license, $5-25M implementation.
+
+### Decision matrix
+
+| Driver | Replatform | Refactor | Rewrite | Replace |
+|--------|-----------|----------|---------|---------|
+| Cost reduction primary | ✅ Best | ⚠️ Maybe | ❌ Wrong tool | ⚠️ Maybe |
+| Workforce risk (no RPG skills) | ⚠️ Defers | ✅ Good | ✅ Good | ✅ Good |
+| Need agility / new features | ❌ No help | ⚠️ Some | ✅ Best | ✅ If COTS fits |
+| Tight timeline (&lt;2 years) | ✅ Good | ✅ Good | ❌ Won't make it | ⚠️ Depends |
+| Behavior parity required (regulatory) | ✅ Best | ✅ Good | ❌ Hard | ⚠️ Depends |
+| Custom logic is differentiator | ⚠️ N/A | ⚠️ N/A | ✅ Preserves | ❌ Loses |
+| 5250 → web is mandatory | ❌ No help | ⚠️ Some help | ✅ Full redesign | ✅ COTS UI |
+| Strong leadership / governance | Any | Any | ✅ Required | ✅ Required |
+
+For your specific situation, document why one strategy fits and others don't.
+
+## Critical success factors (rewrite path)
+
+1. **Strong leadership sponsorship** — multi-year projects need political air cover.
+2. **Clear strategy decision upfront** — don't drift between strategies; pick one and commit.
+3. **Adequate budget** — underfunded RPG modernizations fail predictably.
+4. **Senior engineers who can read RPG** — the scarcest resource. Hire / retain / train.
+5. **Business stakeholder availability** — rule extraction needs SME time; without it the project stalls.
+6. **5250 UI redesign treated as first-class work** — not an afterthought.
+7. **Realistic timeline expectations** — set them at the start, not when you're 6 months over.
+8. **Automation tooling** — manual analysis of 1M+ lines is impossibly slow. Invest in tools.
+
+## When to engage specialists
+
+Even with this playbook, RPG modernization usually requires specialist expertise. Engage when:
+
+- **Initial strategy decision** — independent perspective on which fits.
+- **Tooling selection** — replatform vendors, refactoring tools, CDC tools all have nuances.
+- **Architectural decisions** — especially the 5250 UI strategy.
+- **Workforce transition** — HR and change management for this kind of shift is its own discipline.
+- **Compliance / audit** — regulators evaluating modernization need specialized framing.
+
+This playbook gives you the structure; specialist consultants give you the expertise. They're complementary.
+
+## Independent of the other playbooks
+
+This playbook is for **IBM i / RPG modernization**. For mainframe COBOL, see [COBOL Modernization](/playbook/cobol-modernization-playbook). For Windows web modernization, see [ASP.NET Modernization](/playbook/aspnet-to-angular-dotnet-modernization-playbook). For desktop-to-web, see [VB.NET WinForms Migration](/playbook/vbnet-winforms-to-spa-migration-playbook). For pure DB-engine moves, see [Database Migration](/playbook/database-migration-playbook). If you're starting fresh, see [Custom Web App](/playbook/custom-web-app).

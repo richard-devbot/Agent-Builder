@@ -1,0 +1,239 @@
+---
+title: "Legacy System Audit"
+slug: "legacy-system-audit"
+description: "Reverse-engineer an existing application: structure, dependencies, integrations, business logic, hidden risks. The starting point for any migration."
+type: template
+phase: discover
+category: product-briefs
+projectType: ["custom-app"]
+stack: []
+tags: ["migration", "modernization", "discovery", "legacy"]
+difficulty: intermediate
+estimatedTime: "2-4 hours"
+author: "Platform Engineering"
+featured: true
+createdAt: 2026-04-26
+updatedAt: 2026-04-26
+inputs:
+  - name: app_description
+    description: "What the app does (1-2 paragraphs)"
+    required: true
+  - name: tech_stack
+    description: "Languages, frameworks, runtime versions, database"
+    required: true
+  - name: code_access
+    description: "Do you have the source code? (yes/partial/no - black box)"
+    required: true
+  - name: documentation_quality
+    description: "Existing docs (extensive / sparse / none)"
+    required: false
+output:
+  format: markdown
+relatedAssets:
+  - "strangler-fig-migration-plan"
+  - "behavior-parity-test-suite"
+  - "legacy-code-analyzer-skill"
+---
+
+# Legacy System Audit
+
+The first step of every migration. You can't migrate what you don't understand. This template produces a comprehensive audit document that captures what the legacy system actually does — including the parts no one wrote down.
+
+## When to use
+
+- Starting any migration or modernization project
+- Inheriting a system from another team
+- Before estimating migration effort
+- Before pitching modernization to leadership (need facts, not vibes)
+
+## Prompt
+
+````text
+You are a senior architect with deep experience auditing legacy systems before
+migration. Produce a comprehensive audit document for the application below.
+
+## Input
+
+**Application description:**
+{{app_description}}
+
+**Tech stack:**
+{{tech_stack}}
+
+**Code access:** {{code_access}}
+**Documentation quality:** {{documentation_quality}}
+
+## Output structure
+
+Produce a Markdown document with these sections:
+
+### 1. Executive summary
+Half a page. Plain language. What this system is, who uses it, why it matters,
+and the top 3 risks/opportunities a stakeholder needs to know.
+
+### 2. System overview
+- **Purpose:** What problem does it solve?
+- **Users:** Who uses it, how many, how often?
+- **Criticality:** What breaks if this system goes down? (revenue impact, compliance impact)
+- **Age:** When was it built? Major refactors?
+- **Ownership:** Who maintains it now? Original author still around?
+
+### 3. Tech stack inventory
+
+| Layer | Technology | Version | Status (current/EOL/deprecated) |
+|-------|-----------|---------|----------------------------------|
+| Frontend | ... | ... | ... |
+| Backend | ... | ... | ... |
+| Data | ... | ... | ... |
+| Auth | ... | ... | ... |
+| Infrastructure | ... | ... | ... |
+
+For each, note:
+- Vendor/maintainer (Microsoft? Open source? Abandoned?)
+- License implications
+- Known security issues at the listed version
+- Upgrade path within the same family
+
+### 4. Architecture
+- Component diagram (Mermaid is fine)
+- Data flow for the 3-5 most critical user journeys
+- Integration points (external APIs, message queues, file imports/exports, scheduled jobs)
+- Deployment topology (single server? cluster? cloud? on-prem?)
+
+### 5. Code structure
+- Project / solution layout
+- Layers (UI / business / data / etc.)
+- Lines of code by component (rough estimate is fine)
+- Test coverage (if known)
+- Known dead code or zones nobody touches
+
+### 6. Business logic locations
+**Critical question for migration: where does business logic live?**
+
+For .NET legacy specifically, audit:
+- Code-behind files (often ASP.NET WebForms anti-pattern)
+- Stored procedures (SQL Server is notorious here — sometimes whole apps live in T-SQL)
+- Triggers (database triggers running implicit logic)
+- SQL Server Agent jobs / scheduled tasks
+- BizTalk orchestrations / SSIS packages (if applicable)
+- Windows Services
+- Static helper classes that grew into business modules
+- Embedded SQL strings vs ORM queries
+
+Score each: how much business logic lives here? (1-5)
+This drives migration strategy — logic in stored procs is harder to migrate than logic in code.
+
+### 7. Data layer
+- Database schema overview (tables, approximate row counts)
+- Stored procedures: count, complexity assessment
+- Views and indexed views
+- Triggers (and what they do)
+- Constraints and foreign keys
+- Data quality issues you've observed
+- Backup/restore strategy
+- Schema change history (audit columns, version tables)
+
+### 8. Integration map
+External and internal integrations this system has:
+
+| Integration | Type | Direction | Volume | Coupling |
+|-------------|------|-----------|--------|----------|
+| Salesforce | REST API | bidirectional | ~1000/day | tight (real-time) |
+| Legacy ERP | SOAP | inbound | nightly batch | loose |
+
+For each integration, note migration risk: "Tightly coupled real-time integrations are hardest."
+
+### 9. Authentication & authorization
+- Auth method (Forms Auth / Windows Auth / SAML / custom)
+- Identity provider (Active Directory? SQL-stored users? Both?)
+- Session management
+- Authorization model (roles / claims / custom)
+- Password policies / MFA
+- Audit logging
+
+This section matters: auth is one of the hardest parts of any migration.
+
+### 10. Operational characteristics
+- Performance: typical response times, peak load patterns
+- Reliability: known SLA, incident history
+- Observability: logging, monitoring, alerting (or lack thereof)
+- Deployment cadence: how often does it change today?
+- Operational pain points: what wakes someone up at 3am?
+
+### 11. Known issues and tribal knowledge
+Things insiders know but outsiders don't:
+- "Don't deploy on Wednesdays — that report runs"
+- "If users see error X, restart the app pool"
+- "The customer table has 47 columns; columns 32-40 are deprecated"
+- Workarounds people use because the system can't do something
+- Bugs that have become features (users depend on the broken behavior)
+
+### 12. Risks for migration
+
+For each risk, rate impact (1-5) and likelihood (1-5), and suggest mitigation:
+
+- **Behavior parity risk:** Bugs users depend on
+- **Data risk:** Schema migration, historical data, data quality issues
+- **Integration risk:** Tightly coupled external systems
+- **Performance risk:** New stack must match or beat old performance
+- **Auth risk:** SSO, password migration, session continuity
+- **Compliance risk:** Audit trails, data residency, regulated data
+- **Knowledge risk:** Original team gone, no docs, edge cases unknown
+- **Hidden complexity:** Stored procs, triggers, scheduled jobs
+
+### 13. Strategic options
+
+Three migration strategies with trade-offs:
+
+**A. Big-bang rewrite**
+- When it's right (rare): system is small, well-understood, low risk
+- Pros, cons, estimated effort
+
+**B. Strangler fig (incremental)**
+- Almost always the right answer for non-trivial systems
+- Run old + new in parallel, gradually replace
+- Pros, cons, estimated effort
+
+**C. Lift-and-shift (defer modernization)**
+- Move to cloud/newer runtime without rewriting
+- When it's right: tight deadline, hardware EOL, minimal risk appetite
+- Pros, cons, estimated effort
+
+Recommend ONE based on the audit.
+
+### 14. Open questions
+
+What you couldn't determine from the available info. Each question should
+have:
+- The question
+- Who could answer it
+- Why it matters for the migration
+- What you're assuming until answered
+
+## Tone
+
+- Honest about unknowns (label them clearly)
+- Specific over vague ("3,200 stored procedures, 87 of them >500 lines" beats "many complex stored procedures")
+- Risk-aware but not alarmist
+- Give the reader enough to make decisions
+- 5-10 pages is typical
+````
+
+## Tips
+
+- **Don't skip this step.** Migration projects fail when they start without an honest audit.
+- **Read code, don't just read docs.** Docs lie or rot. Code is truth.
+- **Talk to operators.** The team that runs the app at 3am knows things the original developers don't.
+- **Quantify everything.** "Many stored procedures" is useless. "3,200 stored procedures, average 287 lines, 87 over 500 lines" is actionable.
+- **Be honest about unknowns.** A good audit lists what you don't know, not just what you do.
+- **For .NET WebForms:** pay extra attention to code-behind files. ViewState manipulation, postback handlers, embedded SQL — these are migration landmines.
+- **For VB.NET WinForms:** scrutinize event handlers and shared global state. WinForms patterns assume single-user; web doesn't.
+
+## Common mistakes to avoid
+
+- Auditing only the code (miss the stored procs, triggers, scheduled jobs)
+- Assuming the docs are accurate (they're not)
+- Skipping the operator interviews
+- Treating known bugs as bugs to fix instead of documenting them as required behavior
+- Underestimating integration coupling (the Salesforce sync is "just an API call" — until you migrate)
+- Not quantifying — "lots of stored procs" doesn't give leadership anything to act on

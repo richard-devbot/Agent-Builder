@@ -1,0 +1,120 @@
+# Build + deploy Agent Builder to Azure App Service.
+#
+# Variables (set in pipeline UI or as a variable group):
+#   - azureServiceConnection: name of the ARM service connection
+#   - azureAppName:           App Service name (e.g. sdlc-playbook)
+#   - azureResourceGroup:     resource group containing the App Service
+#   - siteUrl:                e.g. https://sdlc-playbook.azurewebsites.net
+#                             (also set as App Service app setting SITE_URL)
+
+trigger:
+  branches:
+    include:
+      - main
+
+pr:
+  branches:
+    include:
+      - main
+
+pool:
+  vmImage: ubuntu-latest
+
+variables:
+  nodeVersion: "20.x"
+  pnpmVersion: "9"
+  artifactName: sdlc-playbook
+  packageDir: $(Build.ArtifactStagingDirectory)/package
+
+stages:
+  - stage: Build
+    displayName: Build standalone bundle
+    jobs:
+      - job: Build
+        displayName: pnpm install + build + package
+        steps:
+          - checkout: self
+            fetchDepth: 1
+
+          - task: NodeTool@0
+            displayName: Use Node $(nodeVersion)
+            inputs:
+              versionSpec: $(nodeVersion)
+
+          - script: |
+              corepack enable
+              corepack prepare pnpm@$(pnpmVersion) --activate
+              pnpm --version
+            displayName: Install pnpm via corepack
+
+          - task: Cache@2
+            displayName: Cache pnpm store
+            inputs:
+              key: 'pnpm | "$(Agent.OS)" | pnpm-lock.yaml'
+              restoreKeys: |
+                pnpm | "$(Agent.OS)"
+              path: $(Pipeline.Workspace)/.pnpm-store
+
+          - script: pnpm config set store-dir $(Pipeline.Workspace)/.pnpm-store
+            displayName: Point pnpm at the cache
+
+          - script: pnpm install --frozen-lockfile
+            displayName: pnpm install --frozen-lockfile
+
+          - script: pnpm build
+            displayName: pnpm build
+            env:
+              SITE_URL: $(siteUrl)
+              NODE_ENV: production
+
+          # Standalone output omits public/ and .next/static — copy them in.
+          - script: |
+              set -euo pipefail
+              mkdir -p "$(packageDir)"
+              cp -R .next/standalone/. "$(packageDir)/"
+              mkdir -p "$(packageDir)/.next"
+              cp -R .next/static "$(packageDir)/.next/static"
+              if [ -d public ]; then
+                cp -R public "$(packageDir)/public"
+              fi
+              ls -la "$(packageDir)"
+            displayName: Assemble standalone package
+
+          - task: ArchiveFiles@2
+            displayName: Zip package
+            inputs:
+              rootFolderOrFile: $(packageDir)
+              includeRootFolder: false
+              archiveType: zip
+              archiveFile: $(Build.ArtifactStagingDirectory)/$(artifactName).zip
+              replaceExistingArchive: true
+
+          - publish: $(Build.ArtifactStagingDirectory)/$(artifactName).zip
+            displayName: Publish artifact
+            artifact: $(artifactName)
+
+  - stage: Deploy
+    displayName: Deploy to App Service
+    dependsOn: Build
+    condition: and(succeeded(), eq(variables['Build.SourceBranch'], 'refs/heads/main'))
+    jobs:
+      - deployment: Deploy
+        displayName: Deploy to $(azureAppName)
+        environment: production
+        strategy:
+          runOnce:
+            deploy:
+              steps:
+                - download: current
+                  artifact: $(artifactName)
+
+                - task: AzureWebApp@1
+                  displayName: AzureWebApp deploy
+                  inputs:
+                    azureSubscription: $(azureServiceConnection)
+                    appType: webAppLinux
+                    appName: $(azureAppName)
+                    resourceGroupName: $(azureResourceGroup)
+                    package: $(Pipeline.Workspace)/$(artifactName)/$(artifactName).zip
+                    runtimeStack: "NODE|20-lts"
+                    startUpCommand: "node server.js"

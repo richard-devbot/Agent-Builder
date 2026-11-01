@@ -1,0 +1,337 @@
+---
+title: "Database Migration Playbook (Cross-Engine)"
+slug: "database-migration-playbook"
+description: "Migrate a database between engines (SQL Server → Azure SQL or Postgres) with zero or minimal downtime, parity validation, and instant rollback."
+type: playbook
+phase: design
+category: database-design
+projectType: ["custom-app"]
+stack: ["sql", "postgres"]
+tags: ["migration", "database", "sql-server", "postgres", "data"]
+difficulty: advanced
+estimatedTime: "1-2 quarters"
+totalEstimatedTime: "1-2 quarters — wide variance based on stored-procedure complexity"
+author: "Platform Engineering"
+featured: true
+createdAt: 2026-04-26
+updatedAt: 2026-04-27
+intakeFields:
+  - name: source_engine
+    label: "Source DB engine"
+    type: text
+    required: true
+    placeholder: "SQL Server 2016"
+  - name: target_engine
+    label: "Target DB engine"
+    type: text
+    required: true
+    placeholder: "Azure SQL Database (or PostgreSQL 16)"
+  - name: data_volume
+    label: "Data volume"
+    type: text
+    required: true
+    placeholder: "300 GB across 200 tables, largest table 50 GB"
+  - name: stored_proc_count
+    label: "Stored procedure count + complexity"
+    type: textarea
+    required: true
+    placeholder: "~150 procs. ~50 simple CRUD, ~70 with business logic, ~30 multi-page complex"
+  - name: downtime_tolerance
+    label: "Downtime tolerance"
+    type: text
+    required: true
+    placeholder: "Up to 4 hours of weekend maintenance window OK; weekday 0 minutes"
+  - name: app_dependencies
+    label: "App dependencies"
+    type: textarea
+    required: true
+    placeholder: ".NET API (dapper), 2 SSRS reports, 4 SQL Agent jobs, Power BI dataset"
+  - name: cutover_strategy
+    label: "Preferred cutover strategy"
+    type: text
+    required: false
+    placeholder: "Dual-write with CDC (Debezium) — open to recommendation"
+steps:
+  - number: 1
+    title: "Schema Audit"
+    description: "Inventory every object in the source database — tables, procs, functions, triggers, jobs — plus app code that references the schema."
+    whatYoureDoing: "Produce a comprehensive inventory of the source database. Tables (counts, sizes), stored procs (count + complexity score), functions, views, triggers, constraints, indexes, sequences, user-defined types, and SQL Agent jobs. Cross-reference with app code so every schema usage is known."
+    primaryAsset: "legacy-system-audit"
+    alternativeAssets:
+      - slug: "data-migration-plan"
+        when: "You want the audit and the migration plan in a single living document"
+    relevantSkills:
+      - "legacy-code-analyzer-skill"
+      - "migration-planner-skill"
+      - "database-migration-skill"
+    relevantMcpConfigs:
+      - "postgres-mcp"
+      - "filesystem-mcp"
+    estimatedTime: "1-2 weeks"
+    definitionOfDone:
+      - "Inventory at /docs/migration/db-audit.md"
+      - "All tables documented with row counts, sizes, and indexes"
+      - "All stored procs catalogued with line counts, complexity score, and current callers"
+      - "All triggers documented with their purpose"
+      - "Data quality issues identified (orphans, NULLs in NOT NULL columns, duplicates)"
+      - "App code search done: every place SQL is generated, called, or schema-referenced is listed"
+    commonPitfalls:
+      - "Ignoring CLR types — SQL Server allows .NET types in DB; these don't translate"
+      - "Missing SQL Agent jobs — they're outside the DB but tied to it; document them"
+      - "Not searching app code — every place the app generates SQL needs review"
+      - "Underestimating stored-procedure count — easy to find 50 in `dbo` and miss 150 more buried in other schemas"
+
+  - number: 2
+    title: "Translate the Schema"
+    description: "Map every source object to a target equivalent — types, constraints, indexes, identity columns, computed columns."
+    whatYoureDoing: "Produce a target schema script. For each table, design the target equivalent. For each constraint, decide whether it translates as-is, needs adjustment, or doesn't translate. For each type, map to the target type with explicit attention to precision and behavior differences."
+    primaryAsset: "sql-server-schema-translator"
+    alternativeAssets:
+      - slug: "postgres-schema-designer"
+        when: "Target is PostgreSQL and you want to design the new schema fresh rather than translate 1:1"
+      - slug: "mongodb-schema-designer"
+        when: "Target is MongoDB (rare for cross-engine but covers it)"
+    relevantSkills:
+      - "migration-planner-skill"
+      - "database-migration-skill"
+    relevantMcpConfigs:
+      - "postgres-mcp"
+      - "filesystem-mcp"
+    estimatedTime: "2-3 weeks"
+    definitionOfDone:
+      - "Type mapping table (every source type → target type)"
+      - "Schema migration script generated"
+      - "Constraint translation documented (especially defaults using engine-specific functions like GETDATE() vs now())"
+      - "Identity columns translated (SQL Server IDENTITY → Postgres GENERATED AS IDENTITY or SERIAL)"
+      - "Computed columns translated (SQL Server PERSISTED → Postgres GENERATED ALWAYS STORED)"
+      - "Indexes translated (with attention to clustered indexes — no equivalent in Postgres)"
+      - "Validation queries written (run on both DBs once schema is in place)"
+    commonPitfalls:
+      - "Datetime confusion — SQL Server datetime (no tz) → Postgres timestamptz (always UTC) is a behavior change; affects every app touching dates"
+      - "Decimal precision drift — money type → numeric(19,4) is precision-equal but type-different; app code may break"
+      - "Clustered index loss — Postgres has no clustered indexes; query patterns may change behavior"
+      - "Missing Postgres-specific opportunities — JSONB, arrays, partial indexes are usable where they fit"
+
+  - number: 3
+    title: "Migrate Stored Procedures and Functions"
+    description: "Decide what to do with each proc — translate, rewrite in app code, downgrade to a view, or decommission. This is usually the longest phase."
+    whatYoureDoing: "Read every stored procedure (use the legacy-code-analyzer skill). Categorize: simple data access (translate easily), business logic (rewrite in app code), aggregations (view), unused (decommission). Estimate effort. Migrate one at a time with tests."
+    primaryAsset: "stored-procedure-to-service"
+    alternativeAssets:
+      - slug: "sql-server-schema-translator"
+        when: "You're translating procs to the target dialect rather than rewriting them in app code"
+    relevantSkills:
+      - "legacy-code-analyzer-skill"
+      - "spec-driven-builder"
+      - "test-generator-skill"
+      - "database-migration-skill"
+    relevantMcpConfigs:
+      - "postgres-mcp"
+      - "filesystem-mcp"
+      - "github-mcp"
+    estimatedTime: "4-8 weeks (depends on volume + complexity)"
+    definitionOfDone:
+      - "Every proc has a decision: translate / rewrite / view / decommission"
+      - "Translated procs work in the target dialect with tests"
+      - "Rewritten logic has unit tests"
+      - "Original procs marked deprecated with logging (not yet dropped)"
+      - "App code updated to call new locations"
+    commonPitfalls:
+      - "Translating procs that should be rewritten — putting business logic back in DB is just moving the problem"
+      - "Skipping the decommission step — orphaned procs accumulate; track callers"
+      - "Rewriting without tests — proc behavior is not always documented; tests prevent regressions"
+      - "Forgetting cursors — they often hide what should be set-based queries"
+      - "Forgetting transaction boundaries — implicit in procs, must be explicit in app code"
+
+  - number: 4
+    title: "Set Up Dual-Write or CDC"
+    description: "Keep the target DB in sync with source as the migration progresses. Choose dual-write, CDC (Debezium / DMS), or trickle-batch based on downtime tolerance and tooling."
+    whatYoureDoing: "For zero-downtime migration, target must stay current with source. Pick one: (A) dual-write from app, (B) CDC streaming, (C) periodic batch sync. Deploy the chosen sync mechanism, monitor lag, set drift thresholds and stop conditions."
+    primaryAsset: "data-migration-plan"
+    alternativeAssets:
+      - slug: "feature-flag-rollout-migration"
+        when: "You want to feature-flag the dual-read / dual-write rollout per app"
+    relevantSkills:
+      - "compatibility-layer-generator-skill"
+      - "data-validation-skill"
+      - "database-migration-skill"
+    relevantMcpConfigs:
+      - "postgres-mcp"
+      - "filesystem-mcp"
+      - "azure-devops-mcp"
+    estimatedTime: "2-4 weeks"
+    definitionOfDone:
+      - "Sync mechanism deployed (dual-write code, CDC pipeline, or batch jobs)"
+      - "Sync is monitored (lag metric, error rate, drift detection)"
+      - "Validation runs continuously (counts and sums match between source and target)"
+      - "Stop conditions defined (when to halt sync if drift exceeds threshold)"
+      - "Sync can be paused / resumed safely"
+    commonPitfalls:
+      - "No drift monitoring — sync runs, but you don't know if it's working"
+      - "CDC schema changes break sync — when the source schema changes, the CDC pipeline often needs reconfiguration"
+      - "Dual-write transactions — making both writes atomic is hard (2PC is rarely the answer)"
+      - "Forgetting bulk operations — CDC handles row-by-row; bulk imports may not flow through"
+
+  - number: 5
+    title: "Backfill Historical Data"
+    description: "Bulk-copy all historical data into target. The sync from Phase 4 keeps it current after this point."
+    whatYoureDoing: "Do an initial bulk copy of all data from source to target. SQL Server → Azure SQL: Azure DMS handles this. SQL Server → Postgres: pgloader / AWS DMS / custom ETL. For very large data: parallel chunked copy by date range or PK range."
+    primaryAsset: "data-migration-plan"
+    alternativeAssets:
+      - slug: "sql-server-schema-translator"
+        when: "Need the type-mapping reference open during backfill troubleshooting"
+    relevantSkills:
+      - "data-validation-skill"
+      - "database-migration-skill"
+    relevantMcpConfigs:
+      - "postgres-mcp"
+      - "filesystem-mcp"
+    estimatedTime: "Hours to days (volume-dependent)"
+    definitionOfDone:
+      - "Backfill complete"
+      - "Row counts match source (within tolerance)"
+      - "Aggregate sums match"
+      - "Sample row spot-checks passed (50+ random rows per table compared field-by-field)"
+      - "FK integrity preserved (no orphans introduced)"
+      - "Indexes in place on target"
+      - "Statistics updated on target"
+      - "Performance validated (top 20 hot queries tested)"
+    commonPitfalls:
+      - "Sequential single-threaded copy of large tables — chunk and parallelize"
+      - "Loading data before creating indexes — usually right (faster), but means queries are slow during the load window"
+      - "Statistics not updated — query planner makes bad decisions until ANALYZE runs"
+      - "Forgetting to reset sequences — auto-increment columns must continue past the max source value"
+
+  - number: 6
+    title: "Validate Parity"
+    description: "Verify the target has the same data as the source — beyond just counts. Investigate any drift before cutover."
+    whatYoureDoing: "Run multi-level validation: row counts, aggregate sums, distributions, FK integrity, sample-row diffs, time-windowed reconciliation, and business invariant checks (sums of related tables match)."
+    primaryAsset: "behavior-parity-test-suite"
+    alternativeAssets:
+      - slug: "data-migration-plan"
+        when: "Use the validation-queries section of your existing plan instead of starting fresh"
+    relevantSkills:
+      - "data-validation-skill"
+      - "database-migration-skill"
+    relevantMcpConfigs:
+      - "postgres-mcp"
+      - "filesystem-mcp"
+    estimatedTime: "1-2 weeks"
+    definitionOfDone:
+      - "All Level 1-7 validations passed (counts, sums, distributions, FK integrity, spot checks, time-windowed reconciliation, business invariants)"
+      - "Drift report shows zero unexplained differences"
+      - "Validation can be re-run on demand"
+      - "Performance comparison done (top 20 queries on both engines)"
+    commonPitfalls:
+      - "Validating only counts — counts can match while individual rows are corrupted"
+      - "Skipping the spot-check — sample rows reveal field-level translation bugs"
+      - "Accepting \"small\" drift — 5 missing rows out of 9M might be 5 missing customer orders"
+      - "No business invariant checks — sums of related tables (e.g., line items vs order totals) catch issues other checks miss"
+
+  - number: 7
+    title: "Cutover with Feature Flag"
+    description: "Switch apps from source to target. Feature-flag the connection per workload for zero-downtime ramp; or use a brief maintenance window."
+    whatYoureDoing: "Apps switch their connection string from source to target. For zero-downtime: feature-flag the connection per workload, ramp gradually. For minutes-of-downtime: brief maintenance window, swap connection strings, restart apps. Source becomes read-only after cutover."
+    primaryAsset: "migration-cutover-runbook"
+    alternativeAssets:
+      - slug: "feature-flag-rollout-migration"
+        when: "Doing the per-workload ramp via feature flags rather than a single maintenance window"
+      - slug: "migration-rollback-plan"
+        when: "Pre-flight check — make sure the rollback path is documented and rehearsed before flipping the switch"
+    relevantSkills:
+      - "migration-planner-skill"
+      - "database-migration-skill"
+    relevantMcpConfigs:
+      - "azure-devops-mcp"
+      - "postgres-mcp"
+    estimatedTime: "Maintenance window (minutes to hours)"
+    definitionOfDone:
+      - "Cutover runbook executed step by step"
+      - "All apps now reading from target"
+      - "Sync stopped (no more dual-write or CDC)"
+      - "Source DB now read-only (preserved for rollback)"
+      - "Smoke tests passed on apps using target"
+      - "Performance acceptable"
+      - "Error rates stable"
+      - "Stakeholder sign-off"
+    commonPitfalls:
+      - "Cutting over apps in different orders — they may inter-operate via DB; data may briefly drift"
+      - "Forgetting reporting tools — Tableau / Power BI / SSRS reports point at source; update them too"
+      - "Forgetting scheduled jobs — SQL Agent jobs (if any) may still run against source"
+      - "Stopping sync too early — if cutover fails, no easy way back to source-as-primary"
+      - "Forgetting one final pre-cutover validation — catches drift accumulated since the last run"
+
+  - number: 8
+    title: "Decommission the Source"
+    description: "After 30+ days of zero source traffic, take the final backup, shut it down, decommission the infrastructure, write the retro."
+    whatYoureDoing: "Source DB stays read-only for 30+ days post-cutover. Watch for any apps / reports still pointing at it. After zero-traffic confirmation, take the final backup, shut down source, decommission infrastructure, and write the migration retro."
+    primaryAsset: "migration-cutover-runbook"
+    alternativeAssets:
+      - slug: "migration-rollback-plan"
+        when: "Document the formal decommission rollback path in case a critical issue surfaces in the first 30 days"
+    relevantSkills:
+      - "migration-planner-skill"
+      - "documentation-skill"
+    relevantMcpConfigs:
+      - "postgres-mcp"
+      - "azure-devops-mcp"
+      - "confluence-mcp"
+    estimatedTime: "30-90 days post-cutover"
+    definitionOfDone:
+      - "30+ days of zero source traffic confirmed (verified by query log)"
+      - "All apps verified pointing at target"
+      - "All reports updated"
+      - "Final backup taken (cold archive)"
+      - "Source DB shut down"
+      - "Source license / infrastructure costs eliminated"
+      - "Migration retrospective complete"
+      - "Lessons documented"
+    commonPitfalls:
+      - "Decommissioning too fast — 30 days is the minimum; some teams keep source read-only for 6+ months"
+      - "No final backup — you may need to read source data again for a compliance audit"
+      - "Forgetting infrastructure costs — VM, license, storage all keep billing until explicitly stopped"
+      - "No retrospective — the next DB migration won't benefit from this one's lessons"
+wrapUp:
+  deliverables:
+    - "All data migrated to the target DB engine"
+    - "All applications connected to the target DB"
+    - "Stored-procedure logic moved to app code (where appropriate)"
+    - "Comprehensive validation queries as living documentation"
+    - "Source DB decommissioned, license costs eliminated"
+    - "Audit, schema-translation script, validation suite, and cutover runbook in /docs/migration/"
+  nextSteps:
+    - title: "Run a post-migration query-performance audit"
+      description: "Query plans differ between engines. Profile the top 50 queries against the target with realistic data and tune indexes / statistics."
+    - title: "Roll the lessons forward"
+      description: "Update your DB migration playbook (this document) with what surprised you. The next migration team will thank you."
+    - title: "Review your stored-procedure-to-app-code split"
+      description: "Some procs you migrated 1:1 might be ripe for moving into app code now that the dust has settled."
+relatedAssets:
+  - "aspnet-to-angular-dotnet-modernization-playbook"
+  - "vbnet-winforms-to-spa-migration-playbook"
+  - "data-migration-plan"
+  - "sql-server-schema-translator"
+---
+
+# Database Migration Playbook (Cross-Engine)
+
+An 8-phase playbook for moving a database between engines (SQL Server → Azure SQL or SQL Server → Postgres are the two we cover most) with zero or minimal downtime, comprehensive parity validation, and a clear rollback path. Click through the phases — each one points you at the right templates, skills, and MCP configs to use in your IDE.
+
+## When to use this playbook
+
+- You're moving from one DB engine to another (cross-engine, not just upgrading a version)
+- The DB is large enough that a "stop the world, dump, restore, point" approach won't work
+- You want zero or minimal downtime
+- You need formal parity validation (regulatory, audit, or just "we don't trust it until we've validated")
+
+## Critical success factors
+
+1. **Audit before committing.** The audit reveals stored-procedure complexity, which drives most of the timeline.
+2. **Validate continuously.** Don't wait until cutover to discover drift.
+3. **Don't drop source until you're sure.** 30 days minimum, 90 days for critical systems.
+4. **Move business logic out of DB during migration.** It's easier to migrate dumb data than smart data.
+5. **Test queries on target with realistic data volume.** Performance characteristics differ between engines.
+
+## Independent of the other playbooks
+
+This playbook focuses on the **database layer only**. The application that talks to it is your business — you may be doing this DB migration as part of a larger app modernization (see [ASP.NET Modernization](/playbook/aspnet-to-angular-dotnet-modernization-playbook) or [WinForms Migration](/playbook/vbnet-winforms-to-spa-migration-playbook)) or as a standalone effort.

@@ -1,0 +1,464 @@
+---
+title: "ADF / Fabric Pipeline Design Patterns"
+slug: "adf-fabric-pipeline-design-patterns"
+description: "Design patterns for Azure Data Factory and Microsoft Fabric pipelines: metadata-driven, parameterized, idempotent, and observable."
+type: template
+phase: design
+category: architecture
+projectType: ["etl"]
+stack: ["azure", "adf", "fabric"]
+tags: ["etl", "adf", "azure-data-factory", "fabric", "metadata-driven"]
+difficulty: advanced
+estimatedTime: "1-2 days for initial framework design"
+author: "Platform Engineering"
+featured: true
+createdAt: 2026-04-26
+updatedAt: 2026-04-26
+inputs:
+  - name: pipeline_purpose
+    description: "What the pipeline(s) need to do (e.g., 'ingest 50 source tables nightly into Bronze')"
+    required: true
+  - name: source_pattern
+    description: "Source system(s) and access pattern (REST API / DB direct / file drop)"
+    required: true
+  - name: target_pattern
+    description: "Target (ADLS Gen2 / Synapse / Fabric Lakehouse / Fabric Warehouse)"
+    required: true
+  - name: existing_pipelines
+    description: "Existing pipelines if any (informs reuse / consistency)"
+    required: false
+  - name: scale_expectations
+    description: "Expected volume (number of pipelines, total data moved daily)"
+    required: false
+output:
+  format: markdown
+relatedAssets:
+  - "azure-data-platform-modernization-playbook"
+  - "pyspark-transformation-standards"
+---
+
+# ADF / Fabric Pipeline Design Patterns
+
+Pipelines built without patterns end up as 500 hand-coded ADF activities that nobody can maintain. This template generates the design framework: metadata-driven ingestion, parameterized pipelines, error handling, monitoring, and reusable building blocks.
+
+## When to use
+
+- Starting a new ADF / Fabric data project (set the patterns from day 1)
+- Inheriting a sprawling ADF instance that needs rationalization
+- Migrating from another ETL tool to ADF / Fabric
+- Standardizing patterns across multiple data engineering teams
+
+## Why patterns matter for ADF specifically
+
+ADF makes it dangerously easy to:
+- Hand-code 50 nearly-identical pipelines instead of one parameterized pipeline
+- Embed connection details and table names directly in activities
+- Skip error handling (the green checkmark is seductive)
+- Build pipelines that work on day 1 but can't be modified without breaking
+
+Good patterns turn ADF from "click-ops at scale" into a structured engineering practice.
+
+## Prompt
+
+````text
+You are a senior Azure data engineer designing the framework for ADF /
+Fabric pipelines. Generate the design patterns and building blocks the
+team will use across all pipelines.
+
+## Input
+
+**Pipeline purpose:** {{pipeline_purpose}}
+**Source pattern:** {{source_pattern}}
+**Target pattern:** {{target_pattern}}
+**Existing pipelines:** {{existing_pipelines}}
+**Scale expectations:** {{scale_expectations}}
+
+## Output
+
+A Markdown design document covering:
+
+### 1. Architecture overview
+
+How pipelines fit into the broader data platform:
+
+```
+[Source systems]
+       │
+       ↓ (ADF Self-hosted IR or Azure IR)
+       │
+[Bronze: ADLS Gen2 / Lakehouse Files]
+       │
+       ↓ (PySpark notebook / Mapping Data Flow)
+       │
+[Silver: Parquet / Delta / Iceberg with cleansed data]
+       │
+       ↓ (PySpark notebook / SQL transformations)
+       │
+[Gold: Synapse / Fabric Warehouse / dimensional models]
+       │
+       ↓
+[Power BI / consumption layer]
+```
+
+### 2. Repository structure
+
+How ADF / Fabric artifacts are organized in source control:
+
+```
+data-platform/
+├── adf/
+│   ├── pipelines/
+│   │   ├── ingestion/         # Source-to-Bronze
+│   │   ├── transformation/    # Bronze-to-Silver, Silver-to-Gold
+│   │   └── orchestration/     # Master pipelines, scheduling
+│   ├── datasets/              # Reusable dataset definitions
+│   ├── linkedservices/        # Connection definitions (no secrets)
+│   ├── triggers/              # Schedule and event triggers
+│   └── integration-runtimes/
+├── notebooks/                 # PySpark notebooks for transformations
+│   ├── bronze/
+│   ├── silver/
+│   └── gold/
+├── metadata/                  # Driver tables (see below)
+│   ├── source_systems.csv
+│   ├── ingestion_config.csv
+│   └── transformation_config.csv
+└── docs/
+    ├── architecture.md
+    ├── conventions.md
+    └── runbooks/
+```
+
+For Fabric: similar structure but use deployment pipelines and workspace
+artifacts.
+
+### 3. Metadata-driven ingestion pattern (the big one)
+
+DON'T build 50 pipelines for 50 tables. Build 1 pipeline that loops over
+metadata.
+
+#### Metadata table schema
+
+```sql
+CREATE TABLE meta.ingestion_config (
+    source_system VARCHAR(50)      NOT NULL,  -- e.g., 'salesforce'
+    source_object VARCHAR(200)     NOT NULL,  -- table or API endpoint
+    target_zone VARCHAR(20)        NOT NULL,  -- 'bronze' / 'silver' / 'gold'
+    target_path VARCHAR(500)       NOT NULL,  -- ADLS path or table name
+    load_type VARCHAR(20)          NOT NULL,  -- 'full' / 'incremental' / 'cdc'
+    watermark_column VARCHAR(100),            -- for incremental
+    watermark_value VARCHAR(50),              -- last successful watermark
+    primary_key VARCHAR(500),                 -- for upserts
+    is_active BIT                  NOT NULL,
+    schedule_cron VARCHAR(100),               -- when to run
+    sla_minutes INT,                          -- expected duration
+    notification_email VARCHAR(200),          -- on failure
+    last_run_status VARCHAR(20),
+    last_run_duration_seconds INT,
+    last_run_row_count BIGINT,
+    last_run_timestamp DATETIME2,
+    PRIMARY KEY (source_system, source_object)
+);
+```
+
+#### Master pipeline structure
+
+One ADF pipeline that:
+1. Lookup activity: queries `meta.ingestion_config` for active rows
+2. ForEach activity: iterates over results
+3. Inside ForEach: invokes a child pipeline parameterized by metadata
+4. Child pipeline handles one source object (with full error handling)
+
+```json
+// Master pipeline: PL_MasterIngestion
+{
+  "activities": [
+    {
+      "name": "GetActiveSources",
+      "type": "Lookup",
+      "typeProperties": {
+        "source": {
+          "type": "AzureSqlSource",
+          "sqlReaderQuery": "SELECT * FROM meta.ingestion_config WHERE is_active = 1 ORDER BY source_system, source_object"
+        }
+      }
+    },
+    {
+      "name": "ProcessEachSource",
+      "type": "ForEach",
+      "dependsOn": [{ "activity": "GetActiveSources", "dependencyConditions": ["Succeeded"] }],
+      "typeProperties": {
+        "items": "@activity('GetActiveSources').output.value",
+        "isSequential": false,
+        "batchCount": 10,
+        "activities": [
+          {
+            "name": "InvokeChildPipeline",
+            "type": "ExecutePipeline",
+            "typeProperties": {
+              "pipeline": { "referenceName": "PL_IngestSingleObject" },
+              "parameters": {
+                "sourceSystem": "@item().source_system",
+                "sourceObject": "@item().source_object",
+                "loadType": "@item().load_type",
+                "targetPath": "@item().target_path"
+              }
+            }
+          }
+        ]
+      }
+    }
+  ]
+}
+```
+
+This pattern means adding a new source = adding a row to metadata, not a
+new pipeline. Massive multiplier.
+
+### 4. Naming conventions
+
+Predictable names matter at scale:
+
+| Artifact | Convention | Example |
+|----------|------------|---------|
+| Pipeline | `PL_<purpose>_<scope>` | `PL_Ingest_Salesforce`, `PL_Master_Daily` |
+| Dataset | `DS_<source>_<format>` | `DS_AzSql_Parquet`, `DS_Salesforce_Json` |
+| Linked service | `LS_<system>_<env>` | `LS_AzSql_Prod`, `LS_KeyVault_Prod` |
+| Trigger | `TR_<schedule>_<purpose>` | `TR_Daily0200_MasterIngestion` |
+| Notebook | `NB_<zone>_<purpose>` | `NB_Silver_CustomerCleanse` |
+
+For Fabric: same conventions translate.
+
+### 5. Parameterization
+
+Every pipeline accepts parameters; nothing is hardcoded.
+
+Common parameter patterns:
+- **Connection details:** linked service references (which point at Key Vault)
+- **Source/target identifiers:** parameter at pipeline call time
+- **Date ranges:** start_date, end_date, or watermark_value
+- **Environment:** runtime parameter (dev/test/prod)
+- **Batch sizes:** for chunked operations
+
+Use **global parameters** for environment-wide config:
+- `EnvironmentName` (dev/test/prod)
+- `BronzeAdlsPath`
+- `SilverAdlsPath`
+- `GoldAdlsPath`
+- `KeyVaultName`
+- `NotificationEmail`
+
+### 6. Error handling pattern
+
+Every pipeline must handle errors gracefully:
+
+```
+[Main Activity]
+     ├─ on success → [Log Success] → [Update Metadata]
+     ├─ on failure → [Log Failure] → [Send Alert] → [Fail Pipeline]
+     └─ on completion → [Cleanup]
+```
+
+Key practices:
+- **Wrap every dynamic activity** in a Try/Catch pattern (using activity dependencies)
+- **Log structured data** (not just text); pipeline name, run ID, error code, error message
+- **Update metadata table** with last_run_status (success/failure) and last_run_timestamp
+- **Notify** on failure (Teams webhook, email, ServiceNow ticket)
+- **Don't continue** on failure unless explicitly designed to (per-row resilience is different from pipeline resilience)
+- **Fail loudly** in dev/test; don't silently swallow errors
+
+### 7. Idempotency
+
+Pipelines must be safe to re-run:
+
+- **Bronze:** writes to date-partitioned folders (`YYYY/MM/DD/`); re-run replaces same folder
+- **Silver:** uses MERGE / upsert with primary keys; re-run produces same final state
+- **Gold:** transformations are deterministic; same input → same output
+
+For ADF specifically:
+- **Avoid INSERT-only patterns** (re-runs create duplicates)
+- **Use Copy activity's "Overwrite" option** for full loads to Bronze
+- **Use Mapping Data Flows or PySpark notebooks** for upserts (Copy activity doesn't support MERGE natively)
+- **Use partition delete + re-insert** for idempotent Silver/Gold updates
+
+### 8. Incremental load patterns
+
+For sources with high volume, incremental loading is non-negotiable.
+
+#### Watermark-based incremental
+```sql
+-- In source query (parameterized by watermark from metadata)
+SELECT * FROM source_table
+WHERE last_modified_dt > @watermark_value
+```
+
+After successful load, update `meta.ingestion_config.watermark_value` to
+the max `last_modified_dt` from this load.
+
+#### Change Data Capture (CDC)
+For SQL Server / Azure SQL sources with CDC enabled:
+```sql
+SELECT * FROM cdc.dbo_source_table_CT
+WHERE __$start_lsn > @last_lsn
+```
+
+For Fabric mirroring or Azure SQL CDC: simpler, mostly automatic.
+
+#### Append-only patterns
+For event/log sources, simple date-based partitioning:
+```
+SELECT * FROM events WHERE event_date = '@runDate'
+```
+
+#### Snapshot vs incremental decision
+
+Use full snapshot when:
+- Source < 1M rows (incremental complexity not worth it)
+- No reliable watermark column
+- Source is already a mart (small)
+
+Use incremental when:
+- Source > 1M rows
+- Has reliable watermark or CDC
+- Daily change rate is small relative to total volume
+
+### 9. Observability
+
+Every pipeline run must be observable:
+
+#### Built-in monitoring
+- ADF Monitor (basic, useful for ad-hoc)
+- Azure Monitor / Log Analytics integration (essential for prod)
+- Diagnostic settings: ActivityRuns, PipelineRuns, TriggerRuns to Log Analytics
+
+#### Custom logging
+```python
+# In a notebook or Web activity
+log_entry = {
+    'pipeline_name': pipeline_name,
+    'run_id': run_id,
+    'source_system': source_system,
+    'source_object': source_object,
+    'start_time': start_time,
+    'end_time': end_time,
+    'duration_seconds': duration,
+    'rows_processed': row_count,
+    'status': 'success',
+    'error_message': None
+}
+log_to_table('meta.pipeline_run_log', log_entry)
+```
+
+#### Dashboards
+Build standard dashboards in Power BI or Grafana:
+- Pipeline success rate (last 7/30 days)
+- Average duration by pipeline
+- Row count by source
+- Recent failures with details
+- SLA compliance
+
+#### Alerting
+- Failure: notify within 5 minutes via Teams/email
+- Long-running: notify if pipeline exceeds 2x typical duration
+- Volume anomaly: notify if row count is &lt;50% or >200% of typical
+
+### 10. Security patterns
+
+#### Credentials
+- **Key Vault for all secrets.** Never in pipeline JSON.
+- **Linked services use Key Vault references.** Rotate keys without changing pipelines.
+- **Managed identities preferred over service principals** where possible.
+
+#### Network
+- **Self-hosted Integration Runtime** for on-prem sources
+- **Private endpoints** for Azure sources (no public internet)
+- **VNet integration** for the data factory itself
+
+#### PII handling
+- **Identify PII columns in metadata.** Drive masking decisions from there.
+- **Mask before Bronze** if possible (don't bring sensitive data into the lake unmasked).
+- **Encrypt at rest** (default in Azure storage; verify customer-managed keys if required).
+- **Audit access** via diagnostic settings.
+
+### 11. Self-hosted IR considerations
+
+For on-prem sources:
+- **Sizing:** typical config is 4-8 vCPU, 16-32 GB RAM. Scale based on parallelism.
+- **High availability:** install on 2+ nodes for production
+- **Network:** must reach both source (private network) and Azure (HTTPS outbound 443)
+- **Updates:** auto-update is convenient but breaks at unexpected times; pin versions in production
+
+### 12. Performance patterns
+
+#### Copy activity tuning
+- **Parallel copies:** `parallelCopies` setting (start at 4, increase with caution)
+- **Data Integration Units (DIUs):** auto for most cases; manual override only when measured
+- **Staging:** use Polybase / COPY INTO for bulk loads to Synapse
+- **Batch size:** for REST API sources, tune to minimize call count
+
+#### Mapping Data Flow tuning
+- **Cluster size:** larger clusters = faster but more expensive; profile to find sweet spot
+- **Caching:** cache lookups that are reused
+- **Partitioning:** explicit partition strategy for joins and aggregations
+- **Sink optimization:** for Synapse, use staged COPY rather than row-by-row
+
+#### Notebook (Spark) performance
+- See PySpark Transformation Standards template for detail
+
+### 13. Migration path from existing patterns
+
+If migrating from existing ETL tools (Informatica, SSIS, etc.):
+
+- **Don't translate 1:1.** Take the opportunity to apply patterns from this doc.
+- **Build the metadata-driven framework first.** Then migrate pipelines onto it.
+- **Migrate by source.** All Salesforce pipelines together, then all SAP, etc.
+- **Use the parity test approach** from migrations playbooks for behavior validation.
+
+### 14. Common anti-patterns (avoid these)
+
+- **Hand-coded pipeline per table.** Use metadata-driven instead.
+- **Hardcoded connection strings.** Use Key Vault.
+- **Pipelines without error handling.** The green checkmark is a lie.
+- **Sync trigger-on-trigger chains.** Hard to monitor; use orchestration pipelines.
+- **Mapping Data Flows for everything.** Notebooks are often clearer for complex logic.
+- **No incremental strategy.** Daily full loads at scale will fail eventually.
+- **Untested pipelines.** Use unit tests on logic, integration tests on pipelines.
+- **No documentation.** Every pipeline needs purpose + dependencies + SLA in the description field.
+
+### 15. Output
+
+Generate:
+
+1. **`docs/architecture.md`** — diagram and overview
+2. **`docs/conventions.md`** — naming, structure, patterns
+3. **`metadata/ingestion_config.example.csv`** — sample config rows
+4. **`adf/pipelines/PL_MasterIngestion.json`** — the master orchestrator
+5. **`adf/pipelines/PL_IngestSingleObject.json`** — the parameterized child
+6. **`adf/datasets/`** — reusable dataset templates
+7. **`docs/runbooks/onboarding-new-source.md`** — how to add a new source
+
+## Style
+
+- Specific to Azure stack (ADF + Fabric, not platform-agnostic)
+- Real JSON examples, not pseudocode
+- Honest about ADF's limitations (where Notebooks beat Mapping Data Flows, where Copy activity isn't enough)
+- Focus on patterns that scale to 100+ pipelines, not just 1-2
+````
+
+## Tips
+
+- **Build the metadata framework FIRST.** Don't build 5 pipelines first and "refactor later." Refactoring 5 pipelines into a framework takes longer than building the framework.
+- **Sample config rows in source control.** New team members can see real examples.
+- **Document the master pipeline as a runbook.** "How to add a new source" is the most common question; have a clear answer.
+- **For Fabric specifically:** treat Fabric pipelines as evolution of ADF (very similar JSON model). Most patterns translate directly.
+- **For complex transformations:** notebooks > Mapping Data Flows. Mapping Data Flows have a UX limit; PySpark scales linearly with complexity.
+
+## Common mistakes to avoid
+
+- **Skipping metadata-driven design.** Hand-coding 50 pipelines is the most common ADF anti-pattern.
+- **Hardcoded paths and connections.** Breaks the moment you need a second environment.
+- **No error handling.** The pipeline succeeds, but the data didn't load — silent failures are worst.
+- **Mixing concerns in one pipeline.** Ingestion, transformation, and orchestration belong in separate pipelines.
+- **Ignoring Self-hosted IR sizing.** Underprovisioned IR = pipeline timeouts.
+- **No idempotency.** Re-runs create duplicate data; cleanup is painful.
+- **No observability.** When something fails at 3am, nobody knows where to look.
