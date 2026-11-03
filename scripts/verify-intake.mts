@@ -66,6 +66,15 @@ const plan = normalizePlan(
     skillNeeds: [],
     customAgents: [{ name: "Invoice Reconciler!", title: "t", description: "d", tools: ["Read"], handoffsTo: ["ghost-agent", "invoice-reconciler"], skills: ["SAP posting rules", "nope"], body: "b" }, { name: "invoice reconciler", title: "dup", description: "d", tools: [], handoffsTo: [], skills: [], body: "b" }],
     customSkills: [{ name: "SAP posting rules", title: "t", description: "d", body: long }],
+    adkSystem: {
+      packageName: "",
+      title: "Invoice desk",
+      description: "d",
+      rootAgent: "desk",
+      agents: [{ name: "desk", type: "llm", description: "d", model: "", instruction: "Help.", tools: [], subAgents: [], outputKey: "", maxIterations: 0 }],
+      tools: [],
+      envVars: [],
+    },
   },
   new Set(["python"]),
   [],
@@ -74,6 +83,8 @@ PlanSchema.parse(plan);
 assert.deepEqual(plan.technologies, ["python"], "unknown tech dropped, case-folded, de-duplicated");
 assert.deepEqual(plan.customAgents.map((a) => a.name), ["invoice-reconciler"], "slugified and de-duplicated");
 assert.equal(plan.customSkills[0].name, "sap-posting-rules");
+assert.equal(plan.adk?.packageName, "invoice_desk", "package name from title");
+assert.equal(plan.adk?.agents[0].model, "gemini-3.8-flash", "empty model -> default");
 assert.deepEqual(plan.customAgents[0].handoffsTo, [], "edges to unknown agents and to itself are dropped");
 assert.deepEqual(plan.customAgents[0].skills, ["sap-posting-rules"], "skill edges resolve to custom skills only");
 console.log("PASS: gemini schema conversion, follow-up and plan normalisation");

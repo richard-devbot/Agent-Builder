@@ -241,12 +241,13 @@ export function guidedAnalyze(req: AnalyzeRequest): AnalyzeResponse {
 export function guidedPlan(technologies: string[], skills: Plan["skills"]): Plan {
   return {
     summary:
-      "Generated without AI: technologies were matched from the brief and skills recommended by keyword. Connect Gemini to get a milestone plan and draft custom agents and skills.",
+      "Generated without AI: technologies were matched from the brief and skills recommended by keyword. Connect Gemini to get a milestone plan, a runnable Google ADK agent system and draft custom agents and skills.",
     projectType: "none",
     technologies,
     milestones: [],
     skills,
     customAgents: [],
     customSkills: [],
+    adk: null,
   };
 }

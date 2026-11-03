@@ -34,7 +34,8 @@ export function KitBuilder({
 }) {
   const s = useKitBuilderState({ skills, mcpServers });
   const canvasRef = useRef<HTMLDivElement>(null);
-  const discovery = s.step === 1;
+  // The live manifest only earns its column on Review; earlier steps use the full width.
+  const showManifest = s.step === 5;
 
   // Each step starts at the top of the canvas (and of the page on mobile).
   useEffect(() => {
@@ -50,8 +51,7 @@ export function KitBuilder({
     <div
       className={cn(
         "grid grid-cols-1 lg:h-[calc(100dvh-3.5rem)]",
-        // Discovery gives the manifest's column to the chat and agent workspace.
-        discovery ? "lg:grid-cols-[16rem_minmax(0,1fr)] 2xl:grid-cols-[17rem_minmax(0,1fr)]" : "lg:grid-cols-[16rem_minmax(0,1fr)_20rem] 2xl:grid-cols-[17rem_minmax(0,1fr)_24rem]",
+        showManifest ? "lg:grid-cols-[16rem_minmax(0,1fr)_20rem] 2xl:grid-cols-[17rem_minmax(0,1fr)_24rem]" : "lg:grid-cols-[16rem_minmax(0,1fr)] 2xl:grid-cols-[17rem_minmax(0,1fr)]",
       )}
     >
       {/* Left rail */}
@@ -83,7 +83,7 @@ export function KitBuilder({
       </div>
 
       {/* Right rail */}
-      <aside className={cn("hidden min-h-0 border-l border-border/60 bg-surface/50", !discovery && "lg:block")}>
+      <aside className={cn("hidden min-h-0 border-l border-border/60 bg-surface/50", showManifest && "lg:block")}>
         <KitManifest s={s} />
       </aside>
 

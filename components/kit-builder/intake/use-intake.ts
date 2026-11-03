@@ -19,6 +19,7 @@ import type {
   Plan,
   Turn,
 } from "@/contracts/intake";
+import type { AdkProject } from "@/contracts/adk";
 import { EMPTY_BRIEF, completeness } from "@/lib/intake/brief";
 import { clipMaterial, getIntakeStatus, requestAnalyze, requestFollowUp, requestPlan } from "@/lib/intake/client";
 import { extractText } from "@/lib/intake/extract-text";
@@ -85,6 +86,7 @@ const newId = () => Math.random().toString(36).slice(2, 10);
 
 function defaultAccepted(plan: Plan): string[] {
   return [
+    ...(plan.adk ? ["adk"] : []),
     ...plan.customAgents.map((a) => `agent:${a.name}`),
     ...plan.customSkills.map((s) => `skill:${s.name}`),
     ...plan.skills.flatMap((s) => s.skillIds.slice(0, 1)),
@@ -318,6 +320,11 @@ export function useIntake() {
     setState((s) => ({ ...s, accepted: s.accepted.includes(key) ? s.accepted.filter((k) => k !== key) : [...s.accepted, key] }));
   }
 
+  /** Edit the ADK agent system in place (from the Blueprint studio inspector). */
+  function updateAdk(change: (p: AdkProject) => AdkProject) {
+    setState((s) => (s.plan?.adk ? { ...s, plan: { ...s.plan, adk: change(s.plan.adk) } } : s));
+  }
+
   function editDraft(kind: "agent" | "skill", name: string, body: string) {
     setState((s) => {
       if (!s.plan) return s;
@@ -354,6 +361,7 @@ export function useIntake() {
     editBriefField,
     toggleAccepted,
     editDraft,
+    updateAdk,
     markApplied: () => setState((s) => ({ ...s, applied: true })),
     reset: () => {
       setState(EMPTY);

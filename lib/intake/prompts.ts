@@ -20,7 +20,8 @@ import {
   type Plan,
 } from "@/contracts/intake";
 import { FIELD_META, ROLE_LABEL, completeness } from "./brief";
-import { ANALYST_INSTRUCTIONS, ARCHITECT_INSTRUCTIONS, FOLLOWUP_EXAMPLES, FOLLOWUP_PLAYBOOK, GUARDRAILS, PERSONA } from "./instructions";
+import { ADK_DESIGN_INSTRUCTIONS, ANALYST_INSTRUCTIONS, ARCHITECT_INSTRUCTIONS, FOLLOWUP_EXAMPLES, FOLLOWUP_PLAYBOOK, GUARDRAILS, PERSONA } from "./instructions";
+import { normalizeAdkProject } from "@/lib/adk/normalize";
 
 // ── shared context ───────────────────────────────────────────────────────────
 
@@ -248,10 +249,41 @@ export const PlanModelSchema = z.object({
       }),
     )
     .describe("0 to 3 project-specific skills."),
+  adkSystem: z.object({
+    packageName: z.string().describe("snake_case Python package name"),
+    title: z.string(),
+    description: z.string(),
+    rootAgent: z.string().describe("name of the root llm agent"),
+    agents: z.array(
+      z.object({
+        name: z.string(),
+        type: z.enum(["llm", "sequential", "parallel", "loop"]),
+        description: z.string(),
+        model: z.string().describe("llm only; default gemini-3.8-flash"),
+        instruction: z.string().describe("llm only; empty for workflow agents"),
+        tools: z.array(z.string()).describe("tool names; empty for workflow agents"),
+        subAgents: z.array(z.string()),
+        outputKey: z.string().describe("session state key for this agent's output, or empty"),
+        maxIterations: z.number().describe("loop only; 1-10, else 0"),
+      }),
+    ),
+    tools: z.array(
+      z.object({
+        name: z.string(),
+        kind: z.enum(["builtin", "function"]),
+        description: z.string(),
+        builtin: z.string().describe("builtin only: the ADK builtin name; else empty"),
+        code: z.string().describe("function only: complete Python def with docstring; else empty"),
+        imports: z.array(z.string()),
+        dependencies: z.array(z.string()),
+      }),
+    ),
+    envVars: z.array(z.object({ name: z.string(), example: z.string(), description: z.string() })),
+  }),
 });
 
 export function planSystem(techIds: string): string {
-  return [PERSONA, ARCHITECT_INSTRUCTIONS, `Allowed technology ids (use only these): ${techIds}.`, GUARDRAILS].join("\n\n");
+  return [PERSONA, ARCHITECT_INSTRUCTIONS, ADK_DESIGN_INSTRUCTIONS, `Allowed technology ids (use only these): ${techIds}.`, GUARDRAILS].join("\n\n");
 }
 
 export function planPrompt(ctx: IntakeContext): string {
@@ -296,5 +328,20 @@ export function normalizePlan(out: z.infer<typeof PlanModelSchema>, allowedTech:
       body: clip(a.body.trim(), 8_000),
     })),
     customSkills,
+    adk: normalizeAdkProject(
+      {
+        ...out.adkSystem,
+        // The model fills "unused" fields with empty strings / 0; treat those as absent.
+        agents: out.adkSystem.agents.map((a) => ({
+          ...a,
+          model: a.model || undefined,
+          instruction: a.instruction || undefined,
+          outputKey: a.outputKey || undefined,
+          maxIterations: a.maxIterations || undefined,
+        })),
+        tools: out.adkSystem.tools.map((t) => ({ ...t, builtin: t.builtin || undefined, code: t.code || undefined })),
+      },
+      out.adkSystem.title || "Agent system",
+    ),
   };
 }

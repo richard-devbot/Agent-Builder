@@ -307,14 +307,16 @@ Kit Studio's Discovery step calls `/api/intake/*` on this server. These settings
 
 | Setting | Value | Why |
 |---------|-------|-----|
-| `GEMINI_API_KEY` | Gemini API key (store as a Key Vault reference) | Gemini API access. `GOOGLE_API_KEY` also works |
+| `GOOGLE_API_KEY` | Google Cloud API key (`AQ.…`, e.g. free trial; store as a Key Vault reference) | Vertex AI express mode. Keys in this format are detected automatically |
+| `GEMINI_API_KEY` | AI Studio key (`AIza…`) | Gemini API (generativelanguage.googleapis.com); needs that API enabled |
 | `GOOGLE_GENAI_USE_VERTEXAI` | `true` | Use Vertex AI instead of an API key |
 | `GOOGLE_CLOUD_PROJECT` | GCP project id | Required with Vertex AI |
-| `GOOGLE_CLOUD_LOCATION` | e.g. `us-central1` (default) | Vertex AI region |
-| `GOOGLE_APPLICATION_CREDENTIALS` | Path to a service-account key, or use workload identity federation | Vertex AI auth from Azure |
-| `GEMINI_MODEL` | `gemini-2.5-flash` (default) | Model for follow-up questions and plans |
+| `GOOGLE_CLOUD_LOCATION` | `global` (default) | Vertex AI location; current Gemini models are served from `global` |
+| `GOOGLE_SERVICE_ACCOUNT_JSON` | Service-account key JSON (Key Vault reference) | OAuth to Vertex AI without a key file |
+| `GOOGLE_APPLICATION_CREDENTIALS` | Path to a credentials file, or a workload identity federation config | OAuth to Vertex AI from Azure via ADC |
+| `GEMINI_MODEL` | `gemini-3.8-flash` (default) | Model for the Discovery agent team. `gemini-2.5-*` returned 404 for a 2026 free-trial project |
 
-Each client IP is limited to 40 intake calls per 10 minutes (in memory, per instance).
+Each client IP is limited to 40 intake calls per 10 minutes (in memory, per instance). Check the setup with `npx tsx --env-file=.env scripts/check-gemini.mts`.
 ---
 
 ## Custom domain + SSL
