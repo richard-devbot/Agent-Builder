@@ -9,6 +9,7 @@
  */
 
 import { z } from "zod";
+import { AdkProjectSchema } from "./adk";
 
 export const IntakeRoleSchema = z.enum(["developer", "business", "manager"]);
 
@@ -147,6 +148,8 @@ export const PlanSchema = z.object({
   skills: z.array(SkillRecommendationSchema).max(8),
   customAgents: z.array(CustomAgentSchema).max(4),
   customSkills: z.array(CustomSkillSchema).max(4),
+  /** The runnable Google ADK agent system that solves the problem (null in guided mode without a brief). */
+  adk: AdkProjectSchema.nullable(),
 });
 
 export const PlanRequestSchema = IntakeContextSchema;
@@ -183,7 +186,7 @@ export const IntakeStatusSchema = z.object({
   configured: z.boolean(),
   provider: z.enum(["gemini-api", "vertex-ai", "none"]),
   /** How the server authenticates to Google: API key, or OAuth via a service account or ADC. */
-  auth: z.enum(["api-key", "service-account", "adc", "none"]),
+  auth: z.enum(["api-key", "express", "service-account", "adc", "none"]),
   model: z.string(),
   instructionsVersion: z.string(),
 });

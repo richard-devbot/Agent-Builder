@@ -65,7 +65,7 @@ export function StepDiscovery({ s }: { s: KitBuilderState }) {
 function AiStatus({ intake }: { intake: KitBuilderState["intake"] }) {
   if (!intake.ai) return null;
   const on = intake.ai.configured;
-  const auth = { "api-key": "API key", "service-account": "OAuth service account", adc: "OAuth (ADC)", none: "" }[intake.ai.auth];
+  const auth = { "api-key": "API key", express: "express-mode key", "service-account": "OAuth service account", adc: "OAuth (ADC)", none: "" }[intake.ai.auth];
   return (
     <span
       className={cn("inline-flex h-7 items-center gap-1.5 rounded-md border px-2.5 text-xs", on ? "border-success/30 bg-success/5 text-success" : "text-muted-foreground")}

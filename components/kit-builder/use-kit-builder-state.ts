@@ -39,6 +39,7 @@ import { fetchSkillFiles, type FetchedSkill } from "@/lib/skill-catalog/client";
 import { catalogFiles } from "./catalog-files";
 import { loadCatalog } from "@/lib/skill-catalog/client";
 import { briefMarkdown } from "@/lib/intake/brief";
+import { generateAdkProject } from "@/lib/adk/generate";
 import { useIntake, type IntakeSnapshot } from "./intake/use-intake";
 
 /** Does a recommendedFor/appliesTo list match the selected tech set? */
@@ -532,6 +533,10 @@ export function useKitBuilderState({
       });
     }
     out.push(...catalogFiles([...catalogSel.values()], catalogFetch, provider));
+    // The runnable ADK agent system designed in Discovery, under its own folder.
+    if (intake.applied && intake.plan?.adk && intake.accepted.includes("adk")) {
+      for (const f of generateAdkProject(intake.plan.adk)) out.push({ path: `adk-agent/${f.path}`, contents: f.contents });
+    }
     if (intake.hasContent) {
       out.push({
         path: "discovery-brief.md",
@@ -542,7 +547,7 @@ export function useKitBuilderState({
       const custom = fileEdits.get(f.path);
       return custom !== undefined ? { ...f, contents: custom } : f;
     });
-  }, [selection, provider, discovery, fileEdits, catalogSel, catalogFetch, intake.hasContent, intake.brief, intake.role, intake.materials, intake.answers, intake.plan]);
+  }, [selection, provider, discovery, fileEdits, catalogSel, catalogFetch, intake.hasContent, intake.brief, intake.role, intake.materials, intake.answers, intake.plan, intake.applied, intake.accepted]);
 
   function download() {
     const blob = createZip(files);

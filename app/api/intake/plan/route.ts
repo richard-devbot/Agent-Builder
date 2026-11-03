@@ -16,7 +16,7 @@ export async function POST(req: Request) {
     return json(res);
   }
   try {
-    const out = await generateStructured(PlanModelSchema, planSystem(TECH_PROMPT_LIST), planPrompt(body), 16_384);
+    const out = await generateStructured(PlanModelSchema, planSystem(TECH_PROMPT_LIST), planPrompt(body), 16_384, 120_000);
     const res: PlanResponse = { plan: normalizePlan(out, ALLOWED_TECH, await matchSkills(out.skillNeeds)), mode: "ai" };
     return json(res);
   } catch (e) {

@@ -3,7 +3,7 @@
 /** Blueprint tab: the solution plan, the agent-team graph, drafts to review, and apply-to-kit. */
 
 import { useMemo, useState } from "react";
-import { ArrowRight, Bot, CheckCircle2, Eye, Flag, Layers, Sparkles, Wand2 } from "lucide-react";
+import { ArrowRight, Bot, CheckCircle2, Download, Eye, Flag, Layers, Maximize2, Sparkles, Wand2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Textarea } from "@/components/ui/textarea";
@@ -14,6 +14,8 @@ import { techLabel } from "@/lib/kit/technologies";
 import { SOURCE_LABEL, type CatalogSkill } from "@/lib/skill-catalog/domains";
 import { useCatalog } from "@/lib/skill-catalog/client";
 import { BlueprintGraph } from "./blueprint-graph";
+import { AdkFlow } from "./adk-flow";
+import { BlueprintStudio, downloadAdk } from "./blueprint-studio";
 import type { KitBuilderState } from "../use-kit-builder-state";
 
 type Draft = { kind: "agent" | "skill"; name: string; title: string; body: string };
@@ -23,6 +25,7 @@ export function BlueprintView({ s }: { s: KitBuilderState }) {
   const plan = intake.plan;
   const { index } = useCatalog();
   const [draft, setDraft] = useState<Draft | null>(null);
+  const [studio, setStudio] = useState(false);
 
   // Resolve recommended ids to names: curated skills come from the kit, the rest from the catalog.
   const byId = useMemo(() => {
@@ -95,10 +98,38 @@ export function BlueprintView({ s }: { s: KitBuilderState }) {
         </div>
       </div>
 
-      <section>
-        <Title icon={Bot} title="Agent team" />
-        <BlueprintGraph plan={plan} catalogNames={names} accepted={intake.accepted} />
-      </section>
+      {plan.adk ? (
+        <section className="overflow-hidden rounded-xl border border-primary/30 bg-card/80">
+          <div className="flex items-start gap-2.5 border-b border-border/60 bg-gradient-to-r from-primary/10 to-transparent p-3">
+            <Checkbox checked={intake.accepted.includes("adk")} onCheckedChange={() => intake.toggleAccepted("adk")} aria-label="Include the ADK agent system in the kit" className="mt-0.5" />
+            <div className="min-w-0 flex-1">
+              <p className="text-[13px] font-semibold">Google ADK agent system</p>
+              <p className="truncate font-mono text-[11px] text-muted-foreground">
+                {plan.adk.packageName} · {plan.adk.agents.length} agents · {plan.adk.tools.length} tools
+                {plan.adk.warnings.length ? ` · ${plan.adk.warnings.length} notes` : ""}
+              </p>
+            </div>
+          </div>
+          {/* Mouse shortcut into the studio; keyboard users have the "Open studio" button. */}
+          <div onClick={() => setStudio(true)} className="h-64 cursor-zoom-in bg-muted/10 transition-colors hover:bg-muted/30">
+            <AdkFlow project={plan.adk} interactive={false} showTools={false} view="simple" />
+          </div>
+          <div className="flex flex-wrap gap-2 border-t border-border/60 p-3">
+            <Button size="sm" onClick={() => setStudio(true)}>
+              <Maximize2 className="size-3.5" /> Open studio
+            </Button>
+            <Button size="sm" variant="outline" onClick={() => downloadAdk(plan.adk!)}>
+              <Download className="size-3.5" /> Download
+            </Button>
+          </div>
+          <BlueprintStudio project={plan.adk} open={studio} onOpenChange={setStudio} onChange={intake.updateAdk} />
+        </section>
+      ) : (
+        <section>
+          <Title icon={Bot} title="Agent team" />
+          <BlueprintGraph plan={plan} catalogNames={names} accepted={intake.accepted} />
+        </section>
+      )}
 
       {plan.milestones.length > 0 && (
         <section>
@@ -119,7 +150,7 @@ export function BlueprintView({ s }: { s: KitBuilderState }) {
 
       {drafts.length > 0 && (
         <section>
-          <Title icon={Sparkles} title="Custom drafts" hint="Open one to read or edit." />
+          <Title icon={Sparkles} title="Coding-assistant drafts" hint="Agents and skills for the kit. Open one to edit." />
           <div className="space-y-2">
             {drafts.map((d) => {
               const key = `${d.kind}:${d.name}`;

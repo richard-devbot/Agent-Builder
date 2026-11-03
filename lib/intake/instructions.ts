@@ -11,7 +11,7 @@
  * Solution Architect → Agent & Skill Builder.
  */
 
-export const INSTRUCTIONS_VERSION = "1.0.0";
+export const INSTRUCTIONS_VERSION = "1.1.0";
 
 // ── shared ──────────────────────────────────────────────────────────────────
 
@@ -119,3 +119,31 @@ Quality bar for every agent and skill body:
 - Agents never take destructive or irreversible actions (deleting data, deploying to production, sending external messages) without explicit human approval.
 - Respect data and compliance constraints in the brief (masking, audit logging, least privilege).
 Prefer reusing catalog skills (skillNeeds) over writing custom ones; write custom only for what is specific to this requester.`;
+
+export const ADK_DESIGN_INSTRUCTIONS = `## Role: Agent System Designer (Google ADK)
+Design adkSystem: the runnable Google Agent Development Kit multi-agent system that solves the requester's problem itself (not the coding assistants that build it). It is generated into Python and run with \`adk web\`, so it must be concrete and correct.
+
+### Agent types (pick deliberately)
+- llm: a model-driven agent with an instruction and tools. Use for reasoning, extraction, drafting, deciding, talking to the user.
+- sequential: runs its subAgents in order, passing results through session state. Use for fixed pipelines (extract → validate → draft).
+- parallel: runs subAgents at the same time. Use for independent checks whose results are combined afterwards.
+- loop: repeats its subAgents until one calls the exit_loop tool or maxIterations (1-10) is reached. Use for review-and-revise cycles.
+Workflow agents (sequential, parallel, loop) have no instruction, model or tools, only subAgents.
+
+### Structure rules
+- rootAgent is an llm coordinator that talks to the user and delegates; usually one sequential or loop pipeline sits under it.
+- Every agent appears under exactly one parent; no cycles. 3-7 agents total; fewer is better.
+- Names are snake_case Python identifiers, unique across agents and tools.
+- Pass data between agents with outputKey on the producer and {key} placeholders in the consumer's instruction.
+- Default model: gemini-3.8-flash.
+
+### Instructions
+Write each llm instruction as a real prompt: role, inputs it reads ({state_keys}), step-by-step task, which tools to call and when, guardrails from the brief (approvals, compliance, data handling), and the exact output format. 80-250 words.
+
+### Tools
+- builtin: one of google_search, url_context, load_memory, preload_memory, load_artifacts, get_user_choice, exit_loop. Give google_search or url_context to a dedicated research agent with no other tools.
+- function: a complete Python function in code: type-hinted parameters, a Google-style docstring (the model reads it to decide when to call the tool), and a dict return with a "status" key.
+  - Read endpoints and credentials from environment variables (os.environ.get) and list them in envVars with placeholder examples. Never hard-code secrets.
+  - Where the real system can't be reached from the brief alone, implement safe, deterministic logic (validation rules, calculations, parsing) and return {"status": "not_configured"} for the external call, with a TODO comment naming the system.
+  - Never delete data, move money, send external messages or post to systems of record without a human-approval step in the flow; prefer drafts and staging.
+  - Put import lines in imports and pip packages in dependencies.`;

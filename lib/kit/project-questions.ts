@@ -18,6 +18,19 @@ import type { RulePack } from "./rules";
 
 export type ProjectQuestionOption = { id: string; label: string };
 
+/** Groups questions into the cards shown on the project step. */
+export type ProjectQuestionSection = "starting-point" | "scope" | "codebase" | "migration" | "delivery" | "quality" | "notes";
+
+export const SECTION_LABEL: Record<ProjectQuestionSection, { title: string; blurb: string }> = {
+  "starting-point": { title: "Starting point", blurb: "What exists today and what you already have." },
+  scope: { title: "Scope & goals", blurb: "What the first release must achieve." },
+  codebase: { title: "Codebase today", blurb: "How the existing system is built and maintained." },
+  migration: { title: "Migration plan", blurb: "From the legacy system to the target, safely." },
+  delivery: { title: "Delivery & operations", blurb: "Where it runs and how it ships." },
+  quality: { title: "Quality bar", blurb: "Non-functional priorities the agent must respect." },
+  notes: { title: "Anything else", blurb: "Conventions, constraints and domain terms." },
+};
+
 export type ProjectQuestion = {
   id: string;
   /**
@@ -29,6 +42,8 @@ export type ProjectQuestion = {
   /** Short label used as the "fact" prefix in the compiled profile. */
   label: string;
   question: string;
+  /** Card the question is shown in on the project step (tech questions live on the stack step). */
+  section?: ProjectQuestionSection;
   /** Choice options. Omit for a free-text question. */
   options?: ProjectQuestionOption[];
   /** Allow multiple selections (choice questions only). */
@@ -44,6 +59,7 @@ export const PROJECT_QUESTIONS: readonly ProjectQuestion[] = [
   {
     id: "greenfield-inputs",
     triggers: ["type:greenfield"],
+    section: "starting-point",
     label: "Available inputs",
     question: "What do you already have for this new project?",
     multi: true,
@@ -57,8 +73,47 @@ export const PROJECT_QUESTIONS: readonly ProjectQuestion[] = [
     ],
   },
   {
+    id: "greenfield-stage",
+    triggers: ["type:greenfield"],
+    section: "scope",
+    label: "Delivery stage",
+    question: "What are you building first?",
+    options: [
+      { id: "poc", label: "Proof of concept (throwaway)" },
+      { id: "mvp", label: "MVP for real users" },
+      { id: "production", label: "Production system from day one" },
+    ],
+  },
+  {
+    id: "greenfield-users",
+    triggers: ["type:greenfield"],
+    section: "scope",
+    label: "Expected users",
+    question: "Who will use it, and at what scale?",
+    options: [
+      { id: "internal-small", label: "Internal team (under 100 users)" },
+      { id: "internal-org", label: "Whole organisation" },
+      { id: "external-b2b", label: "External business customers" },
+      { id: "public", label: "Public / consumer scale" },
+    ],
+  },
+  {
+    id: "greenfield-auth",
+    triggers: ["type:greenfield"],
+    section: "scope",
+    label: "Sign-in",
+    question: "How will users sign in?",
+    options: [
+      { id: "sso", label: "Company SSO (Entra ID / Okta)" },
+      { id: "social", label: "Email or social login" },
+      { id: "api-keys", label: "Machine-to-machine (API keys / OAuth clients)" },
+      { id: "none", label: "No sign-in needed" },
+    ],
+  },
+  {
     id: "greenfield-repos",
     triggers: ["type:greenfield"],
+    section: "delivery",
     label: "Repository layout",
     question: "How will the code be organized?",
     options: [
@@ -71,8 +126,25 @@ export const PROJECT_QUESTIONS: readonly ProjectQuestion[] = [
 
   // ── Brownfield ───────────────────────────────────────────────────────────
   {
+    id: "brownfield-goal",
+    triggers: ["type:brownfield"],
+    section: "scope",
+    label: "Change goal",
+    question: "What do you want to change in the existing system?",
+    multi: true,
+    options: [
+      { id: "new-features", label: "Add new features" },
+      { id: "refactor", label: "Refactor for maintainability" },
+      { id: "performance", label: "Fix performance problems" },
+      { id: "security", label: "Security hardening" },
+      { id: "upgrade-deps", label: "Upgrade frameworks / dependencies" },
+      { id: "bugs", label: "Reduce bugs and incidents" },
+    ],
+  },
+  {
     id: "brownfield-state",
     triggers: ["type:brownfield"],
+    section: "codebase",
     label: "Codebase state",
     question: "What is true of the existing codebase?",
     multi: true,
@@ -84,11 +156,45 @@ export const PROJECT_QUESTIONS: readonly ProjectQuestion[] = [
       { id: "maintenance-only", label: "Maintenance mode only" },
     ],
   },
+  {
+    id: "brownfield-size",
+    triggers: ["type:brownfield"],
+    section: "codebase",
+    label: "Codebase size",
+    question: "Roughly how big is it?",
+    options: [
+      { id: "small", label: "Small (under 20k lines)" },
+      { id: "medium", label: "Medium (20k – 200k lines)" },
+      { id: "large", label: "Large (over 200k lines)" },
+      { id: "unknown", label: "Not sure" },
+    ],
+  },
+  {
+    id: "brownfield-hotspots",
+    triggers: ["type:brownfield"],
+    section: "codebase",
+    label: "Fragile areas",
+    question: "Which parts are fragile or off-limits for the agent?",
+    placeholder: "e.g. billing/ has no tests and handles real money; never change the public /v1 API contract.",
+  },
+  {
+    id: "brownfield-ci",
+    triggers: ["type:brownfield"],
+    section: "delivery",
+    label: "Delivery pipeline",
+    question: "How do changes reach production today?",
+    options: [
+      { id: "full-ci-cd", label: "CI with automated deploys" },
+      { id: "ci-manual-deploy", label: "CI builds, manual deploys" },
+      { id: "manual", label: "Manual build and release" },
+    ],
+  },
 
   // ── Legacy migration ─────────────────────────────────────────────────────
   {
     id: "legacy-source",
     triggers: ["type:legacy-migration"],
+    section: "migration",
     label: "Legacy stack",
     question: "What is the legacy system built with?",
     dropdown: true,
@@ -105,6 +211,7 @@ export const PROJECT_QUESTIONS: readonly ProjectQuestion[] = [
   {
     id: "legacy-target",
     triggers: ["type:legacy-migration"],
+    section: "migration",
     label: "Target stack",
     question: "What are you migrating to?",
     dropdown: true,
@@ -119,8 +226,54 @@ export const PROJECT_QUESTIONS: readonly ProjectQuestion[] = [
     ],
   },
   {
+    id: "legacy-data",
+    triggers: ["type:legacy-migration"],
+    section: "starting-point",
+    label: "Legacy data store",
+    question: "Where does the legacy system keep its data?",
+    multi: true,
+    options: [
+      { id: "db2", label: "DB2" },
+      { id: "oracle", label: "Oracle" },
+      { id: "sql-server", label: "SQL Server" },
+      { id: "vsam-files", label: "VSAM / flat files" },
+      { id: "access-excel", label: "Access / spreadsheets" },
+      { id: "other-db", label: "Other" },
+    ],
+  },
+  {
+    id: "legacy-interfaces",
+    triggers: ["type:legacy-migration"],
+    section: "starting-point",
+    label: "Integrations",
+    question: "How do other systems talk to it?",
+    multi: true,
+    options: [
+      { id: "batch-files", label: "Nightly batch / file transfers" },
+      { id: "mq", label: "Message queues (MQ / JMS)" },
+      { id: "soap", label: "SOAP / web services" },
+      { id: "direct-db", label: "Direct database access" },
+      { id: "screens-only", label: "Users only (screens)" },
+    ],
+  },
+  {
+    id: "legacy-knowledge",
+    triggers: ["type:legacy-migration"],
+    section: "starting-point",
+    label: "Business-rule knowledge",
+    question: "Where do the business rules live today?",
+    multi: true,
+    options: [
+      { id: "code-only", label: "Only in the code" },
+      { id: "docs", label: "Documented (specs / wiki)" },
+      { id: "sme", label: "In the heads of a few experts" },
+      { id: "tests", label: "Captured in regression tests" },
+    ],
+  },
+  {
     id: "legacy-approach",
     triggers: ["type:legacy-migration"],
+    section: "migration",
     label: "Migration approach",
     question: "Which migration approach fits?",
     options: [
@@ -133,12 +286,40 @@ export const PROJECT_QUESTIONS: readonly ProjectQuestion[] = [
   {
     id: "legacy-coexistence",
     triggers: ["type:legacy-migration"],
+    section: "migration",
     label: "Coexistence requirement",
     question: "Must old and new systems run side by side during the migration?",
     options: [
       { id: "parallel-run", label: "Yes — parallel run required" },
       { id: "cutover", label: "No — module-level cutover is fine" },
       { id: "tbd", label: "To be decided" },
+    ],
+  },
+  {
+    id: "legacy-downtime",
+    triggers: ["type:legacy-migration"],
+    section: "migration",
+    label: "Cutover window",
+    question: "How much downtime can the business accept at cutover?",
+    options: [
+      { id: "zero", label: "None — must be zero-downtime" },
+      { id: "hours", label: "A few hours (e.g. a weekend window)" },
+      { id: "day", label: "Up to a day" },
+      { id: "tbd", label: "To be decided" },
+    ],
+  },
+  {
+    id: "legacy-parity",
+    triggers: ["type:legacy-migration"],
+    section: "quality",
+    label: "Parity evidence",
+    question: "How will you prove the new system behaves like the old one?",
+    multi: true,
+    options: [
+      { id: "golden-files", label: "Compare outputs on recorded production data" },
+      { id: "parallel-reports", label: "Run both and reconcile reports" },
+      { id: "uat", label: "Business user acceptance testing" },
+      { id: "regression-suite", label: "Automated regression suite" },
     ],
   },
 
@@ -254,6 +435,7 @@ export const PROJECT_QUESTIONS: readonly ProjectQuestion[] = [
   {
     id: "architecture-style",
     triggers: ["always"],
+    section: "delivery",
     label: "Architecture style",
     question: "What is the overall architecture?",
     options: [
@@ -264,8 +446,66 @@ export const PROJECT_QUESTIONS: readonly ProjectQuestion[] = [
     ],
   },
   {
+    id: "deploy-target",
+    triggers: ["always"],
+    section: "delivery",
+    label: "Hosting",
+    question: "Where will it run?",
+    options: [
+      { id: "azure", label: "Azure" },
+      { id: "aws", label: "AWS" },
+      { id: "gcp", label: "Google Cloud" },
+      { id: "on-prem", label: "On-premises / private cloud" },
+      { id: "undecided", label: "Not decided yet" },
+    ],
+  },
+  {
+    id: "environments",
+    triggers: ["always"],
+    section: "delivery",
+    label: "Environments",
+    question: "Which environments will you have?",
+    multi: true,
+    options: [
+      { id: "dev", label: "Development" },
+      { id: "test", label: "Test / QA" },
+      { id: "staging", label: "Staging / pre-prod" },
+      { id: "prod", label: "Production" },
+    ],
+  },
+  {
+    id: "quality-priorities",
+    triggers: ["always"],
+    section: "quality",
+    label: "Quality priorities",
+    question: "Which qualities matter most?",
+    multi: true,
+    options: [
+      { id: "security", label: "Security & privacy" },
+      { id: "performance", label: "Performance at scale" },
+      { id: "availability", label: "High availability" },
+      { id: "accessibility", label: "Accessibility (WCAG)" },
+      { id: "i18n", label: "Multiple languages / regions" },
+      { id: "auditability", label: "Audit trail & compliance" },
+    ],
+  },
+  {
+    id: "team-size",
+    triggers: ["always"],
+    section: "delivery",
+    label: "Team size",
+    question: "How many developers will work on it?",
+    options: [
+      { id: "solo", label: "Just me" },
+      { id: "small", label: "2–5 developers" },
+      { id: "medium", label: "6–15 developers" },
+      { id: "large", label: "Several teams" },
+    ],
+  },
+  {
     id: "project-notes",
     triggers: ["always"],
+    section: "notes",
     label: "Project-specific notes",
     question:
       "Anything specific the agent must know about this project? (conventions, constraints, domain terms)",

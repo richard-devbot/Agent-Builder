@@ -8,6 +8,8 @@ import {
   RECOMMENDED_ORG_GUIDELINE_IDS,
 } from "../lib/kit/org-guidelines";
 import {
+  PROJECT_QUESTIONS,
+  isTechQuestion,
   projectProfileRule,
   relevantQuestions,
 } from "../lib/kit/project-questions";
@@ -74,6 +76,24 @@ assert(
     (q) => q.id === "greenfield-inputs",
   ),
   "greenfield questions shown for greenfield type",
+);
+
+// Every non-tech question has a section card on the project step, and each type gets its own questions.
+assert(PROJECT_QUESTIONS.filter((q) => !isTechQuestion(q)).every((q) => q.section), "every project-step question has a section");
+for (const [type, min] of [["greenfield", 5], ["brownfield", 5], ["legacy-migration", 9]] as const) {
+  const own = PROJECT_QUESTIONS.filter((q) => q.triggers.includes(projectTypeTrigger(type)));
+  assert(own.length >= min, `${type} has at least ${min} type-specific questions (${own.length})`);
+}
+const ids = PROJECT_QUESTIONS.map((q) => q.id);
+assert(new Set(ids).size === ids.length, "question ids are unique");
+const richProfile = projectProfileRule(
+  [projectTypeTrigger("brownfield")],
+  { "brownfield-goal": ["refactor", "security"], "brownfield-hotspots": ["billing/ has no tests"], "deploy-target": ["gcp"] },
+  "Helix",
+);
+assert(
+  Boolean(richProfile?.body.includes("**Change goal:** Refactor for maintainability, Security hardening") && richProfile.body.includes("billing/ has no tests") && richProfile.body.includes("**Hosting:** Google Cloud")),
+  "new type-specific answers land in the project profile",
 );
 
 const typeRule = projectTypeRule("legacy-migration");
