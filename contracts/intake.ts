@@ -16,6 +16,38 @@ export const IntakeRoleSchema = z.enum(["developer", "business", "manager"]);
 const line = z.string().max(600);
 const list = (max = 12) => z.array(line).max(max);
 
+export const RequiredValueSchema = z.object({
+  name: z.string().max(120),
+  isSecret: z.boolean(),
+  whereToGet: z.string().max(300),
+  whoProvides: z.string().max(200),
+  howToRequest: z.string().max(400),
+});
+
+export const SystemAccessModeSchema = z.enum(["read", "write"]);
+export const SystemConnectionStatusSchema = z.enum(["known", "needs_request", "unknown"]);
+
+export const DiscoverySystemSchema = z.object({
+  name: z.string().max(120),
+  purpose: z.string().max(500),
+  dataAccessed: z.string().max(500),
+  access: SystemAccessModeSchema,
+  dataClassification: z.string().max(200),
+  ownerTeam: z.string().max(200),
+  connectionMethod: z.string().max(300),
+  requiredValues: z.array(RequiredValueSchema).max(12),
+  storageLocation: z.string().max(300),
+  status: SystemConnectionStatusSchema,
+});
+
+export const AccessRequestSchema = z.object({
+  item: z.string().max(300),
+  ownerTeam: z.string().max(200),
+  suggestedWording: z.string().max(600),
+});
+
+export const RiskTierSchema = z.enum(["low", "medium", "high"]);
+
 /** The living discovery brief the follow-up agent fills in. */
 export const BriefSchema = z.object({
   title: z.string().max(120),
@@ -35,7 +67,16 @@ export const BriefSchema = z.object({
   openQuestions: list(15),
   /** Defaults the agent proposed when the requester didn't know ("Assumed: …"). */
   assumptions: list(),
+  /** Phase F — Internal business team discovery brief extensions */
+  audience: z.string().max(300).default(""),
+  riskTier: RiskTierSchema.default("low"),
+  riskReason: z.string().max(400).default(""),
+  systems: z.array(DiscoverySystemSchema).max(16).default([]),
+  accessRequests: z.array(AccessRequestSchema).max(16).default([]),
+  nextSteps: list(10).default([]),
 });
+
+export const DiscoveryBriefSchema = BriefSchema;
 
 export const BRIEF_FIELDS = [
   "problem",
@@ -192,7 +233,12 @@ export const IntakeStatusSchema = z.object({
 });
 
 export type IntakeRole = z.infer<typeof IntakeRoleSchema>;
+export type RequiredValue = z.infer<typeof RequiredValueSchema>;
+export type DiscoverySystem = z.infer<typeof DiscoverySystemSchema>;
+export type AccessRequest = z.infer<typeof AccessRequestSchema>;
+export type RiskTier = z.infer<typeof RiskTierSchema>;
 export type Brief = z.infer<typeof BriefSchema>;
+export type DiscoveryBrief = Brief;
 export type BriefField = z.infer<typeof BriefFieldSchema>;
 export type Material = z.infer<typeof MaterialSchema>;
 export type FollowUpQuestion = z.infer<typeof FollowUpQuestionSchema>;

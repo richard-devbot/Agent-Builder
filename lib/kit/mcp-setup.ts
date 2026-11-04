@@ -31,9 +31,9 @@ const TOKEN_INFO: Record<
     notes: "Scopes needed: File content (Read), Variables (Read), Library content (Read).",
   },
   "github-mcp": {
-    url: "https://github.com/settings/tokens",
-    label: "GitHub Personal Access Tokens",
-    notes: "Classic PAT with `repo`, `read:org` scopes. Or use a fine-grained token.",
+    url: "",
+    label: "Git provider Personal Access Tokens",
+    notes: "Fine-grained read-only token scoped to target repository.",
   },
   "azure-devops-mcp": {
     url: "https://dev.azure.com/{org}/_usersSettings/tokens",

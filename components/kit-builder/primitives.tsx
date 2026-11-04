@@ -12,6 +12,8 @@ import {
   Check,
   ClipboardCheck,
   ClipboardList,
+  Cloud,
+  GitBranch,
   Pencil,
   RotateCcw,
   Telescope,
@@ -25,10 +27,10 @@ export const STEPS = [
   {
     n: 1,
     label: "Discovery",
-    hint: "Intake & AI follow-up",
+    hint: "Intake & systems checklist",
     icon: Telescope,
     blurb:
-      "Tell us the problem, share your materials, and the follow-up agent asks what's missing. It turns the answers into a brief, a delivery plan and custom agents and skills for your kit.",
+      "Tell us the problem, share your materials, and the Discovery Agent identifies every system involved, who owns it, and what connection values are needed.",
   },
   {
     n: 2,
@@ -56,11 +58,27 @@ export const STEPS = [
   },
   {
     n: 5,
-    label: "Review",
-    hint: "Check & export",
+    label: "Deployment Setup",
+    hint: "GitLab & Cloud target",
+    icon: GitBranch,
+    blurb:
+      "Connect GitLab via OAuth, validate your repository and Python agent folder slug, and choose the target cloud environment and runtime.",
+  },
+  {
+    n: 6,
+    label: "Review & Push to GitLab",
+    hint: "Inspect & push commit",
     icon: ClipboardCheck,
     blurb:
-      "Check readiness, inspect what the kit contains, open any file in the manifest, then generate the zip.",
+      "Inspect every generated file in the manifest, push the kit directly to your private GitLab repository in a single commit, or download a ZIP.",
+  },
+  {
+    n: 7,
+    label: "Deploy to Cloud",
+    hint: "Tag release & WIF pipeline",
+    icon: Cloud,
+    blurb:
+      "Select a commit version, tag an immutable release, and trigger keyless GitLab CI deployment via Workload Identity Federation.",
   },
 ] as const;
 

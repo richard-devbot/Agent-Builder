@@ -72,7 +72,7 @@ export function RepoDiscoveryPanel({
         <Input
           value={repoUrl}
           onChange={(e) => setRepoUrl(e.target.value)}
-          placeholder="https://github.com/org/repo"
+          placeholder="e.g. https://git.example.org/my-team-agent"
           className="h-8 max-w-sm text-[13px]"
           disabled={disabled || loading}
         />

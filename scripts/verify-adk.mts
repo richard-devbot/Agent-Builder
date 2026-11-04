@@ -1,8 +1,8 @@
 /**
  * Checks the ADK blueprint pipeline: a deliberately messy design is repaired
- * by normalizeAdkProject and generated into a package. With an output dir
- * argument the package is written there, so it can be imported by real
- * google-adk:  npx tsx scripts/verify-adk.mts /tmp/adk-out
+ * by normalizeAdkProject and generated into a governed GitLab ADK package.
+ * With an output dir argument the package is written there, so it can be
+ * imported by real google-adk:  npx tsx scripts/verify-adk.mts /tmp/adk-out
  */
 import assert from "node:assert/strict";
 import { mkdirSync, writeFileSync } from "node:fs";
@@ -60,8 +60,16 @@ const files = generateAdkProject(messy);
 const agentPy = files.find((f) => f.path === "invoice_automation/agent.py")!.contents;
 assert.ok(agentPy.includes("{invoice_summary?}") && agentPy.includes("{missing_key?}"), "state placeholders made optional");
 assert.ok(agentPy.indexOf("checker = LlmAgent(") < agentPy.indexOf("validator = LoopAgent("), "children defined before parents");
+assert.ok(agentPy.includes("before_model_callback=before_model_guardrail") && agentPy.includes("before_tool_callback=before_tool_guardrail"), "safety callbacks attached");
 assert.ok(agentPy.trimEnd().endsWith("root_agent = coordinator"));
-assert.match(files.find((f) => f.path === "requirements.txt")!.contents, /^google-adk>=2\.13\npypdf>=4\n$/);
+assert.match(
+  files.find((f) => f.path === "invoice_automation/requirements.txt")!.contents,
+  /^google-adk==2\.13\.0\ngoogle-cloud-aiplatform==1\.85\.0\npypdf>=4\n$/,
+);
+assert.ok(files.some((f) => f.path === ".gitlab-ci.yml"), ".gitlab-ci.yml emitted");
+assert.ok(files.some((f) => f.path === "scripts/check_mandatory_files.py"), "check_mandatory_files.py emitted");
+assert.ok(files.some((f) => f.path === "deploy/deploy_gcp.py"), "deploy_gcp.py emitted");
+assert.ok(!files.some((f) => f.path.startsWith(".github/")), "no .github/ files emitted");
 console.log(agentTree(messy));
 
 const out = process.argv[2];

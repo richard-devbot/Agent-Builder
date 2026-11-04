@@ -1,15 +1,20 @@
 /**
- * Per-client sliding-window limit for the intake routes, so a public
- * deployment can't burn through the Gemini quota. In-memory: fine for the
- * single App Service instance; move to a shared store if the app scales out.
+ * Per-user sliding-window limit for API routes, keyed by Microsoft Entra ID
+ * user `oid` so no single user can exhaust the shared Vertex AI quota.
+ * In-memory: suitable for single-instance POC; move to a shared store if scaled out.
  */
 
 const WINDOW_MS = 10 * 60_000;
 const MAX_CALLS = 40;
 const hits = new Map<string, number[]>();
 
-export function clientKey(req: Request): string {
-  return req.headers.get("x-forwarded-for")?.split(",")[0]?.trim() || req.headers.get("x-real-ip") || "local";
+/** Keys rate limit buckets by authenticated Entra user `oid` (never IP). */
+export function clientKey(_req: Request, oid?: string): string {
+  const trimmed = oid?.trim();
+  if (!trimmed) {
+    throw new Error("Rate limiter requires an authenticated user oid.");
+  }
+  return `oid:${trimmed}`;
 }
 
 /** Returns seconds to wait when over the limit, otherwise null (and records the call). */

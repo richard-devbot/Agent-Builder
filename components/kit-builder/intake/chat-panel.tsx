@@ -508,7 +508,7 @@ function AttachMenu({
                     value={value}
                     onChange={(e) => setValue(e.target.value)}
                     onKeyDown={(e) => e.key === "Enter" && commit()}
-                    placeholder={adder === "repo" ? "https://github.com/org/repo" : "https://…"}
+                    placeholder={adder === "repo" ? "e.g. https://git.example.org/my-team-agent" : "https://…"}
                     className="h-8 text-sm"
                     autoFocus
                   />

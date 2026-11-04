@@ -20,6 +20,11 @@ const SUB_SECTIONS: Record<number, { id: string; label: string }[]> = {
     { id: "capabilities", label: "Capabilities" },
   ],
   5: [
+    { id: "gitlab-connection", label: "GitLab connection" },
+    { id: "cloud-connection", label: "Cloud connection" },
+    { id: "deployment-readiness", label: "Readiness checklist" },
+  ],
+  6: [
     { id: "readiness", label: "Readiness" },
     { id: "contents", label: "Kit contents" },
   ],

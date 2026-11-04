@@ -1,5 +1,7 @@
-/** Checks the deterministic parts of Discovery intake: brief scoring, merging, guided rounds, Markdown. */
+/** Checks the deterministic parts of Discovery intake: brief scoring, merging, guided rounds, Systems & Connections heuristics, Markdown. */
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
 import { z } from "zod";
 import { PlanSchema } from "../contracts/intake";
 import { toGeminiSchema } from "../lib/intake/gemini";
@@ -7,6 +9,11 @@ import { FollowUpModelSchema, PlanModelSchema, normalizeFollowUp, normalizePlan 
 import { BriefSchema, FollowUpResponseSchema, type Answer } from "../contracts/intake";
 import { EMPTY_BRIEF, briefMarkdown, completeness, mergeAnswers, seedBrief } from "../lib/intake/brief";
 import { guidedAnalyze, guidedFollowUp } from "../lib/intake/guided";
+import { DISCOVERY_AGENT_PROMPT } from "../lib/intake/instructions";
+
+// Phase F: Verify prompts/discovery-agent.md matches DISCOVERY_AGENT_PROMPT
+const promptFile = readFileSync(join(process.cwd(), "prompts/discovery-agent.md"), "utf8").trim();
+assert.equal(DISCOVERY_AGENT_PROMPT.trim(), promptFile, "DISCOVERY_AGENT_PROMPT matches prompts/discovery-agent.md");
 
 const seeded = seedBrief(EMPTY_BRIEF, { problem: "Invoices are re-keyed by hand. It takes days.", outcome: "Cut manual effort, fewer errors", timeline: "2–4 weeks" });
 assert.equal(seeded.title, "Invoices are re-keyed by hand");
@@ -17,6 +24,9 @@ const r0 = guidedFollowUp({ role: "business", brief: seeded, materials: [], answ
 FollowUpResponseSchema.parse(r0);
 assert.equal(r0.questions.length, 4);
 assert.ok(!r0.questions.some((q) => ["problem", "goals", "timeline"].includes(q.field)), "filled fields are not asked");
+assert.ok(r0.brief.systems.some((s) => s.name === "SAP"), "SAP detected from invoice problem heuristic");
+assert.ok(r0.brief.accessRequests.length >= 1, "access request generated for detected system");
+assert.equal(r0.brief.audience, "my team", "default audience populated");
 
 const answers: Answer[] = r0.questions.map((q) => ({ questionId: q.id, field: q.field, question: q.question, answer: q.suggestions.slice(0, 2).join(", ") }));
 const r1 = guidedFollowUp({ role: "business", brief: r0.brief, materials: [], answers, asked: r0.questions.map((q) => q.id), transcript: [], message: "", round: 1 });
@@ -31,8 +41,9 @@ BriefSchema.parse(twice);
 const md = briefMarkdown({ brief: r1.brief, role: "business", materials: [{ id: "1", name: "spec.pdf", kind: "file", text: "x" }], answers, plan: null });
 assert.ok(md.startsWith("# Invoices are re-keyed by hand"));
 assert.ok(md.includes("## Follow-up Q&A") && md.includes("spec.pdf"));
+assert.ok(md.includes("## Systems & connection checklist"), "markdown includes Systems & connection checklist");
 assert.ok(!/\n\n\n/.test(md), "no blank-line runs");
-console.log("PASS: intake brief scoring, guided rounds, idempotent merge, markdown");
+console.log("PASS: intake brief scoring, guided rounds, idempotent merge, systems checklist, markdown");
 
 // ── model-facing pieces (no network) ─────────────────────────────────────────
 
@@ -93,15 +104,16 @@ console.log("PASS: gemini schema conversion, follow-up and plan normalisation");
 const ctx = { role: "developer" as const, materials: [], answers: [], asked: [], transcript: [], round: 0 };
 const asked = guidedFollowUp({ ...ctx, brief: EMPTY_BRIEF, message: "Who approves the budget?" });
 assert.deepEqual(asked.brief.openQuestions, ["Who approves the budget?"], "questions become open questions");
-const told = guidedFollowUp({ ...ctx, brief: EMPTY_BRIEF, message: "Support tickets are triaged by hand. It takes hours." });
-assert.equal(told.brief.problem, "Support tickets are triaged by hand. It takes hours.");
-assert.equal(told.brief.title, "Support tickets are triaged by hand");
+const told = guidedFollowUp({ ...ctx, brief: EMPTY_BRIEF, message: "Support tickets in ServiceNow are triaged by hand. It takes hours." });
+assert.equal(told.brief.problem, "Support tickets in ServiceNow are triaged by hand. It takes hours.");
+assert.equal(told.brief.title, "Support tickets in ServiceNow are triaged by hand");
+assert.ok(told.brief.systems.some((s) => s.name === "ServiceNow" && s.requiredValues.some((rv) => rv.isSecret)), "ServiceNow system and secret checklist detected");
 
 const an = guidedAnalyze({
   role: "developer",
   brief: EMPTY_BRIEF,
   materials: [
-    { id: "a", name: "spec.md", kind: "file", text: "# Spec\nThe portal is built on Next.js and PostgreSQL.\n- 400 invoices a week\n- Approvals over 5k need a manager" },
+    { id: "a", name: "spec.md", kind: "file", text: "# Spec\nThe portal is built on Next.js and PostgreSQL and reads SharePoint lists.\n- 400 invoices a week\n- Approvals over 5k need a manager" },
     { id: "b", name: "old.md", kind: "file", text: "ignored" },
   ],
   analyze: ["a"],
@@ -110,4 +122,5 @@ assert.equal(an.insights.length, 1, "only requested materials are analysed");
 assert.deepEqual(an.insights[0].technologies, ["Next.js", "PostgreSQL"]);
 assert.ok(an.insights[0].facts.includes("400 invoices a week"));
 assert.deepEqual(an.brief.stack, ["Next.js", "PostgreSQL"]);
+assert.ok(an.brief.systems.some((s) => s.name === "SharePoint"), "SharePoint detected from material text");
 console.log("PASS: guided free-form messages and material analysis");

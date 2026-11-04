@@ -1,10 +1,10 @@
 "use client";
 
 /**
- * Kit Studio workspace. On large screens it fills the viewport below the site
- * header as three independently scrolling panes: step navigator, step canvas,
- * and a live kit manifest. Below `lg` it collapses to one column with a
- * horizontal step strip and the manifest in a sheet.
+ * Kit Studio workspace.
+ * 7-step flow:
+ * 1 Discovery -> 2 Organisation -> 3 Project -> 4 Stack ->
+ * 5 Deployment Setup -> 6 Review & Push to GitLab -> 7 Deploy to Cloud
  */
 
 import { useEffect, useRef } from "react";
@@ -23,7 +23,9 @@ import { StepStack } from "./step-stack";
 import { StepOrg } from "./step-org";
 import { StepProject } from "./step-project";
 import { StepDiscovery } from "./step-discovery";
+import { StepDeploymentSetup } from "./step-deployment-setup";
 import { StepReview } from "./step-review";
+import { StepDeployToCloud } from "./step-deploy-to-cloud";
 
 export function KitBuilder({
   skills,
@@ -34,8 +36,8 @@ export function KitBuilder({
 }) {
   const s = useKitBuilderState({ skills, mcpServers });
   const canvasRef = useRef<HTMLDivElement>(null);
-  // The live manifest only earns its column on Review; earlier steps use the full width.
-  const showManifest = s.step === 5;
+  // The live manifest earns its right-hand column on Step 6 (Review & Push).
+  const showManifest = s.step === 6;
 
   // Each step starts at the top of the canvas (and of the page on mobile).
   useEffect(() => {
@@ -76,7 +78,13 @@ export function KitBuilder({
             <StepStack s={s} />
           </div>
           <div className={stepClass(5)}>
+            <StepDeploymentSetup s={s} />
+          </div>
+          <div className={stepClass(6)}>
             <StepReview s={s} />
+          </div>
+          <div className={stepClass(7)}>
+            <StepDeployToCloud s={s} />
           </div>
         </div>
         <StepFooter s={s} />
@@ -124,6 +132,7 @@ function MobileSteps({ s }: { s: ReturnType<typeof useKitBuilderState> }) {
 /** Back / continue bar pinned to the bottom of the canvas. */
 function StepFooter({ s }: { s: ReturnType<typeof useKitBuilderState> }) {
   const next = STEPS[s.step];
+  const currentStep = STEPS[s.step - 1] ?? STEPS[0];
   return (
     <div className="sticky bottom-0 z-20 border-t border-border/60 bg-background/85 px-4 py-2.5 backdrop-blur-md sm:px-6 lg:px-8">
       <div className="flex items-center justify-between gap-3">
@@ -144,14 +153,14 @@ function StepFooter({ s }: { s: ReturnType<typeof useKitBuilderState> }) {
               <span
                 key={step.n}
                 className={cn(
-                  "h-1.5 w-8 rounded-full transition-colors duration-500",
+                  "h-1.5 w-7 rounded-full transition-colors duration-500",
                   step.n < s.step ? "bg-success/70" : step.n === s.step ? "bg-primary" : "bg-muted",
                 )}
               />
             ))}
           </div>
           <span className="text-xs tabular-nums text-muted-foreground">
-            {s.step}/{STEPS.length} · {STEPS[s.step - 1].label}
+            {s.step}/{STEPS.length} · {currentStep.label}
           </span>
         </div>
 
@@ -175,8 +184,8 @@ function StepFooter({ s }: { s: ReturnType<typeof useKitBuilderState> }) {
               {next.label} <ArrowRight className="size-3.5" />
             </Button>
           ) : (
-            <Button type="button" size="sm" onClick={s.download}>
-              <Download className="size-3.5" /> Generate kit
+            <Button type="button" variant="outline" size="sm" onClick={s.download}>
+              <Download className="size-3.5" /> Download ZIP
             </Button>
           )}
         </div>

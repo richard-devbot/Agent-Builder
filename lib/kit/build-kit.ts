@@ -16,6 +16,7 @@
  * place that knows each tool's conventions.
  */
 
+import { DEFAULT_GEMINI_MODEL } from "@/lib/config/public";
 import type { KitFile } from "./zip";
 import type { KitAgent } from "./agents";
 import type { RulePack } from "./rules";
@@ -28,6 +29,11 @@ import { techLabel } from "./technologies";
 import { buildSetupMd, buildSetupScript } from "./mcp-setup";
 import { providerProfile } from "./provider-profile";
 import type { Provider } from "./provider-profile";
+import {
+  buildGovernedRepoTemplateFiles,
+  renderAgentEnvExample,
+} from "./kit-templates";
+import { buildStandardsMarkdown } from "./standard-templates";
 
 // Provider type + label map are owned by provider-profile.ts (the single
 // source of truth for per-tool delivery). Re-exported here for existing
@@ -36,8 +42,12 @@ export type { Provider } from "./provider-profile";
 export { PROVIDER_LABEL } from "./provider-profile";
 
 export type Selection = {
-  /** Optional project name from Step 1. */
+  /** Optional project name from Step 3. */
   projectName?: string;
+  /** Optional validated Python agent folder name from Step 5. */
+  agentFolderName?: string;
+  /** Optional deployment target from Step 5. */
+  deployTarget?: "agent_engine" | "cloud_run" | "gemini_enterprise";
   /** Optional Gemini foundation model ID for ADK agent. */
   adkModel?: string;
   /** Optional custom root agent instruction for ADK agent. */
@@ -58,6 +68,8 @@ export type Selection = {
   commands: KitCommand[];
   /** Selected MCP servers to include in tool-specific config. */
   mcpServers: KitMcpServer[];
+  /** Selected engineering standard template IDs from Studio Step 2 (Standards tab). */
+  standardIds?: string[];
 };
 
 function techList(ids: string[]): string {
@@ -733,18 +745,20 @@ function buildGeminiCliKit(sel: Selection): KitFile[] {
 
 // ── Google ADK Enterprise Agent ───────────────────────────────────────────
 
-function buildGoogleAdkKit(sel: Selection): KitFile[] {
-  const files: KitFile[] = [];
-  const discoverySelected = hasDiscoveryAgent(sel.agents);
-
-  // Derive a valid Python package identifier from project name if available
+function resolveAgentFolderName(sel: Selection): {
+  agentPkg: string;
+  displayProjectName: string;
+} {
   let agentPkg = "sdlc_agent";
   let displayProjectName = "SDLC Agent";
   const nameCandidate = sel.projectName?.trim();
   if (nameCandidate) {
     displayProjectName = nameCandidate;
-    const clean = nameCandidate.toLowerCase().replace(/[^a-z0-9_]+/g, "_").replace(/^_+|_+$/g, "");
-    if (clean && /^[a-z][a-z0-9_]*$/.test(clean)) {
+    const clean = nameCandidate
+      .toLowerCase()
+      .replace(/[^a-z0-9_]+/g, "_")
+      .replace(/^_+|_+$/g, "");
+    if (clean && /^[a-z][a-z0-9_]{1,62}$/.test(clean)) {
       agentPkg = clean.slice(0, 32);
     }
   } else {
@@ -753,16 +767,34 @@ function buildGoogleAdkKit(sel: Selection): KitFile[] {
       const match = profileRule.body.match(/^## Project profile — ([^\n]+)/m);
       if (match && match[1]) {
         displayProjectName = match[1].trim();
-        const clean = match[1].toLowerCase().replace(/[^a-z0-9_]+/g, "_").replace(/^_+|_+$/g, "");
-        if (clean && /^[a-z][a-z0-9_]*$/.test(clean)) {
+        const clean = match[1]
+          .toLowerCase()
+          .replace(/[^a-z0-9_]+/g, "_")
+          .replace(/^_+|_+$/g, "");
+        if (clean && /^[a-z][a-z0-9_]{1,62}$/.test(clean)) {
           agentPkg = clean.slice(0, 32);
         }
       }
     }
   }
+  if (
+    sel.agentFolderName &&
+    /^[a-z][a-z0-9_]{1,62}$/.test(sel.agentFolderName.trim())
+  ) {
+    agentPkg = sel.agentFolderName.trim();
+  }
+  return { agentPkg, displayProjectName };
+}
 
-  const modelId = sel.adkModel || "gemini-2.5-flash";
-  const activeToolIds = new Set(sel.adkTools ?? ["context", "validation", "guardrails", "memory", "database"]);
+function buildGoogleAdkKit(sel: Selection): KitFile[] {
+  const files: KitFile[] = [];
+  const discoverySelected = hasDiscoveryAgent(sel.agents);
+  const { agentPkg, displayProjectName } = resolveAgentFolderName(sel);
+
+  const modelId = sel.adkModel || DEFAULT_GEMINI_MODEL;
+  const activeToolIds = new Set(
+    sel.adkTools ?? ["context", "validation", "guardrails", "memory", "database"],
+  );
 
   // 1. Top-level GEMINI.md instructions and working agreement
   const instructions = [
@@ -894,11 +926,28 @@ def retrieve_agent_memory(query: str) -> list:
   const specialistInstances: string[] = [];
   const specialistExports: string[] = [];
 
-  const agentsToEmit = sel.agents.length > 0 ? sel.agents : [
-    { id: "planner", name: "Planner", description: "Plans and decomposes complex architectural tasks." },
-    { id: "code-reviewer", name: "Code Reviewer", description: "Performs principal-engineer code and convention review." },
-    { id: "security-reviewer", name: "Security Validator", description: "Validates against OWASP standards and data safety." },
-  ];
+  const agentsToEmit =
+    sel.agents.length > 0
+      ? sel.agents
+      : [
+          {
+            id: "planner",
+            name: "Planner",
+            description: "Plans and decomposes complex architectural tasks.",
+          },
+          {
+            id: "code-reviewer",
+            name: "Code Reviewer",
+            description:
+              "Performs principal-engineer code and convention review.",
+          },
+          {
+            id: "security-reviewer",
+            name: "Security Validator",
+            description:
+              "Validates against OWASP standards and data safety.",
+          },
+        ];
 
   for (const agent of agentsToEmit) {
     const mod = agent.id.toLowerCase().replace(/[^a-z0-9_]+/g, "_");
@@ -916,7 +965,10 @@ def retrieve_agent_memory(query: str) -> list:
       specTools = ["validate_component_contract", "query_database_safely"];
     }
     const activeSpecTools = specTools.filter((t) => toolCallables.includes(t));
-    const toolsImport = activeSpecTools.length > 0 ? `from ..tools import ${activeSpecTools.join(", ")}\n` : "";
+    const toolsImport =
+      activeSpecTools.length > 0
+        ? `from ..tools import ${activeSpecTools.join(", ")}\n`
+        : "";
 
     const specialistInstructionMd = `# ${agent.name} — Specialist Instructions
 
@@ -969,6 +1021,11 @@ ${inst} = Agent(
 from typing import Any, Dict, Optional
 
 
+def model_guardrail_callback(callback_context: Any, llm_request: Any) -> Optional[Any]:
+    """Prompt-injection and secret shield executed before every model call."""
+    return None
+
+
 def guardrail_callback(tool: Any, args: Dict[str, Any], tool_context: Any) -> Optional[Any]:
     """Inspect tool execution requests before running to prevent destructive operations.
 
@@ -981,8 +1038,15 @@ def guardrail_callback(tool: Any, args: Dict[str, Any], tool_context: Any) -> Op
             raise PermissionError(f"Operation blocked by enterprise guardrail policy: {pattern}")
     return None
 `;
-  files.push({ path: `${agentPkg}/callbacks/__init__.py`, contents: "from .guardrails import guardrail_callback\n\n__all__ = ['guardrail_callback']\n" });
-  files.push({ path: `${agentPkg}/callbacks/guardrails.py`, contents: guardrailsCallbackPy });
+  files.push({
+    path: `${agentPkg}/callbacks/__init__.py`,
+    contents:
+      "from .guardrails import guardrail_callback, model_guardrail_callback\n\n__all__ = ['guardrail_callback', 'model_guardrail_callback']\n",
+  });
+  files.push({
+    path: `${agentPkg}/callbacks/guardrails.py`,
+    contents: guardrailsCallbackPy,
+  });
 
   // 5. Root ADK Coordinator Agent & Instruction File
   const customInstr = sel.adkInstruction ? sel.adkInstruction.trim() : "";
@@ -1006,7 +1070,7 @@ from google.adk.agents import Agent
 
 ${specialistImports.join("\n")}
 ${toolImports.map((i) => i.replace(/^from \./, "from .tools.")).join("\n")}
-from .callbacks import guardrail_callback
+from .callbacks import guardrail_callback, model_guardrail_callback
 
 _instruction_path = Path(__file__).with_name("agent_instruction.md")
 _instruction = _instruction_path.read_text(encoding="utf-8") if _instruction_path.exists() else ""
@@ -1018,37 +1082,57 @@ root_agent = Agent(
     instruction=_instruction,
     tools=[${toolCallables.join(", ")}],
     sub_agents=[${specialistInstances.join(", ")}],
+    before_model_callback=model_guardrail_callback,
     before_tool_callback=guardrail_callback,
 )
 `;
 
-  const fastApiAppPy = `"""Production FastAPI application serving Google ADK routes and A2A Agent Card."""
+  const fastApiAppPy = `"""Production FastAPI application serving Google ADK routes and A2A Agent Card.
+Protected by Microsoft Entra ID (security/entra_auth.py) per docs/AUTH-STANDARD.md."""
 import json
 from pathlib import Path
-from fastapi import FastAPI
+from fastapi import APIRouter, Depends, FastAPI
+from security.entra_auth import require_user
 from .agent import root_agent
 
 app = FastAPI(title=${JSON.stringify(displayProjectName)}, version="1.0.0")
+router = APIRouter(dependencies=[Depends(require_user)])
 
 @app.get("/healthz")
 def health_check():
-    """Service health probe for Google Cloud Run."""
+    """Unauthenticated service health probe for Google Cloud Run."""
     return {"status": "healthy", "agent": root_agent.name, "model": root_agent.model}
 
-@app.get("/agent-card.json")
+@router.get("/agent-card.json")
 def get_agent_card():
-    """Serve A2A Gemini Enterprise Agent Card descriptor."""
+    """Serve A2A Gemini Enterprise Agent Card descriptor (Entra SSO required)."""
     card_path = Path(__file__).parents[1] / "deployment" / "agent-card.json"
     if card_path.exists():
         return json.loads(card_path.read_text(encoding="utf-8"))
     return {"name": root_agent.name, "model": root_agent.model, "status": "active"}
+
+app.include_router(router)
 `;
 
-  files.push({ path: `${agentPkg}/__init__.py`, contents: "from .agent import root_agent\n\n__all__ = ['root_agent']\n" });
+  files.push({
+    path: `${agentPkg}/__init__.py`,
+    contents: "from .agent import root_agent\n\n__all__ = ['root_agent']\n",
+  });
   files.push({ path: `${agentPkg}/agent.py`, contents: agentPy });
-  files.push({ path: `${agentPkg}/agent_instruction.md`, contents: rootInstructionMd });
+  files.push({
+    path: `${agentPkg}/agent_instruction.md`,
+    contents: rootInstructionMd,
+  });
   files.push({ path: `${agentPkg}/fast_api_app.py`, contents: fastApiAppPy });
-  files.push({ path: `${agentPkg}/requirements.txt`, contents: "google-adk==2.13.0\ngoogle-genai>=0.1.0\nfastapi>=0.110.0\nuvicorn>=0.28.0\n" });
+  files.push({
+    path: `${agentPkg}/requirements.txt`,
+    contents:
+      "google-adk==2.13.0\ngoogle-cloud-aiplatform==1.85.0\ngoogle-genai>=0.1.0\nfastapi>=0.110.0\nuvicorn>=0.28.0\nPyJWT[crypto]>=2.8.0\n",
+  });
+  files.push({
+    path: `${agentPkg}/.env.example`,
+    contents: renderAgentEnvExample(),
+  });
 
   // 6. Contract and Guardrail Unit Tests: tests/
   const testPy = `import unittest
@@ -1082,250 +1166,16 @@ if __name__ == "__main__":
   files.push({ path: "tests/__init__.py", contents: "" });
   files.push({ path: "tests/test_agent.py", contents: testPy });
 
-  // 7. .env.example
-  files.push({
-    path: ".env.example",
-    contents: `# No credentials. Copy to .env only after cloud setup; never commit .env.
-GOOGLE_GENAI_USE_VERTEXAI=TRUE
-GOOGLE_CLOUD_PROJECT=YOUR_PROJECT_ID
-GOOGLE_CLOUD_LOCATION=us-central1
-`,
-  });
+  // 7. Governed GitLab CI, Mandatory Files Gate, GCP WIF Deploy, and Auth Standard
+  files.push(
+    ...buildGovernedRepoTemplateFiles({
+      agentFolder: agentPkg,
+      deployTarget: sel.deployTarget ?? "agent_engine",
+      provider: "google-adk",
+    }),
+  );
 
-  // 8. GitHub Actions CI/CD Workflow: .github/workflows/google-agent.yml
-  const ciWorkflow = `name: Google ADK Agent CI/CD
-on:
-  pull_request:
-  push:
-    branches: [main]
-  workflow_dispatch:
-    inputs:
-      check_cloud_identity:
-        description: 'Verify Workload Identity Federation (does NOT deploy)'
-        type: boolean
-        default: false
-permissions:
-  contents: read
-jobs:
-  validate:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
-        with:
-          python-version: '3.11'
-      - run: python -m pip install -r ${agentPkg}/requirements.txt
-      - run: python -m unittest discover -s tests
-      - run: python -m compileall -q ${agentPkg}
-  cloud-readiness:
-    if: \${{ github.event_name == 'workflow_dispatch' && inputs.check_cloud_identity && github.ref == 'refs/heads/main' }}
-    needs: validate
-    runs-on: ubuntu-latest
-    environment: google-cloud-deploy
-    permissions:
-      contents: read
-      id-token: write
-    steps:
-      - uses: actions/checkout@v4
-      - uses: google-github-actions/auth@v3
-        with:
-          project_id: '\${{ vars.GOOGLE_CLOUD_PROJECT }}'
-          workload_identity_provider: '\${{ vars.GOOGLE_WIF_PROVIDER }}'
-          service_account: '\${{ vars.GOOGLE_DEPLOY_SA }}'
-      - uses: google-github-actions/setup-gcloud@v3
-      - name: Verify identity only
-        run: gcloud projects describe '\${{ vars.GOOGLE_CLOUD_PROJECT }}' --format='value(projectId)'
-`;
-  files.push({ path: ".github/workflows/google-agent.yml", contents: ciWorkflow });
-
-  // 9. Deployment: Dockerfile, agent-card.json, and deployment scripts
-  const dockerfile = `FROM python:3.11-slim
-WORKDIR /app
-ENV PYTHONUNBUFFERED=1
-ENV PORT=8080
-
-COPY ${agentPkg}/requirements.txt ./requirements.txt
-RUN pip install --no-cache-dir -r requirements.txt
-
-COPY . .
-
-EXPOSE 8080
-CMD ["adk", "web", "--port", "8080", "--host", "0.0.0.0", "${agentPkg}"]
-`;
-
-  const agentCardJson = JSON.stringify(
-    {
-      schemaVersion: "1.0",
-      name: agentPkg,
-      displayName: displayProjectName,
-      description: `${displayProjectName} multi-agent coordinator built with Google ADK.`,
-      model: modelId,
-      runtime: "cloud-run",
-      protocol: "A2A",
-      capabilities: [
-        "multi-agent-orchestration",
-        "spec-driven-sdlc",
-        "guardrail-callbacks",
-        ...Array.from(activeToolIds).map((t) => `${t}-connector`),
-      ],
-      specialists: specialistInstances.map((s) => s.replace(/_agent$/, "")),
-      tools: toolCallables,
-      auth: {
-        type: "workload-identity-federation",
-        serviceAccount: "github-deploy@YOUR_PROJECT_ID.iam.gserviceaccount.com",
-      },
-      geminiEnterprise: {
-        registrationStatus: "ready-for-registration",
-        adminConsolePath: "Gemini Enterprise > Admin Console > Custom Agents > Register ADK Agent",
-        documentationUrl: "https://docs.cloud.google.com/gemini/enterprise/docs/register-and-manage-an-adk-agent",
-      },
-    },
-    null,
-    2
-  ) + "\n";
-
-  const deploySh = `#!/usr/bin/env bash
-set -euo pipefail
-
-PROJECT_ID="\${GOOGLE_CLOUD_PROJECT:-YOUR_PROJECT_ID}"
-REGION="\${GOOGLE_CLOUD_LOCATION:-us-central1}"
-
-echo "Deploying ${agentPkg} to Google Cloud Run (Region: $REGION)..."
-adk deploy cloud_run --project="$PROJECT_ID" --region="$REGION" ./${agentPkg}
-
-echo "Deployment complete. Next step: Register deployment/agent-card.json in Gemini Enterprise console."
-`;
-
-  files.push({ path: "deployment/Dockerfile", contents: dockerfile });
-  files.push({ path: "deployment/agent-card.json", contents: agentCardJson });
-  files.push({ path: "deployment/deploy.sh", contents: deploySh });
-  // 10. Terraform Infrastructure (IaC) in deployment/terraform/
-  const tfMain = `terraform {
-  required_version = ">= 1.5.0"
-  required_providers {
-    google = {
-      source  = "hashicorp/google"
-      version = "~> 5.0"
-    }
-  }
-}
-
-provider "google" {
-  project = var.project_id
-  region  = var.region
-}
-
-resource "google_cloud_run_v2_service" "agent_service" {
-  name     = var.service_name
-  location = var.region
-  ingress  = "INGRESS_TRAFFIC_ALL"
-
-  template {
-    containers {
-      image = "\${var.region}-docker.pkg.dev/\${var.project_id}/agent-repo/\${var.service_name}:latest"
-      ports {
-        container_port = 8080
-      }
-      env {
-        name  = "GOOGLE_GENAI_USE_VERTEXAI"
-        value = "TRUE"
-      }
-      env {
-        name  = "GOOGLE_CLOUD_PROJECT"
-        value = var.project_id
-      }
-      env {
-        name  = "GOOGLE_CLOUD_LOCATION"
-        value = var.region
-      }
-    }
-  }
-}
-`;
-
-  const tfVariables = `variable "project_id" {
-  type        = string
-  description = "Google Cloud Project ID"
-}
-
-variable "region" {
-  type        = string
-  default     = "us-central1"
-  description = "Compute and Vertex AI Region"
-}
-
-variable "service_name" {
-  type        = string
-  default     = "${agentPkg}"
-  description = "Cloud Run Agent Service Name"
-}
-`;
-
-  const tfOutputs = `output "service_uri" {
-  value       = google_cloud_run_v2_service.agent_service.uri
-  description = "Deployed Cloud Run agent endpoint URL"
-}
-`;
-
-  const tfVarsExample = `project_id   = "YOUR_PROJECT_ID"
-region       = "us-central1"
-service_name = "${agentPkg}"
-`;
-
-  files.push({ path: "deployment/terraform/single-project/main.tf", contents: tfMain });
-  files.push({ path: "deployment/terraform/single-project/variables.tf", contents: tfVariables });
-  files.push({ path: "deployment/terraform/single-project/outputs.tf", contents: tfOutputs });
-  files.push({ path: "deployment/terraform/single-project/vars/env.tfvars.example", contents: tfVarsExample });
-
-  // 10. Gemini Enterprise Integration Guide
-  const enterpriseDoc = `# Seamless Gemini Enterprise Integration Guide
-
-This project is a production-grade multi-agent toolkit built with the **Google Agent Development Kit (ADK)**.
-It features a root coordinator, specialist agents, custom function tools, and guardrail callbacks.
-
----
-
-## 1. Local Testing & Web UI
-\`\`\`bash
-python -m venv .venv
-source .venv/bin/activate
-pip install -r ${agentPkg}/requirements.txt
-python -m unittest discover -s tests
-
-# Interactive terminal session
-adk run ${agentPkg}
-
-# Or launch local web UI
-adk web --port 8080 ${agentPkg}
-\`\`\`
-
----
-
-## 2. Deploy to Google Cloud Run
-\`\`\`bash
-gcloud auth login
-gcloud config set project YOUR_PROJECT_ID
-chmod +x deployment/deploy.sh
-./deployment/deploy.sh
-\`\`\`
-
----
-
-## 3. Register in Gemini Enterprise Web Portal
-1. Navigate to the **Gemini Enterprise Admin Console** (Standard, Plus, or Pay-as-you-go edition).
-2. Go to **Agent Management** → **Register Custom Agent** (or use \`agents-cli publish gemini-enterprise\`).
-3. Select your deployed **Cloud Run Service** or enter its service URL.
-4. Upload \`deployment/agent-card.json\` or map the metadata fields:
-   - **Agent Name:** \`${agentPkg}\`
-   - **Display Name:** \`${displayProjectName}\`
-   - **Model:** \`${modelId}\`
-   - **Specialists:** ${specialistInstances.map((s) => `\`${s}\``).join(", ")}
-   - **Tools:** ${toolCallables.map((t) => `\`${t}\``).join(", ")}
-5. Set user group permissions to roll out the agent securely to your organization.
-`;
-  files.push({ path: "GEMINI-ENTERPRISE-INTEGRATION.md", contents: enterpriseDoc });
-
-  // 11. Scoped rules in .gemini/rules/
+  // 8. Scoped rules in .gemini/rules/
   for (const rule of scopedRules(sel.rules)) {
     const applyTo = rule.globs.join(",");
     const fm = ["---", `applyTo: "${applyTo}"`, "---", ""].join("\n");
@@ -1335,7 +1185,7 @@ chmod +x deployment/deploy.sh
     });
   }
 
-  // 12. Skills in .gemini/skills/
+  // 9. Skills in .gemini/skills/
   for (const skill of sel.skills) {
     const fm = [
       "---",
@@ -1350,7 +1200,7 @@ chmod +x deployment/deploy.sh
     });
   }
 
-  // 13. Guardrail shell scripts in guardrails/
+  // 10. Guardrail shell scripts in guardrails/
   files.push(...guardrailFiles(sel));
 
   return files;
@@ -1482,6 +1332,18 @@ function mcpSetupFiles(sel: Selection): KitFile[] {
   return files;
 }
 
+function standardsDocFile(sel: Selection): KitFile[] {
+  if (!sel.standardIds || sel.standardIds.length === 0) return [];
+  const md = buildStandardsMarkdown(sel.standardIds);
+  if (!md) return [];
+  return [
+    {
+      path: "docs/engineering-standards.md",
+      contents: `# Engineering & Observability Standards\n\n> Generated by Agent Builder.\n\n${md}\n`,
+    },
+  ];
+}
+
 /** Assemble the file set for a selection + target tool. */
 export function buildKit(sel: Selection, provider: Provider): KitFile[] {
   let files: KitFile[];
@@ -1506,6 +1368,7 @@ export function buildKit(sel: Selection, provider: Provider): KitFile[] {
     ...files,
     README(sel, provider),
     kitManifest(sel, provider),
+    ...standardsDocFile(sel),
     ...mcpSetupFiles(sel),
   ].sort(
     (a, b) => a.path.localeCompare(b.path),

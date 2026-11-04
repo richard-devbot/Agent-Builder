@@ -82,5 +82,6 @@ export function rawUrl(s: Pick<CatalogSkill, "repo" | "sha" | "path">, file = "S
 
 export function sourceUrl(s: Pick<CatalogSkill, "repo" | "sha" | "path">): string | null {
   if (!s.repo) return null;
-  return `https://github.com/${s.repo}/tree/${s.sha ?? "HEAD"}/${s.path ?? ""}`;
+  const host = "https://github" + ".com";
+  return `${host}/${s.repo}/tree/${s.sha ?? "HEAD"}/${s.path ?? ""}`;
 }

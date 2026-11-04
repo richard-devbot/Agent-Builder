@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { Bot, Menu, Search } from "lucide-react";
+import { Bot, LogOut, Menu, Search, Shield } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
   Sheet,
@@ -12,6 +12,7 @@ import {
   SheetTrigger,
 } from "@/components/ui/sheet";
 import { ThemeToggle } from "@/components/theme-toggle";
+import type { SessionUser } from "@/lib/auth/roles";
 import { siteConfig } from "@/lib/site-config";
 import { cn } from "@/lib/utils";
 
@@ -19,7 +20,6 @@ const NAV_LINKS = [
   { href: "/studio", label: "Kit Studio" },
   { href: "/browse", label: "Library" },
   { href: "/playbooks", label: "Playbooks" },
-  { href: "/integrations", label: "Cloud Deploy" },
   { href: "/contribute", label: "Governance" },
 ] as const;
 
@@ -29,7 +29,7 @@ function isActive(pathname: string, href: string) {
   return pathname.startsWith(href);
 }
 
-export function SiteHeader() {
+export function SiteHeader({ user = null }: { user?: SessionUser | null }) {
   const pathname = usePathname();
   // Workspace-style pages span the full viewport, so their header does too.
   const fullBleed = ["/studio", "/browse"].some((p) => pathname.startsWith(p));
@@ -82,6 +82,25 @@ export function SiteHeader() {
             <Search className="size-3.5" aria-hidden />
             <span>Search library</span>
           </Link>
+          {user && (
+            <div className="hidden items-center gap-1.5 rounded-md border bg-muted/30 px-2.5 py-1 text-xs sm:inline-flex">
+              <Shield className="size-3.5 text-primary" aria-hidden />
+              <span className="max-w-32 truncate font-medium">{user.name}</span>
+              <span className="rounded bg-primary/15 px-1.5 py-0.5 text-[10px] font-semibold text-primary">
+                {user.roles.join(", ")}
+              </span>
+              <form action="/api/auth/signout" method="POST" className="inline-flex">
+                <button
+                  type="submit"
+                  title="Sign out"
+                  className="ml-1 cursor-pointer text-muted-foreground hover:text-foreground"
+                  aria-label="Sign out"
+                >
+                  <LogOut className="size-3.5" aria-hidden />
+                </button>
+              </form>
+            </div>
+          )}
           <ThemeToggle />
           <MobileNav pathname={pathname} />
         </div>

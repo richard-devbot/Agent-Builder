@@ -28,6 +28,7 @@ import { RULES, RULE_KIND_LABEL } from "@/lib/kit/rules";
 import { HOOKS } from "@/lib/kit/hooks";
 import { COMMANDS } from "@/lib/kit/commands";
 import { PROVIDER_LABEL } from "@/lib/kit/build-kit";
+import { APPROVED_GEMINI_MODELS } from "@/lib/config/public";
 import {
   BulkActions,
   Chip,
@@ -285,10 +286,12 @@ export function StepStack({ s }: { s: KitBuilderState }) {
                 onChange={(e) => s.setAdkModel(e.target.value)}
                 className="h-9 w-full rounded-lg border border-input bg-background px-3 text-sm shadow-xs outline-none transition-colors hover:border-primary/40 focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/40"
               >
-                <option value="gemini-2.5-flash">gemini-2.5-flash · recommended, fast with tools</option>
-                <option value="gemini-2.5-pro">gemini-2.5-pro · complex reasoning, multi-agent</option>
-                <option value="gemini-2.0-flash">gemini-2.0-flash · low latency</option>
-                <option value="gemini-1.5-pro">gemini-1.5-pro · long context window</option>
+                <option value="">Select an approved model…</option>
+                {APPROVED_GEMINI_MODELS.map((m) => (
+                  <option key={m.id} value={m.id}>
+                    {m.label}{m.note ? ` · ${m.note}` : ""}
+                  </option>
+                ))}
               </select>
               <p className="mt-1 text-xs text-muted-foreground">Pinned in agent.py and deployment/agent-card.json.</p>
             </div>

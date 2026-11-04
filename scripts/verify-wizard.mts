@@ -2,7 +2,9 @@
  * Verifies the wizard's step-2 (org guidelines) and step-3 (project profile)
  * outputs actually land in the generated instruction files for every provider.
  */
+import { NextRequest } from "next/server";
 import { buildKit, type Selection, type Provider } from "../lib/kit/build-kit";
+import { proxy } from "../proxy";
 import {
   orgGuidelineRules,
   RECOMMENDED_ORG_GUIDELINE_IDS,
@@ -142,7 +144,40 @@ for (const p of PROVIDERS) {
     files.some((f) => f.path.includes("legacy-migration-playbook")),
     `[${p}] legacy migration playbook skill emitted`,
   );
+  if (p === "google-adk") {
+    assert(
+      !files.some((f) => f.path.startsWith(".github/")),
+      "[google-adk] no .github/ workflow files emitted",
+    );
+    assert(
+      files.some((f) => f.path === ".gitlab-ci.yml"),
+      "[google-adk] .gitlab-ci.yml emitted",
+    );
+    assert(
+      !files.some((f) => f.path === "Dockerfile"),
+      "[google-adk] Dockerfile omitted when deployTarget is not cloud_run",
+    );
+  }
 }
+
+const cloudRunFiles = buildKit({ ...sel, deployTarget: "cloud_run" }, "google-adk");
+assert(
+  cloudRunFiles.some((f) => f.path === "Dockerfile"),
+  "[google-adk] Dockerfile emitted when deployTarget is cloud_run",
+);
+
+assert(typeof proxy === "function", "proxy.ts exports a synchronous function named `proxy`");
+const unauthPageRes = await proxy(new NextRequest("http://localhost:3000/studio"));
+assert(
+  unauthPageRes.status === 307 &&
+    (unauthPageRes.headers.get("location") ?? "").includes("/login"),
+  "proxy redirects unauthenticated page requests to /login",
+);
+const unauthApiRes = await proxy(new NextRequest("http://localhost:3000/api/intake/status"));
+assert(
+  unauthApiRes.status === 401,
+  "proxy returns 401 JSON for unauthenticated /api/* requests",
+);
 
 if (process.exitCode) console.error("\nSome checks FAILED");
 else console.log("\nAll wizard checks passed");

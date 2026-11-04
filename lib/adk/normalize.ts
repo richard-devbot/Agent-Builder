@@ -22,8 +22,9 @@ import {
   type AdkProject,
   type AdkTool,
 } from "@/contracts/adk";
+import { DEFAULT_GEMINI_MODEL } from "@/lib/config/public";
 
-export const DEFAULT_ADK_MODEL = "gemini-3.8-flash";
+export const DEFAULT_ADK_MODEL = DEFAULT_GEMINI_MODEL;
 
 export type LooseAdkProject = {
   packageName?: string;

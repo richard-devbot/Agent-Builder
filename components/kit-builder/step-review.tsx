@@ -1,27 +1,45 @@
 "use client";
 
-/** Step 5 — readiness checks and a summary of everything in the kit before generating. */
+/**
+ * Step 6 — Review & Push to GitLab.
+ * Existing file tree/preview plus primary "Push to GitLab" action (Phase D)
+ * and secondary "Download ZIP" action.
+ */
 
+import { useState } from "react";
+import Link from "next/link";
 import {
   AlertTriangle,
+  ArrowRight,
   ArrowUpRight,
   Bot,
   CheckCircle2,
-  Library,
   Circle,
   Download,
+  ExternalLink,
+  GitBranch,
+  Library,
+  Loader2,
   Plug,
   ScrollText,
   ShieldCheck,
   Sparkles,
   TerminalSquare,
+  UploadCloud,
 } from "lucide-react";
+import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
-import { cn } from "@/lib/utils";
 import { PROVIDER_LABEL } from "@/lib/kit/build-kit";
+import {
+  loadLastPushRecord,
+  saveLastPushRecord,
+  type GitLabPushRecord,
+} from "@/lib/storage";
+import { cn } from "@/lib/utils";
 import { Count, Panel, StepHeader } from "./primitives";
 import { PROVIDER_META } from "./providers";
 import { readiness } from "./readiness";
+import { buildCiVariablesFromSetup } from "./step-deployment-setup";
 import type { KitBuilderState } from "./use-kit-builder-state";
 
 type ContentGroup = {
@@ -37,6 +55,96 @@ export function StepReview({ s }: { s: KitBuilderState }) {
   const authoredSlugs = new Set(s.authoredSkills.map((a) => a.slug));
   const checks = readiness(s);
   const blocking = checks.filter((c) => !c.ok && !c.optional);
+
+  const [pushing, setPushing] = useState(false);
+  const [pushError, setPushError] = useState<{
+    status: number;
+    message: string;
+  } | null>(null);
+  const [pushResult, setPushResult] = useState<GitLabPushRecord | null>(() =>
+    loadLastPushRecord(),
+  );
+
+  async function pushToGitLab() {
+    const projectSlug =
+      s.deploymentSetup.gitlabProjectSlug.trim() ||
+      s.projectName
+        .trim()
+        .toLowerCase()
+        .replace(/[^a-z0-9-_]+/g, "-")
+        .replace(/^-+|-+$/g, "");
+    const agentFolder =
+      s.deploymentSetup.agentFolderName.trim() ||
+      s.projectName
+        .trim()
+        .toLowerCase()
+        .replace(/[^a-z0-9_]+/g, "_")
+        .replace(/^_+|_+$/g, "") ||
+      "team_agent";
+
+    if (!projectSlug) {
+      toast.error(
+        "Set a GitLab project slug in Step 5 (Deployment Setup) before pushing.",
+      );
+      s.setStep(5);
+      return;
+    }
+
+    setPushing(true);
+    setPushError(null);
+    try {
+      const res = await fetch("/api/gitlab/push", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          groupPath: s.deploymentSetup.gitlabGroupPath.trim() || undefined,
+          projectName: projectSlug,
+          agentFolderName: agentFolder,
+          kitVersion: "2.13.0",
+          ciVariables: buildCiVariablesFromSetup(s.deploymentSetup),
+          files: s.files.map((f) => ({
+            path: f.path,
+            contents: f.contents,
+          })),
+        }),
+      });
+      const data = (await res.json()) as Partial<GitLabPushRecord> & {
+        error?: string;
+      };
+      if (!res.ok) {
+        setPushError({
+          status: res.status,
+          message:
+            data.error || `GitLab push failed with status ${res.status}.`,
+        });
+        toast.error(data.error || "GitLab push failed.");
+        return;
+      }
+      if (data.projectUrl && data.commitSha && data.projectId) {
+        const record: GitLabPushRecord = {
+          projectId: data.projectId,
+          projectPath: data.projectPath || projectSlug,
+          projectUrl: data.projectUrl,
+          commitSha: data.commitSha,
+          branch: data.branch || "main",
+          mergeRequestUrl: data.mergeRequestUrl,
+          pipelineUrl: data.pipelineUrl,
+          pushedAt: new Date().toISOString(),
+        };
+        saveLastPushRecord(record);
+        setPushResult(record);
+        toast.success("Kit committed and pushed to GitLab.");
+      }
+    } catch {
+      setPushError({
+        status: 500,
+        message: "Network error while pushing kit to GitLab.",
+      });
+      toast.error("Network error while pushing kit to GitLab.");
+    } finally {
+      setPushing(false);
+    }
+  }
 
   /** Prefer exact path, then endsWith, then includes, then a content search. */
   function findFile(patterns: string[], fallbacks: string[] = []) {
@@ -164,13 +272,96 @@ export function StepReview({ s }: { s: KitBuilderState }) {
   return (
     <>
       <StepHeader
-        n={5}
+        n={6}
         actions={
-          <Button onClick={s.download}>
-            <Download className="size-4" /> Generate kit
-          </Button>
+          <div className="flex flex-wrap items-center gap-2">
+            <Button variant="outline" onClick={s.download}>
+              <Download className="size-4" /> Download ZIP
+            </Button>
+            <Button onClick={pushToGitLab} disabled={pushing}>
+              {pushing ? (
+                <>
+                  <Loader2 className="size-4 animate-spin" /> Pushing to GitLab…
+                </>
+              ) : (
+                <>
+                  <UploadCloud className="size-4" /> Push to GitLab
+                </>
+              )}
+            </Button>
+          </div>
         }
       />
+
+      {pushError && (
+        <div
+          role="alert"
+          className="flex flex-col gap-2 rounded-xl border border-destructive/40 bg-destructive/10 p-4 text-xs text-destructive sm:flex-row sm:items-center sm:justify-between"
+        >
+          <div className="flex items-start gap-2.5">
+            <AlertTriangle className="mt-0.5 size-4 shrink-0" />
+            <div>
+              <p className="font-semibold">GitLab Push Error ({pushError.status})</p>
+              <p className="mt-0.5">{pushError.message}</p>
+            </div>
+          </div>
+          {pushError.status === 401 && (
+            <Link
+              href="/api/gitlab/login?returnTo=/studio"
+              prefetch={false}
+              className="inline-flex h-8 shrink-0 items-center gap-1.5 rounded-lg bg-destructive px-3 font-medium text-white"
+            >
+              <GitBranch className="size-3.5" /> Re-authenticate GitLab
+            </Link>
+          )}
+        </div>
+      )}
+
+      {pushResult && (
+        <div className="flex flex-col gap-3 rounded-xl border border-success/40 bg-success/10 p-4 text-xs sm:flex-row sm:items-center sm:justify-between">
+          <div className="space-y-1">
+            <p className="flex items-center gap-1.5 text-sm font-semibold text-success">
+              <CheckCircle2 className="size-4" /> Pushed to GitLab ({pushResult.branch})
+            </p>
+            <div className="flex flex-wrap items-center gap-3 text-muted-foreground">
+              <a
+                href={pushResult.projectUrl}
+                target="_blank"
+                rel="noreferrer"
+                className="inline-flex items-center gap-1 font-mono text-foreground underline"
+              >
+                {pushResult.projectPath} <ExternalLink className="size-3" />
+              </a>
+              <span>
+                Commit: <code className="font-mono">{pushResult.commitSha.slice(0, 8)}</code>
+              </span>
+              {pushResult.mergeRequestUrl && (
+                <a
+                  href={pushResult.mergeRequestUrl}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="inline-flex items-center gap-1 font-medium text-primary underline"
+                >
+                  Merge Request <ExternalLink className="size-3" />
+                </a>
+              )}
+              {pushResult.pipelineUrl && (
+                <a
+                  href={pushResult.pipelineUrl}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="inline-flex items-center gap-1 font-medium text-primary underline"
+                >
+                  Pipeline <ExternalLink className="size-3" />
+                </a>
+              )}
+            </div>
+          </div>
+          <Button size="sm" onClick={() => s.setStep(7)}>
+            Deploy to Cloud <ArrowRight className="size-3.5" />
+          </Button>
+        </div>
+      )}
 
       {/* Summary banner */}
       <div className="relative overflow-hidden rounded-xl border bg-gradient-to-br from-primary/12 via-card to-card p-5">
@@ -183,7 +374,7 @@ export function StepReview({ s }: { s: KitBuilderState }) {
             <div>
               <p className="text-lg font-semibold tracking-tight">{s.projectName || "Untitled kit"}</p>
               <p className="text-sm text-muted-foreground">
-                {PROVIDER_LABEL[provider]} · {s.orgName}
+                {PROVIDER_LABEL[provider]}{s.orgName ? ` · ${s.orgName}` : ""}
               </p>
             </div>
           </div>

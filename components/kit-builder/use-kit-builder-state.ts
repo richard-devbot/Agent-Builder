@@ -21,6 +21,10 @@ import {
   orgGuidelineRules,
 } from "@/lib/kit/org-guidelines";
 import {
+  RECOMMENDED_STANDARD_TEMPLATE_IDS,
+  buildStandardsMarkdown,
+} from "@/lib/kit/standard-templates";
+import {
   isTechQuestion,
   relevantQuestions,
   projectProfileRule,
@@ -40,14 +44,21 @@ import { catalogFiles } from "./catalog-files";
 import { loadCatalog } from "@/lib/skill-catalog/client";
 import { briefMarkdown } from "@/lib/intake/brief";
 import { generateAdkProject } from "@/lib/adk/generate";
+import { publicConfig } from "@/lib/config/public";
+import {
+  DEFAULT_DEPLOYMENT_SETUP,
+  loadDeploymentSetup,
+  loadKitStudioSnapshot,
+  saveDeploymentSetup,
+  saveKitStudioSnapshot,
+  type DeploymentSetupState,
+} from "@/lib/storage";
 import { useIntake, type IntakeSnapshot } from "./intake/use-intake";
 
 /** Does a recommendedFor/appliesTo list match the selected tech set? */
 export function matches(recommendedFor: string[], tech: Set<string>): boolean {
   return recommendedFor.some((id) => id === "always" || tech.has(id));
 }
-
-const STORAGE_KEY = "agent-builder-kit-v1";
 
 /** JSON-serializable snapshot of everything the user configured. */
 type PersistedState = {
@@ -57,6 +68,7 @@ type PersistedState = {
   tech: string[];
   orgName: string;
   orgGuidelineSel: string[];
+  standardTemplateSel?: string[];
   projectName: string;
   projectAnswers: ProjectAnswers;
   overrides: Record<string, [string, boolean][]>;
@@ -65,6 +77,7 @@ type PersistedState = {
   discovery?: RepoDiscovery | null;
   catalogSkills?: CatalogSkill[];
   intake?: IntakeSnapshot;
+  deploymentSetup?: DeploymentSetupState;
 };
 
 /** Fetch state for a catalog skill's SKILL.md and references. */
@@ -106,7 +119,7 @@ export function useKitBuilderState({
   );
 
   // ADK Agent customization before deployment
-  const [adkModel, setAdkModel] = useState<string>("gemini-2.5-flash");
+  const [adkModel, setAdkModel] = useState<string>("");
   const [adkInstruction, setAdkInstruction] = useState<string>("");
   const [adkTools, setAdkTools] = useState<Set<string>>(
     () => new Set(["context", "validation", "guardrails", "memory", "database"])
@@ -144,15 +157,60 @@ export function useKitBuilderState({
 
   const [step, setStep] = useState<number>(1);
 
-  // Step 2 — organization guidelines.
-  const [orgName, setOrgName] = useState("Richardson & Team");
+  // Step 2 — organization guidelines + engineering standards.
+  const [orgName, setOrgName] = useState(publicConfig.orgName);
   const [orgGuidelineSel, setOrgGuidelineSel] = useState<Set<string>>(
     () => new Set(RECOMMENDED_ORG_GUIDELINE_IDS),
   );
+  const [standardTemplateSel, setStandardTemplateSel] = useState<Set<string>>(
+    () => new Set(RECOMMENDED_STANDARD_TEMPLATE_IDS),
+  );
 
   // Step 3 — project details.
-  const [projectName, setProjectName] = useState("");
+  const [projectName, setProjectNameState] = useState("");
   const [projectAnswers, setProjectAnswers] = useState<ProjectAnswers>({});
+
+  // Step 5 — deployment setup.
+  const [deploymentSetup, setDeploymentSetup] = useState<DeploymentSetupState>(
+    DEFAULT_DEPLOYMENT_SETUP,
+  );
+
+  function updateDeploymentSetup(patch: Partial<DeploymentSetupState>) {
+    setDeploymentSetup((prev) => {
+      const next = { ...prev, ...patch };
+      saveDeploymentSetup(next);
+      return next;
+    });
+  }
+
+  function setProjectName(nextName: string) {
+    setProjectNameState(nextName);
+    const cleanFolder = nextName
+      .trim()
+      .toLowerCase()
+      .replace(/[^a-z0-9_]+/g, "_")
+      .replace(/^[^a-z]+/, "")
+      .replace(/_+/g, "_")
+      .replace(/_$/, "")
+      .slice(0, 62);
+    const cleanSlug = nextName
+      .trim()
+      .toLowerCase()
+      .replace(/[^a-z0-9-_]+/g, "-")
+      .replace(/^[^a-z0-9]+/, "")
+      .replace(/-+/g, "-")
+      .replace(/-$/, "")
+      .slice(0, 62);
+    setDeploymentSetup((prev) => {
+      const next = {
+        ...prev,
+        agentFolderName: prev.agentFolderName || (cleanFolder.length >= 2 ? cleanFolder : ""),
+        gitlabProjectSlug: prev.gitlabProjectSlug || (cleanSlug.length >= 2 ? cleanSlug : ""),
+      };
+      saveDeploymentSetup(next);
+      return next;
+    });
+  }
   // Skills AI-authored from uploaded documents (author-skill Lambda).
   const [authoredSkills, setAuthoredSkills] = useState<KitSkill[]>([]);
   // Server-side repo analysis (repo-discovery Lambda).
@@ -171,21 +229,26 @@ export function useKitBuilderState({
     body: string;
   } | null>(null);
 
-  // ── Persistence (localStorage, restored after mount to avoid SSR mismatch) ──
+  // ── Persistence (localStorage behind lib/storage, restored after mount) ──
   const hydrated = useRef(false);
   useEffect(() => {
     try {
-      const raw = window.localStorage.getItem(STORAGE_KEY);
-      if (raw) {
-        const s = JSON.parse(raw) as PersistedState;
+      const storedSetup = loadDeploymentSetup();
+      setDeploymentSetup(storedSetup);
+      const s = loadKitStudioSnapshot<PersistedState>();
+      if (s) {
         if (s.provider) setProvider(s.provider);
         if (s.step) setStep(s.step);
         setProjectType(s.projectType ?? null);
         setTech(new Set(s.tech ?? []));
-        setOrgName(s.orgName || "Richardson & Team");
+        setOrgName(s.orgName ?? publicConfig.orgName);
         if (s.orgGuidelineSel) setOrgGuidelineSel(new Set(s.orgGuidelineSel));
-        setProjectName(s.projectName ?? "");
+        if (s.standardTemplateSel) setStandardTemplateSel(new Set(s.standardTemplateSel));
+        setProjectNameState(s.projectName ?? "");
         setProjectAnswers(s.projectAnswers ?? {});
+        if (s.deploymentSetup) {
+          setDeploymentSetup({ ...storedSetup, ...s.deploymentSetup });
+        }
         const o = s.overrides ?? {};
         setAgentOverride(new Map(o.agent ?? []));
         setRuleOverride(new Map(o.rule ?? []));
@@ -214,8 +277,10 @@ export function useKitBuilderState({
       tech: [...tech],
       orgName,
       orgGuidelineSel: [...orgGuidelineSel],
+      standardTemplateSel: [...standardTemplateSel],
       projectName,
       projectAnswers,
+      deploymentSetup,
       overrides: {
         agent: [...agentOverride],
         rule: [...ruleOverride],
@@ -230,11 +295,7 @@ export function useKitBuilderState({
       catalogSkills: [...catalogSel.values()],
       intake: intake.snapshot,
     };
-    try {
-      window.localStorage.setItem(STORAGE_KEY, JSON.stringify(snapshot));
-    } catch {
-      // Storage full/unavailable — persistence is best-effort.
-    }
+    saveKitStudioSnapshot(snapshot);
   }, [
     provider,
     step,
@@ -242,8 +303,10 @@ export function useKitBuilderState({
     tech,
     orgName,
     orgGuidelineSel,
+    standardTemplateSel,
     projectName,
     projectAnswers,
+    deploymentSetup,
     agentOverride,
     ruleOverride,
     skillOverride,
@@ -380,6 +443,15 @@ export function useKitBuilderState({
     });
   }
 
+  function toggleStandardTemplate(id: string) {
+    setStandardTemplateSel((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  }
+
   /** Set a single-choice answer (replaces), or toggle within a multi-choice. */
   function setChoiceAnswer(qId: string, optId: string, multi: boolean) {
     setProjectAnswers((prev) => {
@@ -468,6 +540,19 @@ export function useKitBuilderState({
     // delivered as governance rules, so they flow through the normal
     // per-provider emission alongside the rules chosen in step 1.
     const orgRules = orgGuidelineRules(orgGuidelineSel, orgName);
+    const standardsBody = buildStandardsMarkdown(standardTemplateSel);
+    const standardsRule: RulePack | null = standardsBody
+      ? {
+          id: "org-engineering-standards",
+          name: "Engineering Standards Library",
+          kind: "governance",
+          description:
+            "Enterprise engineering standards (Observability, Security, Coding, Error Handling, API Design, Testing, Architecture, Data, CI/CD, Design Systems)",
+          appliesTo: ["always"],
+          globs: ["**/*"],
+          body: standardsBody,
+        }
+      : null;
     const questionTriggers = projectType
       ? [...tech, projectTypeTrigger(projectType)]
       : [...tech];
@@ -479,6 +564,8 @@ export function useKitBuilderState({
     const typeRule = projectTypeRule(projectType);
     return {
       projectName: projectName.trim() || undefined,
+      agentFolderName: deploymentSetup.agentFolderName.trim() || undefined,
+      deployTarget: deploymentSetup.deployTarget,
       adkModel,
       adkInstruction: adkInstruction.trim() || undefined,
       adkTools: Array.from(adkTools),
@@ -487,6 +574,7 @@ export function useKitBuilderState({
       rules: [
         ...selectedRules.map((r: RulePack) => applyBody(r, `rule:${r.id}`)),
         ...orgRules,
+        ...(standardsRule ? [standardsRule] : []),
         ...(typeRule ? [typeRule] : []),
         ...(profile ? [profile] : []),
       ],
@@ -501,6 +589,7 @@ export function useKitBuilderState({
       commands: selectedCommands.map((c) => applyBody(c, `command:${c.id}`)),
       hooks: selectedHooks,
       mcpServers: selectedMcpServers,
+      standardIds: [...standardTemplateSel],
     };
   }, [
     tech,
@@ -514,9 +603,12 @@ export function useKitBuilderState({
     bodyEdits,
     authoredSkills,
     orgGuidelineSel,
+    standardTemplateSel,
     orgName,
     projectAnswers,
     projectName,
+    deploymentSetup.agentFolderName,
+    deploymentSetup.deployTarget,
     adkModel,
     adkInstruction,
     adkTools,
@@ -647,8 +739,13 @@ export function useKitBuilderState({
     orgGuidelineSel,
     setOrgGuidelineSel,
     toggleOrgGuideline,
+    standardTemplateSel,
+    setStandardTemplateSel,
+    toggleStandardTemplate,
     projectName,
     setProjectName,
+    deploymentSetup,
+    updateDeploymentSetup,
     projectAnswers,
     setChoiceAnswer,
     setTextAnswer,
