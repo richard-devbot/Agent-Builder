@@ -1,0 +1,33 @@
+rules:
+  - id: tls-verification-disabled
+    languages: [python]
+    severity: ERROR
+    message: "TLS verification disabled. Remove verify=False; use REQUESTS_CA_BUNDLE for the corporate CA."
+    pattern-either:
+      - pattern: $F(..., verify=False, ...)
+      - pattern: urllib3.disable_warnings(...)
+  - id: subprocess-shell-true
+    languages: [python]
+    severity: ERROR
+    message: "shell=True enables command injection. Pass an argument list instead."
+    pattern: subprocess.$F(..., shell=True, ...)
+  - id: hardcoded-reasoning-engine
+    languages: [python, generic]
+    severity: ERROR
+    message: "Hard-coded Agent Engine resource. Read project/location/engine ID from environment variables."
+    pattern-regex: 'reasoningEngines/\d{6,}'
+  - id: hardcoded-google-api-key
+    languages: [generic]
+    severity: ERROR
+    message: "Google API key in source. Use Vertex AI with ADC; store secrets in Secret Manager."
+    pattern-regex: 'AIza[0-9A-Za-z_\-]{35}'
+  - id: public-cloud-run
+    languages: [generic]
+    severity: ERROR
+    message: "Public access is not allowed. Remove allUsers/allAuthenticatedUsers and --allow-unauthenticated."
+    pattern-regex: '(allUsers|allAuthenticatedUsers|--allow-unauthenticated)'
+  - id: gcloud-token-subprocess
+    languages: [python]
+    severity: ERROR
+    message: "Do not shell out to gcloud for tokens. Use google.auth.default()."
+    pattern-regex: 'print-access-token'

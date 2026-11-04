@@ -18,6 +18,7 @@ import { cn } from "@/lib/utils";
 import type { AdkAgent, AdkProject, AdkTool } from "@/contracts/adk";
 import { generateAdkProject } from "@/lib/adk/generate";
 import { ADK_MODELS } from "@/lib/adk/models";
+import { GCP_REGIONS } from "@/lib/config/public";
 import { createZip } from "@/lib/kit/zip";
 import { AGENT_META, ToolIcon, type AdkSelection } from "./adk-meta";
 import { AdkFlow } from "./adk-flow";
@@ -375,34 +376,35 @@ function ToolInspector({ tool, project, onPatch }: { tool: AdkTool; project: Adk
 
 function DeployPane({ project }: { project: AdkProject }) {
   const [projectId, setProjectId] = useState("");
-  const [region, setRegion] = useState("us-central1");
+  const [region, setRegion] = useState("");
   const pkg = project.packageName;
-  const pid = projectId.trim() || "YOUR_PROJECT_ID";
+  const pid = projectId.trim() || "$GOOGLE_CLOUD_PROJECT";
+  const reg = region.trim() || "$GOOGLE_CLOUD_LOCATION";
   const steps: { title: string; body: string; cmd: string }[] = [
     {
-      title: "1 · Run locally with your free-trial key",
-      body: "Works with a Vertex AI express-mode key (starts AQ.). No gcloud needed. Don't set GOOGLE_CLOUD_LOCATION for express mode.",
-      cmd: `unzip ${pkg}-adk.zip && cd ${pkg}\npython -m venv .venv && source .venv/bin/activate\npip install -r requirements.txt\ncp ${pkg}/.env.example ${pkg}/.env   # paste your GOOGLE_API_KEY\nadk web                         # http://localhost:8000\n# or: adk run ${pkg}`,
+      title: "1 · Run locally with Vertex AI ADC",
+      body: "Uses Google Cloud Vertex AI Application Default Credentials. No API keys.",
+      cmd: `unzip ${pkg}-adk.zip && cd ${pkg}\npython -m venv .venv && source .venv/bin/activate\npip install -r requirements.txt\ncp ${pkg}/.env.example ${pkg}/.env\ngcloud auth application-default login\nadk web                         # http://localhost:8000\n# or: adk run ${pkg}`,
     },
     {
-      title: "2 · Deploy to Agent Runtime with the same key (no gcloud)",
-      body: "ADK 2.13 can deploy with an express-mode API key. The CLI only uses the key when GOOGLE_GENAI_USE_ENTERPRISE is true. Express-mode quotas apply.",
-      cmd: `export GOOGLE_GENAI_USE_ENTERPRISE=true\nadk deploy agent_engine --api_key="$GOOGLE_API_KEY" --display_name="${project.title.replace(/"/g, "'")}" ${pkg}`,
+      title: "2 · Deploy via GitLab CI (Workload Identity Federation)",
+      body: "Use Step 6 (Push to GitLab) and Step 7 (Deploy to Cloud) to deploy from a protected release tag without local keys.",
+      cmd: `python scripts/check_mandatory_files.py --agent ${pkg}`,
     },
     {
-      title: "3 · Or sign in to Google Cloud for full project deploys",
-      body: "Deploys use OAuth, not the API key. Install the gcloud CLI, then enable the APIs once per project.",
+      title: "3 · Sign in to Google Cloud for operator CLI checks",
+      body: "Deploys use OAuth / Workload Identity Federation, never static keys.",
       cmd: `gcloud auth login\ngcloud auth application-default login\ngcloud config set project ${pid}\ngcloud services enable aiplatform.googleapis.com cloudresourcemanager.googleapis.com run.googleapis.com cloudbuild.googleapis.com`,
     },
     {
-      title: "4a · Deploy to Agent Runtime in your project",
-      body: "Fully managed, auto-scaling agent hosting on Vertex AI. Takes several minutes; prints a reasoningEngines resource name to query.",
-      cmd: `adk deploy agent_engine --project=${pid} --region=${region} --display_name="${project.title.replace(/"/g, "'")}" ${pkg}`,
+      title: "4a · Deploy to Agent Engine (Vertex AI)",
+      body: "Fully managed, auto-scaling agent hosting on Vertex AI.",
+      cmd: `adk deploy agent_engine --project=${pid} --region=${reg} --display_name="${project.title.replace(/"/g, "'")}" ${pkg}`,
     },
     {
       title: "4b · Or deploy to Cloud Run (container + web UI)",
-      body: "Builds a container with Cloud Build and serves the ADK API, plus the dev UI with --with_ui.",
-      cmd: `adk deploy cloud_run --project=${pid} --region=${region} --service_name=${pkg.replace(/_/g, "-")} --with_ui ${pkg}`,
+      body: "Builds a container with Cloud Build and serves the ADK API.",
+      cmd: `adk deploy cloud_run --project=${pid} --region=${reg} --service_name=${pkg.replace(/_/g, "-")} --with_ui ${pkg}`,
     },
   ];
   return (
@@ -413,13 +415,25 @@ function DeployPane({ project }: { project: AdkProject }) {
             <label className={label} htmlFor="gcp-project">
               Google Cloud project ID
             </label>
-            <Input id="gcp-project" value={projectId} onChange={(e) => setProjectId(e.target.value)} placeholder="my-project-123" className="h-9 font-mono text-sm" />
+            <Input id="gcp-project" value={projectId} onChange={(e) => setProjectId(e.target.value)} placeholder="e.g. my-team-agent" className="h-9 font-mono text-sm" />
           </div>
           <div>
             <label className={label} htmlFor="gcp-region">
               Region
             </label>
-            <Input id="gcp-region" value={region} onChange={(e) => setRegion(e.target.value)} className="h-9 font-mono text-sm" />
+            <select
+              id="gcp-region"
+              value={region}
+              onChange={(e) => setRegion(e.target.value)}
+              className="h-9 w-full rounded-lg border border-input bg-background px-3 font-mono text-sm"
+            >
+              <option value="">Select a region…</option>
+              {GCP_REGIONS.map((r) => (
+                <option key={r.id} value={r.id}>
+                  {r.label}
+                </option>
+              ))}
+            </select>
           </div>
         </div>
         {steps.map((s) => (

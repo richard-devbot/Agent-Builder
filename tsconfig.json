@@ -19,7 +19,9 @@
       }
     ],
     "paths": {
-      "@/*": ["./*"]
+      "@/*": ["./*"],
+      "next-auth": ["./lib/auth/next-auth-runtime.ts"],
+      "next-auth/providers/microsoft-entra-id": ["./lib/auth/microsoft-entra-id.ts"]
     }
   },
   "include": [

@@ -119,7 +119,7 @@ export function StepProject({ s }: { s: KitBuilderState }) {
                 id="project-name"
                 value={s.projectName}
                 onChange={(e) => s.setProjectName(e.target.value)}
-                placeholder="e.g. Helix Billing Service"
+                placeholder="e.g. my-team-agent"
                 className="h-10 text-base"
               />
             </div>

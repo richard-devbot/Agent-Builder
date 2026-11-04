@@ -1,35 +1,35 @@
 import type { Metadata } from "next";
-import { Cloud, Database, KeyRound, ShieldCheck } from "lucide-react";
-import { GoogleCloudConfigPanel } from "@/components/google-cloud-config";
+import { Cloud, GitBranch, KeyRound, ShieldCheck } from "lucide-react";
+import { StepDeploymentSetup } from "@/components/kit-builder/step-deployment-setup";
 import { PageHeader, StatGrid, type Stat } from "@/components/page-header";
 
 export const metadata: Metadata = {
-  title: "Cloud Deploy",
+  title: "Deployment Setup",
   description:
-    "Package grounded Google ADK agents for Cloud Run with Workload Identity Federation and register them in Gemini Enterprise.",
+    "Connect GitLab via OAuth 2.0 + PKCE and configure your Google Cloud deployment environment and target runtime.",
 };
 
 const STATS: Stat[] = [
-  { icon: KeyRound, label: "Identity", value: "Workload Identity (OIDC)", hint: "Token exchange only. No service-account keys." },
-  { icon: Cloud, label: "Runtime", value: "Cloud Run + ADK", hint: "Stateless containers with least-privilege IAM." },
-  { icon: Database, label: "Data residency", value: "Regional isolation", hint: "Pick compute and Vertex AI regions per policy." },
-  { icon: ShieldCheck, label: "Deploy gate", value: "Two-person review", hint: "Protected GitHub environment before any cloud change." },
+  { icon: GitBranch, label: "CI Target", value: "GitLab CI Only", hint: "Governed .gitlab-ci.yml pipeline with Semgrep & Gitleaks." },
+  { icon: KeyRound, label: "Identity", value: "Workload Identity (OIDC)", hint: "GitLab OIDC token exchange. Zero static GCP keys." },
+  { icon: Cloud, label: "Runtimes", value: "Agent Engine · Cloud Run · GE", hint: "Deploy to Vertex AI Agent Engine, Cloud Run, or Gemini Enterprise." },
+  { icon: ShieldCheck, label: "Release Gate", value: "Protected Release Tags", hint: "Deployments run only from immutable release tags." },
 ];
 
 export default function IntegrationsPage() {
   return (
     <>
       <PageHeader
-        eyebrow="Cloud deploy · Google ADK"
-        icon={Cloud}
-        title="Deploy governed agents to"
+        eyebrow="Step 5 · Deployment Setup"
+        icon={GitBranch}
+        title="Configure GitLab &amp;"
         highlight="Google Cloud."
-        description="Package a Google ADK agent for Cloud Run with short-lived Workload Identity credentials, then register it in Gemini Enterprise after human sign-off."
+        description="Connect your corporate GitLab account via OAuth 2.0 + PKCE, validate your repository and Python agent folder slug, and select your target Google Cloud environment."
       >
         <StatGrid items={STATS} />
       </PageHeader>
-      <div className="container-page py-6">
-        <GoogleCloudConfigPanel />
+      <div className="container-page @container py-6">
+        <StepDeploymentSetup standalone />
       </div>
     </>
   );

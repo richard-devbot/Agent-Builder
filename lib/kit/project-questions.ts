@@ -15,6 +15,7 @@
  */
 
 import type { RulePack } from "./rules";
+import { COMPLIANCE_OPTIONS } from "@/lib/config/public";
 
 export type ProjectQuestionOption = { id: string; label: string };
 
@@ -488,6 +489,15 @@ export const PROJECT_QUESTIONS: readonly ProjectQuestion[] = [
       { id: "i18n", label: "Multiple languages / regions" },
       { id: "auditability", label: "Audit trail & compliance" },
     ],
+  },
+  {
+    id: "compliance-requirements",
+    triggers: ["always"],
+    section: "quality",
+    label: "Compliance frameworks",
+    question: "Which compliance or regulatory frameworks apply?",
+    multi: true,
+    options: [...COMPLIANCE_OPTIONS],
   },
   {
     id: "team-size",

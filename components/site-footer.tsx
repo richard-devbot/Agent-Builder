@@ -10,7 +10,6 @@ const COLUMNS = [
     title: "Build",
     links: [
       { href: "/studio", label: "Kit Studio" },
-      { href: "/integrations", label: "Cloud Deploy" },
     ],
   },
   {

@@ -22,6 +22,12 @@ export const EMPTY_BRIEF: Brief = {
   risks: [],
   openQuestions: [],
   assumptions: [],
+  audience: "",
+  riskTier: "low",
+  riskReason: "",
+  systems: [],
+  accessRequests: [],
+  nextSteps: [],
 };
 
 /** Display order, labels and completeness weight per field (weights sum to 100). */
@@ -129,6 +135,7 @@ export function briefMarkdown(input: {
     "",
     "## Users & stakeholders",
     bullets(brief.users),
+    ...(brief.audience ? ["", `**Audience**: ${brief.audience}`] : []),
     "",
     "## Scope",
     "**In scope**",
@@ -140,6 +147,33 @@ export function briefMarkdown(input: {
     "## Technology & integrations",
     bullets([...brief.stack, ...brief.integrations.map((i) => `Integration: ${i}`)]),
     "",
+    ...(brief.systems && brief.systems.length > 0
+      ? [
+          "## Systems & connection checklist",
+          ...brief.systems.flatMap((sys) => [
+            `### ${sys.name} (${sys.access.toUpperCase()} · ${sys.status})`,
+            `- **Purpose**: ${sys.purpose}`,
+            `- **Data accessed**: ${sys.dataAccessed} (${sys.dataClassification})`,
+            `- **Owner team**: ${sys.ownerTeam}`,
+            `- **Connection method**: ${sys.connectionMethod}`,
+            `- **Storage location**: ${sys.storageLocation}`,
+            ...sys.requiredValues.map(
+              (rv) =>
+                `  - \`${rv.name}\` (${rv.isSecret ? "Secret — never enter in platform" : "Non-secret"}): get from ${rv.whereToGet} · provided by ${rv.whoProvides} (${rv.howToRequest})`,
+            ),
+            "",
+          ]),
+        ]
+      : []),
+    ...(brief.accessRequests && brief.accessRequests.length > 0
+      ? [
+          "## Access requests",
+          ...brief.accessRequests.map(
+            (ar) => `- **${ar.item}** (Team: ${ar.ownerTeam}): _"${ar.suggestedWording}"_`,
+          ),
+          "",
+        ]
+      : []),
     "## Data & compliance",
     para(brief.dataCompliance),
     "",
@@ -153,11 +187,13 @@ export function briefMarkdown(input: {
     bullets(brief.successMetrics),
     "",
     "## Risks",
+    `**Risk tier**: ${(brief.riskTier || "low").toUpperCase()}${brief.riskReason ? ` — ${brief.riskReason}` : ""}`,
     bullets(brief.risks),
     "",
     "## Open questions",
     bullets(brief.openQuestions),
     "",
+    ...(brief.nextSteps && brief.nextSteps.length > 0 ? ["## Your next steps", bullets(brief.nextSteps), ""] : []),
     ...(brief.assumptions.length ? ["## Assumptions", bullets(brief.assumptions), ""] : []),
   ];
   if (plan) {

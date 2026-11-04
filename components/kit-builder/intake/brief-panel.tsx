@@ -10,6 +10,7 @@ import { CopyButton } from "@/components/copy-button";
 import { cn } from "@/lib/utils";
 import type { BriefField } from "@/contracts/intake";
 import { FIELD_META, briefMarkdown, isFilled } from "@/lib/intake/brief";
+import { SystemsConnectionsPanel } from "./systems-panel";
 import type { IntakeState } from "./use-intake";
 
 function Ring({ value }: { value: number }) {
@@ -168,6 +169,9 @@ export function BriefPanel({ intake }: { intake: IntakeState }) {
           </li>
         )}
       </ul>
+      <div className="border-t border-border/60">
+        <SystemsConnectionsPanel intake={intake} />
+      </div>
     </div>
   );
 }

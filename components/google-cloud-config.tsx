@@ -11,13 +11,13 @@ import { createZip } from "@/lib/kit/zip";
 import { cn } from "@/lib/utils";
 
 const fields: { key: keyof GoogleCloudConfig; label: string; placeholder: string; hint: string }[] = [
-  { key: "projectId", label: "Google Cloud project ID", placeholder: "my-agent-project", hint: "Optional for drafts. Use the project ID, not its display name or number." },
-  { key: "region", label: "Region", placeholder: "us-central1", hint: "Confirm model and service availability before deployment." },
-  { key: "agentName", label: "Agent name", placeholder: "sdlc_agent", hint: "Python package name: lowercase letters, numbers and underscores." },
-  { key: "model", label: "Gemini model ID", placeholder: "gemini-2.5-flash", hint: "Editable model ID; availability and quota are not checked." },
-  { key: "repository", label: "GitHub repository", placeholder: "organization/repository", hint: "Optional for drafts. Enter owner/repository, without a URL." },
-  { key: "workloadIdentityProvider", label: "Workload Identity provider", placeholder: "projects/123456789012/locations/global/workloadIdentityPools/github/providers/github", hint: "Optional for drafts. Full resource name; uses a project number." },
-  { key: "serviceAccount", label: "CI service account", placeholder: "github-deploy@my-agent-project.iam.gserviceaccount.com", hint: "Optional for drafts. Identity email only — never paste credentials or keys." },
+  { key: "projectId", label: "Google Cloud project ID", placeholder: "e.g. my-team-agent", hint: "Optional for drafts. Use the project ID, not its display name or number." },
+  { key: "region", label: "Region", placeholder: "e.g. region-id", hint: "Confirm model and service availability before deployment." },
+  { key: "agentName", label: "Agent name", placeholder: "e.g. my_team_agent", hint: "Python package name: lowercase letters, numbers and underscores." },
+  { key: "model", label: "Gemini model ID", placeholder: "Select or enter approved model ID", hint: "Editable model ID; availability and quota are not checked." },
+  { key: "repository", label: "Repository path", placeholder: "e.g. group/my-team-agent", hint: "Optional for drafts. Enter group/repository, without a URL." },
+  { key: "workloadIdentityProvider", label: "Workload Identity provider", placeholder: "e.g. workload-identity-provider-resource", hint: "Optional for drafts. Full resource name from admin setup." },
+  { key: "serviceAccount", label: "CI service account", placeholder: "e.g. deployer-service-account", hint: "Optional for drafts. Identity only — never paste credentials or keys." },
 ];
 
 export function GoogleCloudConfigPanel() {

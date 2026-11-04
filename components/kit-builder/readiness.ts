@@ -2,6 +2,7 @@
 
 import { PROVIDER_LABEL } from "@/lib/kit/build-kit";
 import { PROJECT_TYPES } from "@/lib/kit/project-types";
+import { AGENT_FOLDER_REGEX, PROJECT_SLUG_REGEX } from "./step-deployment-setup";
 import type { KitBuilderState } from "./use-kit-builder-state";
 
 export type ReadinessCheck = {
@@ -16,6 +17,9 @@ export type ReadinessCheck = {
 
 export function readiness(s: KitBuilderState): ReadinessCheck[] {
   const type = PROJECT_TYPES.find((t) => t.id === s.projectType);
+  const folderOk = AGENT_FOLDER_REGEX.test(s.deploymentSetup.agentFolderName.trim());
+  const slugOk = PROJECT_SLUG_REGEX.test(s.deploymentSetup.gitlabProjectSlug.trim());
+  const envOk = Boolean(s.deploymentSetup.environment);
   return [
     {
       id: "assistant",
@@ -53,6 +57,16 @@ export function readiness(s: KitBuilderState): ReadinessCheck[] {
       step: 4,
     },
     {
+      id: "deployment",
+      label: "Deployment setup",
+      detail:
+        folderOk && slugOk && envOk
+          ? `${s.deploymentSetup.gitlabProjectSlug} (${s.deploymentSetup.environment} · ${s.deploymentSetup.deployTarget})`
+          : "Configure GitLab project slug, agent folder name and target environment",
+      ok: folderOk && slugOk && envOk,
+      step: 5,
+    },
+    {
       id: "context",
       label: "Project context",
       detail: s.intake.score
@@ -80,6 +94,14 @@ export function stepStatus(s: KitBuilderState, n: number): string {
       return PROJECT_TYPES.find((t) => t.id === s.projectType)?.label ?? "Type not set";
     case 4:
       return `${s.tech.size} tech · ${PROVIDER_LABEL[s.provider]}`;
+    case 5:
+      return s.deploymentSetup.environment
+        ? `${s.deploymentSetup.environment.toUpperCase()} · ${s.deploymentSetup.deployTarget}`
+        : "GitLab & Cloud target";
+    case 6:
+      return `${s.files.length} files · Push or ZIP`;
+    case 7:
+      return "Tag release & WIF pipeline";
     default:
       return `${s.files.length} files`;
   }

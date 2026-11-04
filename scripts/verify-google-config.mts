@@ -10,8 +10,8 @@ const complete = {
   ...defaultGoogleCloudConfig,
   projectId: "acme-agent-demo",
   repository: "acme/agent-demo",
-  workloadIdentityProvider: "projects/123456789012/locations/global/workloadIdentityPools/github/providers/github",
-  serviceAccount: "github-deploy@acme-agent-demo.iam.gserviceaccount.com",
+  workloadIdentityProvider: "projects/123456789012/locations/global/workloadIdentityPools/gitlab/providers/gitlab",
+  serviceAccount: "gitlab-deploy@acme-agent-demo.iam.gserviceaccount.com",
 };
 assert.equal(missingGoogleSetup(defaultGoogleCloudConfig).length, 4);
 assert.deepEqual(missingGoogleSetup(complete), []);
@@ -21,7 +21,7 @@ for (const key of Object.keys(complete)) {
     assert.throws(() => buildGoogleCloudKit({ ...complete, [key]: payload }), `${key} accepted ${JSON.stringify(payload)}`);
   }
 }
-for (const agentName of ["class", "import", "def", "async", "1agent", "agent-name"]) {
+for (const agentName of ["class", "import", "def", "async", "1agent", "agent-name", "a"]) {
   assert.throws(() => buildGoogleCloudKit({ ...complete, agentName }));
 }
 assert.throws(() => buildGoogleCloudKit({ ...complete, secret: "not-allowed" }));
@@ -32,6 +32,7 @@ for (const config of [defaultGoogleCloudConfig, complete]) {
   const files = buildGoogleCloudKit(config);
   assert.equal(new Set(files.map((file) => file.path)).size, files.length);
   assert(files.every((file) => !file.path.includes("..") && !file.path.startsWith("/")));
+  assert(!files.some((file) => file.path.startsWith(".github/")), "No GitHub Actions files emitted");
   const get = (path: string) => {
     const file = files.find((candidate) => candidate.path === path);
     assert(file, `Missing ${path}`);
@@ -43,13 +44,9 @@ for (const config of [defaultGoogleCloudConfig, complete]) {
   assert(get("README.md").includes("Gemini Enterprise registration"));
   assert(get("GEMINI.md").includes("advisory"));
   assert(get(`${config.agentName}/requirements.txt`).includes("google-adk=="));
-  const workflow = get(".github/workflows/google-agent.yml");
-  assert(workflow.includes("environment: google-cloud-deploy"));
-  assert(workflow.includes("${{ github.event_name == 'workflow_dispatch'"));
-  assert(workflow.includes("github.ref == 'refs/heads/main'"));
-  assert(!workflow.includes("adk deploy"));
-  assert(!workflow.includes("secrets."));
-  assert(workflow.includes("id-token: write"));
+  const ci = get(".gitlab-ci.yml");
+  assert(ci.includes("stages: [validate, security, test, deploy]"));
+  assert(ci.includes("check_mandatory_files.py"));
   const archive = createZip(files);
   const bytes = new Uint8Array(await archive.arrayBuffer());
   assert.equal(new DataView(bytes.buffer).getUint32(0, true), 0x04034b50);
@@ -66,4 +63,4 @@ for (const config of [defaultGoogleCloudConfig, complete]) {
     await rm(directory, { recursive: true, force: true });
   }
 }
-console.log("PASS: draft and complete kits, input/injection rejection, Python syntax, workflow boundaries and ZIP integrity.");
+console.log("PASS: draft and complete kits, input/injection rejection, Python syntax, GitLab CI boundaries and ZIP integrity.");

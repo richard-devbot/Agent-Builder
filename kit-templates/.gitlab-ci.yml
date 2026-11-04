@@ -1,0 +1,80 @@
+# Agent Builder kit - governed GitLab pipeline.
+# GCP values come from GROUP-level CI/CD variables set once by the platform admin.
+# No keys are stored anywhere; GitLab authenticates to GCP with OIDC (Workload Identity Federation).
+
+workflow:
+  rules:
+    - if: $CI_PIPELINE_SOURCE == "merge_request_event"
+    - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
+    - if: $CI_COMMIT_TAG
+    - if: $CI_PIPELINE_SOURCE == "api" || $CI_PIPELINE_SOURCE == "web"
+
+variables:
+  AGENT_FOLDER: "{{AGENT_FOLDER}}"          # templated by Agent Builder
+  DEPLOY_TARGET:
+    value: "none"
+    options: ["none", "agent_engine", "cloud_run", "gemini_enterprise"]
+    description: "Set by Agent Builder 'Deploy to Cloud'."
+  DEPLOY_ENV:
+    value: "dev"
+    options: ["dev", "uat", "prod"]
+  PIP_DISABLE_PIP_VERSION_CHECK: "1"
+
+stages: [validate, security, test, deploy]
+
+default:
+  image: python:3.11-slim
+  interruptible: true
+
+mandatory_files:
+  stage: validate
+  script:
+    - python scripts/check_mandatory_files.py --agent "$AGENT_FOLDER"
+
+secret_scan:
+  stage: security
+  image: { name: zricethezav/gitleaks:v8.18.4, entrypoint: [""] }   # TODO(verify): pin to your approved version
+  script:
+    - gitleaks detect --source . --no-banner --redact --exit-code 1
+
+sast:
+  stage: security
+  script:
+    - pip install --quiet "semgrep==1.85.0"     # TODO(verify): pin approved version
+    - semgrep scan --config security/semgrep-rules.yaml --error --metrics=off .
+
+dependency_audit:
+  stage: security
+  allow_failure: true            # warning-only for the POC
+  script:
+    - pip install --quiet pip-audit
+    - pip-audit -r "$AGENT_FOLDER/requirements.txt"
+
+smoke_test:
+  stage: test
+  script:
+    - pip install --quiet -r "$AGENT_FOLDER/requirements.txt"
+    - python -c "import importlib,os; m=importlib.import_module(os.environ['AGENT_FOLDER']+'.agent'); assert m.root_agent, 'root_agent missing'; print('root_agent loaded:', m.root_agent.name)"
+
+.deploy_base:
+  stage: deploy
+  resource_group: deploy-$DEPLOY_ENV     # one deployment per environment at a time
+  environment:
+    name: $DEPLOY_ENV
+  id_tokens:
+    GITLAB_OIDC_TOKEN:
+      aud: https://iam.googleapis.com/projects/${GCP_PROJECT_NUMBER}/locations/global/workloadIdentityPools/${WIF_POOL_ID}/providers/${WIF_PROVIDER_ID}
+  rules:
+    - if: $CI_COMMIT_TAG && $DEPLOY_TARGET != "none"   # deploy ONLY protected release tags
+  artifacts:
+    paths: [deployment-record.json]
+    expire_in: 1 year
+
+deploy_gcp:
+  extends: .deploy_base
+  image: gcr.io/google.com/cloudsdktool/google-cloud-cli:slim   # gcloud needed for cloud_run
+  script:
+    - apt-get update -qq && apt-get install -y -qq python3-venv >/dev/null
+    - python3 -m venv /tmp/venv && . /tmp/venv/bin/activate
+    - pip install --quiet -r "$AGENT_FOLDER/requirements.txt"
+    - python deploy/deploy_gcp.py --target "$DEPLOY_TARGET" --agent "$AGENT_FOLDER"
