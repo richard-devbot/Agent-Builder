@@ -1,6 +1,7 @@
 import { NextResponse, type NextRequest } from "next/server";
 import { requireApiSession } from "@/lib/intake/route-utils";
 import { publicConfig } from "@/lib/config/public";
+import { loadGitLabServerConfig } from "@/lib/config/server";
 import {
   getValidGitLabAuth,
   gitlabFetch,
@@ -13,11 +14,19 @@ export async function GET(req: NextRequest) {
   const sessionOrRes = await requireApiSession();
   if (sessionOrRes instanceof Response) return sessionOrRes;
 
+  let hasEnvToken = false;
+  try {
+    hasEnvToken = Boolean(loadGitLabServerConfig().accessToken);
+  } catch {
+    // ignore
+  }
+
   try {
     const authCtx = await getValidGitLabAuth(req);
     if (!authCtx) {
       return NextResponse.json({
         connected: false,
+        hasEnvToken,
         baseUrl: publicConfig.gitlabBaseUrl,
         groupPath: publicConfig.gitlabGroupPath,
         ownerContact: publicConfig.gitlabGroupOwnerContact,
@@ -28,6 +37,7 @@ export async function GET(req: NextRequest) {
     if (!userRes.ok) {
       return NextResponse.json({
         connected: false,
+        hasEnvToken,
         baseUrl: authCtx.config.baseUrl,
         groupPath: authCtx.config.groupPath,
         ownerContact: authCtx.config.ownerContact,
@@ -62,8 +72,21 @@ export async function GET(req: NextRequest) {
       // Group listing is optional convenience
     }
 
+    if (!groups.some((g) => g.fullPath === user.username)) {
+      groups.push({
+        id: user.id,
+        name: `${user.name} (Personal namespace)`,
+        fullPath: user.username,
+      });
+    }
+
+    const effectiveGroupPath =
+      authCtx.config.groupPath || groups[0]?.fullPath || user.username;
+
     const res = NextResponse.json({
       connected: true,
+      authMode: authCtx.authMode,
+      hasEnvToken,
       user: {
         id: user.id,
         username: user.username,
@@ -71,7 +94,7 @@ export async function GET(req: NextRequest) {
       },
       groups,
       baseUrl: authCtx.config.baseUrl,
-      groupPath: authCtx.config.groupPath,
+      groupPath: effectiveGroupPath,
       ownerContact: authCtx.config.ownerContact,
       expiresAt: authCtx.tokens.expires_at,
     });
@@ -80,6 +103,7 @@ export async function GET(req: NextRequest) {
   } catch {
     return NextResponse.json({
       connected: false,
+      hasEnvToken,
       baseUrl: publicConfig.gitlabBaseUrl,
       groupPath: publicConfig.gitlabGroupPath,
       ownerContact: publicConfig.gitlabGroupOwnerContact,

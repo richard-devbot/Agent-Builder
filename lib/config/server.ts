@@ -57,22 +57,34 @@ export function loadServerConfig(
 
 const GitLabEnvSliceSchema = ServerEnvSchema.pick({
   GITLAB_BASE_URL: true,
-  GITLAB_OAUTH_CLIENT_ID: true,
-  GITLAB_OAUTH_CLIENT_SECRET: true,
   GITLAB_OAUTH_REDIRECT_URI: true,
   GITLAB_TOKEN_ENC_KEY: true,
 }).extend({
   GITLAB_GROUP_PATH: z.string().optional(),
+  GITLAB_OAUTH_CLIENT_ID: z.string().optional(),
+  GITLAB_OAUTH_CLIENT_SECRET: z.string().optional(),
+  GITLAB_ACCESS_TOKEN: z.string().optional(),
 });
 
 export function loadGitLabServerConfig(
   env: Record<string, string | undefined> = process.env,
 ) {
   const pub = loadPublicConfig(env);
+  const accessToken =
+    env.GITLAB_ACCESS_TOKEN?.trim() ||
+    env.GITLAB_PERSONAL_ACCESS_TOKEN?.trim() ||
+    env.GITLAB_PAT?.trim() ||
+    undefined;
   const candidate = {
     ...env,
     GITLAB_BASE_URL: env.GITLAB_BASE_URL || pub.gitlabBaseUrl || undefined,
     GITLAB_GROUP_PATH: env.GITLAB_GROUP_PATH || pub.gitlabGroupPath || undefined,
+    GITLAB_TOKEN_ENC_KEY:
+      env.GITLAB_TOKEN_ENC_KEY ||
+      (env.AUTH_SECRET && env.AUTH_SECRET.length >= 32
+        ? env.AUTH_SECRET
+        : undefined),
+    GITLAB_ACCESS_TOKEN: accessToken,
   };
   const result = GitLabEnvSliceSchema.safeParse(candidate);
   if (!result.success) {
@@ -88,10 +100,11 @@ export function loadGitLabServerConfig(
     groupPath: (result.data.GITLAB_GROUP_PATH || "").replace(/^\/+|\/+$/g, ""),
     ownerContact:
       env.GITLAB_GROUP_OWNER_CONTACT?.trim() || pub.gitlabGroupOwnerContact,
-    clientId: result.data.GITLAB_OAUTH_CLIENT_ID,
-    clientSecret: result.data.GITLAB_OAUTH_CLIENT_SECRET,
+    clientId: result.data.GITLAB_OAUTH_CLIENT_ID?.trim() || "",
+    clientSecret: result.data.GITLAB_OAUTH_CLIENT_SECRET?.trim() || "",
     redirectUri: result.data.GITLAB_OAUTH_REDIRECT_URI,
     tokenEncKey: result.data.GITLAB_TOKEN_ENC_KEY,
+    accessToken,
   };
 }
 

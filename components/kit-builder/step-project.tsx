@@ -16,6 +16,7 @@ import { StepHeader, fieldLabelClass } from "./primitives";
 import { TYPE_META, TypeArt } from "./project/type-art";
 import { QuestionSection, SECTION_ORDER, answered } from "./project/question-section";
 import { ProfilePreview } from "./project/profile-preview";
+import { RepoDiscoveryPanel } from "./repo-discovery-panel";
 import type { KitBuilderState } from "./use-kit-builder-state";
 
 const NEUTRAL = "#14b8a6";
@@ -194,6 +195,15 @@ export function StepProject({ s }: { s: KitBuilderState }) {
               )}
             </div>
           </div>
+
+          {(s.projectType === "brownfield" ||
+            s.projectType === "legacy-migration" ||
+            Boolean(s.discovery)) && (
+            <RepoDiscoveryPanel
+              discovery={s.discovery}
+              onDiscovered={s.applyDiscovery}
+            />
+          )}
 
           {!s.projectType && (
             <p className="rounded-xl border border-dashed px-4 py-3 text-xs text-muted-foreground">

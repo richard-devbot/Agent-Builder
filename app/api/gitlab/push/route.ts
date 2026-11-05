@@ -18,6 +18,7 @@ import {
   gitlabFetch,
   isBinaryContent,
   mapGitLabErrorResponse,
+  resolveGitLabNamespace,
   withRefreshedCookie,
 } from "@/lib/gitlab/client";
 
@@ -68,7 +69,7 @@ export async function POST(req: NextRequest) {
     return NextResponse.json(
       {
         error:
-          "Not connected to GitLab. Click 'Connect GitLab' in Step 5 to sign in with OAuth.",
+          "Not connected to GitLab. Connect via Personal Access Token or OAuth in Step 5.",
       },
       { status: 401 },
     );
@@ -91,36 +92,18 @@ export async function POST(req: NextRequest) {
   }
 
   const { projectName, kitVersion, files, ciVariables } = parsedBody;
-  const groupPath = (parsedBody.groupPath?.trim() || authCtx.config.groupPath).replace(
-    /^\/+|\/+$/g,
-    "",
-  );
-  if (!groupPath) {
-    return NextResponse.json(
-      {
-        error:
-          "Target GitLab group is not set. Select or enter a GitLab group path in Step 5 (Deployment Setup).",
-      },
-      { status: 400 },
-    );
-  }
-
-  // 1. Resolve the group ID from GITLAB_GROUP_PATH (GET /groups/:path)
-  const groupRes = await gitlabFetch(
-    authCtx,
-    `/groups/${encodeURIComponent(groupPath)}`,
-  );
-  if (!groupRes.ok) {
+  const resolved = await resolveGitLabNamespace(authCtx, parsedBody.groupPath);
+  if (!resolved.ok) {
     return mapGitLabErrorResponse(
-      groupRes.status,
+      resolved.status,
       authCtx.config,
-      `Could not resolve GitLab group '${groupPath}'.`,
+      resolved.detail,
     );
   }
-  const groupData = (await groupRes.json()) as { id: number; full_path: string };
+  const { namespace } = resolved;
 
-  // 2. Check if the project already exists in the group
-  const fullProjectPath = `${groupData.full_path}/${projectName}`;
+  // 2. Check if the project already exists in the group / namespace
+  const fullProjectPath = `${namespace.fullPath}/${projectName}`;
   const checkRes = await gitlabFetch(
     authCtx,
     `/projects/${encodeURIComponent(fullProjectPath)}`,
@@ -155,16 +138,19 @@ export async function POST(req: NextRequest) {
       );
     }
   } else if (checkRes.status === 404) {
-    // Create the project (POST /projects with namespace_id, private, initialize_with_readme=false)
+    // Create the project (POST /projects with namespace_id for groups, private, initialize_with_readme=false)
+    const createPayload: Record<string, unknown> = {
+      name: projectName,
+      path: projectName,
+      visibility: "private",
+      initialize_with_readme: false,
+    };
+    if (namespace.kind === "group") {
+      createPayload.namespace_id = namespace.id;
+    }
     const createRes = await gitlabFetch(authCtx, "/projects", {
       method: "POST",
-      body: JSON.stringify({
-        name: projectName,
-        path: projectName,
-        namespace_id: groupData.id,
-        visibility: "private",
-        initialize_with_readme: false,
-      }),
+      body: JSON.stringify(createPayload),
     });
     if (!createRes.ok) {
       let errDetail: string | undefined;
