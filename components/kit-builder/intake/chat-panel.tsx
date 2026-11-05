@@ -106,18 +106,35 @@ export function ChatPanel({ intake, onOpenBlueprint }: { intake: IntakeState; on
           <span
             className={cn(
               "absolute -right-0.5 -bottom-0.5 size-2.5 rounded-full border-2 border-card",
-              intake.busy ? "animate-pulse bg-warning" : "bg-success",
+              intake.busy || intake.ai?.authError ? "animate-pulse bg-warning" : "bg-success",
             )}
           />
         </span>
         <div className="min-w-0 flex-1">
           <p className="text-sm font-semibold">Discovery agent</p>
           <p className="truncate text-[11px] text-muted-foreground">
-            {intake.busy ? BUSY_TEXT[intake.busy] : intake.ai?.configured ? `Gemini · ${intake.ai.model}` : "Guided mode · connect Gemini for full AI"}
+            {intake.busy
+              ? BUSY_TEXT[intake.busy]
+              : intake.ai?.authError
+                ? `Vertex AI credentials missing · ${intake.ai.model}`
+                : intake.ai?.configured
+                  ? `Gemini · ${intake.ai.model} (${intake.ai.auth})`
+                  : "Guided mode · connect Gemini for full AI"}
           </p>
         </div>
         <RoleSwitch role={intake.role} onChange={intake.setRole} />
       </header>
+
+      {intake.ai?.authError && (
+        <div className="border-b border-warning/30 bg-warning/10 px-4 py-2.5 text-xs text-foreground">
+          <p className="font-semibold text-warning-foreground">
+            Google Cloud / Gemini authentication needed to switch off Guided fallback:
+          </p>
+          <p className="mt-0.5 text-[11.5px] text-muted-foreground">
+            {intake.ai.authError}
+          </p>
+        </div>
+      )}
 
       {/* Messages */}
       <div ref={scroller} className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-4 py-5">

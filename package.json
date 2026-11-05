@@ -9,7 +9,7 @@
     "lint": "eslint",
     "verify": "tsx scripts/verify-no-hardcode.mts && tsx scripts/verify-wizard.mts && tsx scripts/verify-intake.mts && tsx scripts/verify-adk.mts && tsx scripts/verify-google-config.mts && tsx scripts/verify-gitlab-kit.mts",
     "skills:sync": "tsx scripts/sync-skill-catalog.mts",
-    "intake:check": "tsx scripts/check-gemini.mts"
+    "intake:check": "tsx --env-file=.env.local scripts/check-gemini.mts"
   },
   "dependencies": {
     "@base-ui/react": "^1.4.1",

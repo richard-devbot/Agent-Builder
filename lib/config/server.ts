@@ -95,6 +95,11 @@ export function loadGitLabServerConfig(
   };
 }
 
+export const FALLBACK_VERTEX_MODELS = [
+  "gemini-3-flash-preview",
+  "gemini-2.5-flash",
+] as const;
+
 export function loadVertexAiServerConfig(
   env: Record<string, string | undefined> = process.env,
 ) {
@@ -118,12 +123,19 @@ export function loadVertexAiServerConfig(
     saProject ||
     env.NEXT_PUBLIC_GCP_DEV_PROJECT_ID?.trim() ||
     "";
+  const apiKey =
+    env.GEMINI_API_KEY?.trim() || env.GOOGLE_API_KEY?.trim() || undefined;
+  const accessToken = env.GOOGLE_CLOUD_ACCESS_TOKEN?.trim() || undefined;
   const useVertex = env.GOOGLE_GENAI_USE_VERTEXAI === "true" && Boolean(project);
   return {
-    configured: useVertex,
+    configured: useVertex || Boolean(apiKey),
+    useVertex,
     model,
+    fallbackModels: [...FALLBACK_VERTEX_MODELS],
     location,
     project,
     serviceAccountJson: env.GOOGLE_SERVICE_ACCOUNT_JSON?.trim() || undefined,
+    apiKey,
+    accessToken,
   };
 }

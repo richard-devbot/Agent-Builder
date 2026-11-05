@@ -234,6 +234,8 @@ export const IntakeStatusSchema = z.object({
   auth: z.enum(["api-key", "express", "service-account", "adc", "none"]),
   model: z.string(),
   instructionsVersion: z.string(),
+  /** Present when a GCP project is configured in .env.local but local credentials are missing. */
+  authError: z.string().optional(),
 });
 
 export type IntakeRole = z.infer<typeof IntakeRoleSchema>;
