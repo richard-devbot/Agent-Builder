@@ -20,7 +20,7 @@ import type {
   Turn,
 } from "@/contracts/intake";
 import type { AdkProject } from "@/contracts/adk";
-import { synthesizeAdkFromBrief } from "@/lib/adk/catalog";
+import { mergeAdkPreservingUserEdits, synthesizeAdkFromBrief } from "@/lib/adk/catalog";
 import { EMPTY_BRIEF, completeness } from "@/lib/intake/brief";
 import { clipMaterial, getIntakeStatus, requestAnalyze, requestFollowUp, requestPlan } from "@/lib/intake/client";
 import { extractText } from "@/lib/intake/extract-text";
@@ -146,6 +146,35 @@ export function useIntake() {
 
   const push = (s: IntakeSnapshot, ...m: ChatMessage[]): IntakeSnapshot => ({ ...s, messages: [...s.messages, ...m] });
 
+  /** Keep the live ADK flow and Blueprint synced in real time whenever the Discovery brief changes. */
+  function syncBriefAndBlueprint(
+    s: IntakeSnapshot,
+    nextBrief: Brief,
+    modelAdkDraft?: AdkProject | null,
+  ): IntakeSnapshot {
+    const candidateAdk = modelAdkDraft ?? synthesizeAdkFromBrief(nextBrief);
+    const freshAdk = mergeAdkPreservingUserEdits(s.draftAdk, candidateAdk, nextBrief);
+    const updatedPlan: Plan | null = s.plan
+      ? {
+          ...s.plan,
+          adk: freshAdk,
+          summary:
+            s.planMode === "guided" && nextBrief.title
+              ? `Synthesized from "${nextBrief.title}": ${freshAdk.agents.length} Google ADK agents and ${freshAdk.tools.length} governed tools wired to ${nextBrief.integrations.length ? nextBrief.integrations.join(", ") : "Vertex AI"}.`
+              : s.plan.summary,
+        }
+      : null;
+    const accepted = s.accepted.includes("adk") ? s.accepted : ["adk", ...s.accepted];
+    return {
+      ...s,
+      brief: nextBrief,
+      draftAdk: freshAdk,
+      plan: updatedPlan,
+      accepted,
+      applied: false,
+    };
+  }
+
   /** One follow-up turn against an explicit snapshot (state updates are async). */
   async function followUp(s: IntakeSnapshot, message: string): Promise<IntakeSnapshot> {
     const asked = s.messages.flatMap((m) => (m.role === "agent" && m.kind === "questions" ? m.questions.map((q) => q.id) : []));
@@ -162,7 +191,8 @@ export function useIntake() {
     const reply: ChatMessage = res.questions.length
       ? { id: newId(), role: "agent", kind: "questions", text: res.message, mode: res.mode, questions: res.questions, answers: {}, submitted: false }
       : { id: newId(), role: "agent", kind: "text", text: res.message, mode: res.mode };
-    return push({ ...s, brief: res.brief, done: res.done, turns: s.turns + 1 }, reply);
+    const synced = syncBriefAndBlueprint(s, res.brief, res.adkDraft);
+    return push({ ...synced, done: res.done, turns: s.turns + 1 }, reply);
   }
 
   /** Run an async step with a busy flag; errors surface in the chat banner. */
@@ -223,8 +253,9 @@ export function useIntake() {
     return run("analyzing", s, async (x) => {
       const res = await requestAnalyze({ role: x.role, brief: x.brief, materials: x.materials, analyze: ids });
       const names = new Map(x.materials.map((m) => [m.id, m.name]));
+      const synced = syncBriefAndBlueprint(x, res.brief, res.adkDraft);
       let next = push(
-        { ...x, brief: res.brief, analyzed: [...new Set([...x.analyzed, ...ids])] },
+        { ...synced, analyzed: [...new Set([...x.analyzed, ...ids])] },
         {
           id: newId(),
           role: "agent",
@@ -320,7 +351,7 @@ export function useIntake() {
     setState((s) => {
       const cur = s.brief[field];
       const next = Array.isArray(cur) ? value.split("\n").map((l) => l.trim()).filter(Boolean) : value;
-      return { ...s, brief: { ...s.brief, [field]: next } };
+      return syncBriefAndBlueprint(s, { ...s.brief, [field]: next });
     });
   }
 
@@ -357,7 +388,7 @@ export function useIntake() {
 
   /** Direct brief updater for interactive panels (e.g., Systems & Connections checklist). */
   function updateBrief(change: (b: Brief) => Brief) {
-    setState((s) => ({ ...s, brief: change(s.brief) }));
+    setState((s) => syncBriefAndBlueprint(s, change(s.brief)));
   }
 
   function editDraft(kind: "agent" | "skill", name: string, body: string) {
@@ -371,6 +402,8 @@ export function useIntake() {
   }
 
   const score = completeness(state.brief);
+  const hasContent = score > 0 || state.materials.length > 0 || state.messages.length > 0;
+  const hasAdkFlow = hasContent || Boolean(state.plan?.adk) || Boolean(state.draftAdk);
   const liveAdk = useMemo(
     () => state.plan?.adk ?? state.draftAdk ?? synthesizeAdkFromBrief(state.brief),
     [state.plan?.adk, state.draftAdk, state.brief],
@@ -383,12 +416,13 @@ export function useIntake() {
   return {
     ...state,
     liveAdk,
+    hasAdkFlow,
     busy,
     error,
     setError,
     ai,
     score,
-    hasContent: score > 0 || state.materials.length > 0 || state.messages.length > 0,
+    hasContent,
     openCard,
     setRole: (role: IntakeRole) => setState((s) => ({ ...s, role })),
     send,

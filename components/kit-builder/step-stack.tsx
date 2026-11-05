@@ -1,14 +1,22 @@
 "use client";
 
-/** Step 4 — target assistant, technologies, stack questions and capability pickers. */
+/**
+ * Step 4 — Target assistant, ADK runtime, technologies, stack follow-ups, and
+ * kit capabilities — organized into a clean, minimal-by-default layout that
+ * highlights what is active for the user's project without visual clutter.
+ */
 
 import { useState } from "react";
 import {
   Bot,
   Boxes,
+  Check,
+  ChevronDown,
   ClipboardList,
+  Filter,
   Layers,
   Library,
+  Network,
   Plug,
   Plus,
   Search,
@@ -22,6 +30,7 @@ import {
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
+import { cn } from "@/lib/utils";
 import { TECHNOLOGIES, TECH_GROUP_LABEL, TECH_GROUP_ORDER, techLabel } from "@/lib/kit/technologies";
 import { AGENTS, AGENT_PACK_LABEL } from "@/lib/kit/agents";
 import { RULES, RULE_KIND_LABEL } from "@/lib/kit/rules";
@@ -106,7 +115,7 @@ function capabilityTabs(s: KitBuilderState): CapTab[] {
       id: "skills",
       label: "Skills",
       icon: Sparkles,
-      hint: "Reusable skill packs, pre-selected from your stack.",
+      hint: "Reusable skill packs, pre-selected from your stack and Discovery brief.",
       items: s.skills.map((sk) => ({
         id: sk.slug,
         title: sk.name,
@@ -172,7 +181,7 @@ function capabilityTabs(s: KitBuilderState): CapTab[] {
       id: "mcp",
       label: "MCP servers",
       icon: Plug,
-      hint: "External tools over Model Context Protocol, recommended from your stack.",
+      hint: "External tools over Model Context Protocol, matched from your systems & stack.",
       items: s.mcpServers.map((m) => ({
         id: m.slug,
         title: m.name,
@@ -203,15 +212,27 @@ function capabilityTabs(s: KitBuilderState): CapTab[] {
 export function StepStack({ s }: { s: KitBuilderState }) {
   const [tabId, setTabId] = useState("skills");
   const [query, setQuery] = useState("");
+  const [showAllCaps, setShowAllCaps] = useState(false);
+  const [browseTechOpen, setBrowseTechOpen] = useState(false);
+  const [stackQuestionsOpen, setStackQuestionsOpen] = useState(false);
+  const [baseAdkToolsOpen, setBaseAdkToolsOpen] = useState(false);
 
   const tabs = capabilityTabs(s);
   const catalogOpen = tabId === "catalog";
   const tab = tabs.find((t) => t.id === tabId) ?? tabs[0];
   const isOn = (t: CapTab, item: CapItem) => s.isSelected(item.id, item.rec, t.override);
+
+  const selectedInTab = tab.items.filter((i) => isOn(tab, i));
   const q = query.trim().toLowerCase();
+
+  // When searching or when `showAllCaps` is toggled on (or nothing is selected yet), show all matching items;
+  // otherwise default to the clean "Selected only" view so the page stays minimal and easy to scan.
+  const effectiveShowAll = showAllCaps || Boolean(q) || selectedInTab.length === 0;
+  const baseItems = effectiveShowAll ? tab.items : selectedInTab;
   const visible = q
-    ? tab.items.filter((i) => i.title.toLowerCase().includes(q) || i.description.toLowerCase().includes(q))
-    : tab.items;
+    ? baseItems.filter((i) => i.title.toLowerCase().includes(q) || i.description.toLowerCase().includes(q))
+    : baseItems;
+
   const setAll = (on: boolean) => tab.setOverride(new Map(tab.items.map((i) => [i.id, on])));
 
   const renderItem = (item: CapItem) =>
@@ -235,8 +256,16 @@ export function StepStack({ s }: { s: KitBuilderState }) {
       />
     );
 
+  const selectedTechList = [
+    ...TECHNOLOGIES.filter((t) => s.tech.has(t.id)).map((t) => ({ id: t.id, label: t.label })),
+    ...s.customTechIds.map((id) => ({ id, label: techLabel(id) })),
+  ];
+  const showFullTechCatalog = browseTechOpen || selectedTechList.length === 0;
+
+  const answeredStackQs = s.techProjectQuestions.filter((tq) => (s.projectAnswers[tq.id] ?? []).some((v) => v.trim()));
+
   return (
-    <>
+    <div className="flex flex-col gap-5">
       <StepHeader
         n={4}
         actions={
@@ -247,11 +276,12 @@ export function StepStack({ s }: { s: KitBuilderState }) {
         }
       />
 
+      {/* 1. Target Assistant & ADK Configuration (Unified Card) */}
       <Panel
         id="assistant"
         icon={Sparkles}
-        title="Target assistant"
-        description="We generate that tool's native file layout and execution model."
+        title="1. Target assistant & runtime"
+        description="Choose the target agent runtime or coding assistant. We generate its native file layout and execution model."
       >
         <div className="grid grid-cols-1 gap-2.5 @2xl:grid-cols-2 @5xl:grid-cols-3 @6xl:grid-cols-5">
           {PROVIDERS.map((p) => (
@@ -266,147 +296,304 @@ export function StepStack({ s }: { s: KitBuilderState }) {
             />
           ))}
         </div>
-      </Panel>
 
-      {s.provider === "google-adk" && (
-        <Panel
-          icon={Wrench}
-          title="ADK agent & connectors"
-          description="Foundation model, root prompt and callable Python tools."
-          className="animate-fade-up"
-        >
-          <div className="grid grid-cols-1 gap-4 @3xl:grid-cols-2">
-            <div>
-              <label htmlFor="adk-model-select" className={fieldLabelClass}>
-                Foundation model
-              </label>
-              <select
-                id="adk-model-select"
-                value={s.adkModel}
-                onChange={(e) => s.setAdkModel(e.target.value)}
-                className="h-9 w-full rounded-lg border border-input bg-background px-3 text-sm shadow-xs outline-none transition-colors hover:border-primary/40 focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/40"
-              >
-                <option value="">Select an approved model…</option>
-                {APPROVED_GEMINI_MODELS.map((m) => (
-                  <option key={m.id} value={m.id}>
-                    {m.label}{m.note ? ` · ${m.note}` : ""}
-                  </option>
-                ))}
-              </select>
-              <p className="mt-1 text-xs text-muted-foreground">Pinned in agent.py and deployment/agent-card.json.</p>
+        {s.provider === "google-adk" && (
+          <div className="mt-4 space-y-4 rounded-xl border border-primary/25 bg-primary/[0.03] p-4">
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <div className="flex items-center gap-2">
+                <Wrench className="size-4 text-primary" />
+                <div>
+                  <p className="text-xs font-semibold">ADK Agent & Connectors Configuration</p>
+                  <p className="text-[11px] text-muted-foreground">
+                    Pinned in <code className="font-mono">{s.deploymentSetup.agentFolderName || s.intake.liveAdk.packageName || "agent"}/agent.py</code> and <code className="font-mono">deployment/agent-card.json</code>.
+                  </p>
+                </div>
+              </div>
+              {s.intake.hasContent && (
+                <span className="inline-flex items-center gap-1.5 rounded-md border border-primary/30 bg-background/80 px-2.5 py-1 font-mono text-[11px] text-primary">
+                  <Network className="size-3.5" />
+                  {s.intake.liveAdk.agents.length} ADK agents · {s.intake.liveAdk.tools.length} tools synced
+                </span>
+              )}
             </div>
-            <div>
-              <label htmlFor="adk-instruction-input" className={fieldLabelClass}>
-                Root coordinator prompt <span className="font-normal normal-case tracking-normal">(optional)</span>
-              </label>
-              <Textarea
-                id="adk-instruction-input"
-                value={s.adkInstruction}
-                onChange={(e) => s.setAdkInstruction(e.target.value)}
-                placeholder="e.g. Prioritise SLA compliance and automated parity tests…"
-                rows={2}
-                className="min-h-9 text-xs"
-              />
-              <p className="mt-1 text-xs text-muted-foreground">Added to Agent(instruction=…) alongside your standards.</p>
-            </div>
-          </div>
-          <div className="mt-5">
-            <GroupLabel count={`${s.adkTools.size}`}>Callable tools & connectors</GroupLabel>
-            <p className="-mt-1 mb-2.5 font-mono text-[11px] text-muted-foreground">
-              {s.projectName.trim().toLowerCase().replace(/[^a-z0-9_]+/g, "_") || "sdlc_agent"}/tools/
-            </p>
-            <div className={tileGridClass}>
-              {ADK_TOOLS_CATALOG.map((tool) => (
-                <SelectableRow
-                  key={tool.id}
-                  title={tool.name}
-                  description={tool.description}
-                  selected={s.adkTools.has(tool.id)}
-                  recommended
-                  onToggle={() => s.toggleAdkTool(tool.id)}
+
+            <div className="grid grid-cols-1 gap-4 @3xl:grid-cols-2">
+              <div>
+                <label htmlFor="adk-model-select" className={fieldLabelClass}>
+                  Foundation model
+                </label>
+                <select
+                  id="adk-model-select"
+                  value={s.adkModel}
+                  onChange={(e) => s.setAdkModel(e.target.value)}
+                  className="h-9 w-full rounded-lg border border-input bg-background px-3 text-sm shadow-xs outline-none transition-colors hover:border-primary/40 focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/40"
+                >
+                  <option value="">Select an approved model…</option>
+                  {APPROVED_GEMINI_MODELS.map((m) => (
+                    <option key={m.id} value={m.id}>
+                      {m.label}{m.note ? ` · ${m.note}` : ""}
+                    </option>
+                  ))}
+                </select>
+              </div>
+              <div>
+                <label htmlFor="adk-instruction-input" className={fieldLabelClass}>
+                  Root coordinator prompt <span className="font-normal normal-case tracking-normal">(optional)</span>
+                </label>
+                <Textarea
+                  id="adk-instruction-input"
+                  value={s.adkInstruction}
+                  onChange={(e) => s.setAdkInstruction(e.target.value)}
+                  placeholder="e.g. Coordinate specialist agents and enforce human approval gates…"
+                  rows={2}
+                  className="min-h-9 bg-background text-xs"
                 />
-              ))}
+              </div>
             </div>
-          </div>
-        </Panel>
-      )}
 
-      <Panel
-        id="technologies"
-        icon={Boxes}
-        title="Technologies"
-        description="Your stack decides which agents, rules and skills we recommend."
-        meta={<Count tone={s.tech.size ? "brand" : "muted"}>{`${s.tech.size} selected`}</Count>}
-        actions={
-          <form
-            className="flex gap-1.5"
-            onSubmit={(e) => {
-              e.preventDefault();
-              s.addCustomTech();
-            }}
-          >
-            <Input
-              value={s.customTech}
-              onChange={(e) => s.setCustomTech(e.target.value)}
-              placeholder="Add technology…"
-              aria-label="Add another technology"
-              className="h-8 w-44 text-xs md:text-xs"
-            />
-            <Button type="submit" variant="outline" size="sm" disabled={!s.customTech.trim()}>
-              <Plus className="size-3.5" /> Add
-            </Button>
-          </form>
-        }
-      >
-        <div className="grid grid-cols-1 gap-x-6 gap-y-5 @3xl:grid-cols-2 @7xl:grid-cols-3">
-          {TECH_GROUP_ORDER.map((group) => {
-            const items = TECH_BY_GROUP.get(group) ?? [];
-            if (items.length === 0) return null;
-            const picked = items.filter((t) => s.tech.has(t.id)).length;
-            return (
-              <div key={group}>
-                <GroupLabel count={picked ? `${picked}` : undefined}>
-                  {TECH_GROUP_LABEL[group as keyof typeof TECH_GROUP_LABEL]}
-                </GroupLabel>
+            {/* Live Discovery ADK Topology Chips */}
+            {s.intake.hasContent && (
+              <div className="rounded-lg border bg-background/70 p-3">
+                <p className="mb-1.5 text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
+                  Active Discovery ADK Topology ({s.intake.liveAdk.packageName})
+                </p>
                 <div className="flex flex-wrap gap-1.5">
-                  {items.map((t) => (
-                    <Chip key={t.id} active={s.tech.has(t.id)} onClick={() => s.toggleTech(t.id)}>
-                      {t.label}
-                    </Chip>
+                  {s.intake.liveAdk.agents.map((ag) => (
+                    <span
+                      key={ag.name}
+                      className="inline-flex items-center gap-1 rounded-md border bg-card px-2 py-0.5 font-mono text-[11px]"
+                    >
+                      <Bot className="size-3 text-primary" />
+                      {ag.name}
+                      <span className="text-[10px] text-muted-foreground">({ag.type})</span>
+                    </span>
+                  ))}
+                  {s.intake.liveAdk.tools.map((tl) => (
+                    <span
+                      key={tl.name}
+                      className="inline-flex items-center gap-1 rounded-md border border-info/30 bg-info/5 px-2 py-0.5 font-mono text-[11px] text-info"
+                    >
+                      <Plug className="size-3" />
+                      {tl.name}
+                    </span>
                   ))}
                 </div>
               </div>
-            );
-          })}
-          {s.customTechIds.length > 0 && (
-            <div>
-              <GroupLabel>Custom</GroupLabel>
-              <div className="flex flex-wrap gap-1.5">
-                {s.customTechIds.map((id) => (
-                  <Chip key={id} active onClick={() => s.toggleTech(id)}>
-                    {techLabel(id)}
-                    <X className="size-3" />
-                  </Chip>
-                ))}
-              </div>
+            )}
+
+            {/* Collapsible base ADK helper tools */}
+            <div className="rounded-lg border bg-background/60">
+              <button
+                type="button"
+                onClick={() => setBaseAdkToolsOpen((v) => !v)}
+                aria-expanded={baseAdkToolsOpen}
+                className="flex w-full items-center justify-between px-3 py-2 text-left text-xs font-medium hover:bg-muted/40"
+              >
+                <span className="flex items-center gap-2">
+                  <span>Standard ADK helper tools</span>
+                  <span className="rounded bg-primary/10 px-1.5 py-0.5 font-mono text-[10.5px] text-primary">
+                    {s.adkTools.size}/{ADK_TOOLS_CATALOG.length} enabled
+                  </span>
+                </span>
+                <ChevronDown className={cn("size-4 text-muted-foreground transition-transform", baseAdkToolsOpen && "rotate-180")} />
+              </button>
+              {baseAdkToolsOpen && (
+                <div className="border-t border-border/60 p-3">
+                  <div className={tileGridClass}>
+                    {ADK_TOOLS_CATALOG.map((tool) => (
+                      <SelectableRow
+                        key={tool.id}
+                        title={tool.name}
+                        description={tool.description}
+                        selected={s.adkTools.has(tool.id)}
+                        recommended
+                        onToggle={() => s.toggleAdkTool(tool.id)}
+                      />
+                    ))}
+                  </div>
+                </div>
+              )}
             </div>
-          )}
-        </div>
+          </div>
+        )}
       </Panel>
 
-      {s.techProjectQuestions.length > 0 && (
-        <Panel
-          icon={ClipboardList}
-          title="Stack questions"
-          description="Follow-ups for the technologies you picked. Answers feed your project profile."
-        >
-          <QuestionList s={s} questions={s.techProjectQuestions} />
-        </Panel>
-      )}
+      {/* 2. Technologies & Stack Questions (Compact Active View + Expandable Picker) */}
+      <Panel
+        id="technologies"
+        icon={Boxes}
+        title="2. Technologies & stack profile"
+        description="Your selected stack drives which agents, rules, skills, and MCP servers are included."
+        meta={<Count tone={s.tech.size ? "brand" : "muted"}>{`${s.tech.size} selected`}</Count>}
+        actions={
+          <div className="flex flex-wrap items-center gap-2">
+            <form
+              className="flex gap-1.5"
+              onSubmit={(e) => {
+                e.preventDefault();
+                s.addCustomTech();
+              }}
+            >
+              <Input
+                value={s.customTech}
+                onChange={(e) => s.setCustomTech(e.target.value)}
+                placeholder="Add technology…"
+                aria-label="Add another technology"
+                className="h-8 w-40 text-xs md:text-xs"
+              />
+              <Button type="submit" variant="outline" size="sm" className="h-8" disabled={!s.customTech.trim()}>
+                <Plus className="size-3.5" /> Add
+              </Button>
+            </form>
+            {selectedTechList.length > 0 && (
+              <Button
+                type="button"
+                variant="ghost"
+                size="sm"
+                className="h-8 text-xs"
+                onClick={() => setBrowseTechOpen((v) => !v)}
+              >
+                {browseTechOpen ? "Hide full catalog" : `Browse all (${TECHNOLOGIES.length})`}
+                <ChevronDown className={cn("size-3.5 transition-transform", browseTechOpen && "rotate-180")} />
+              </Button>
+            )}
+          </div>
+        }
+      >
+        {/* Active selected stack chips */}
+        {selectedTechList.length > 0 && (
+          <div className="flex flex-wrap items-center gap-1.5">
+            <span className="mr-1 text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
+              Active stack:
+            </span>
+            {selectedTechList.map((t) => (
+              <Chip key={t.id} active onClick={() => s.toggleTech(t.id)}>
+                {t.label}
+                <X className="size-3 opacity-70" />
+              </Chip>
+            ))}
+          </div>
+        )}
 
-      {/* Capabilities: one tabbed workspace instead of six stacked accordions. */}
+        {/* Full categorized technology catalog (collapsed by default once stack is selected) */}
+        {showFullTechCatalog && (
+          <div className={cn("grid grid-cols-1 gap-x-6 gap-y-5 @3xl:grid-cols-2 @7xl:grid-cols-3", selectedTechList.length > 0 && "mt-4 border-t border-border/60 pt-4")}>
+            {TECH_GROUP_ORDER.map((group) => {
+              const items = TECH_BY_GROUP.get(group) ?? [];
+              if (items.length === 0) return null;
+              const picked = items.filter((t) => s.tech.has(t.id)).length;
+              return (
+                <div key={group}>
+                  <GroupLabel count={picked ? `${picked}` : undefined}>
+                    {TECH_GROUP_LABEL[group as keyof typeof TECH_GROUP_LABEL]}
+                  </GroupLabel>
+                  <div className="flex flex-wrap gap-1.5">
+                    {items.map((t) => (
+                      <Chip key={t.id} active={s.tech.has(t.id)} onClick={() => s.toggleTech(t.id)}>
+                        {t.label}
+                      </Chip>
+                    ))}
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        )}
+
+        {/* Stack Follow-Up Questions integrated cleanly inside the same card */}
+        {s.techProjectQuestions.length > 0 && (
+          <div className="mt-4 overflow-hidden rounded-xl border bg-background/50">
+            <button
+              type="button"
+              onClick={() => setStackQuestionsOpen((v) => !v)}
+              aria-expanded={stackQuestionsOpen}
+              className="flex w-full flex-col gap-2 px-3.5 py-2.5 text-left hover:bg-muted/30"
+            >
+              <div className="flex w-full items-center justify-between gap-2">
+                <span className="flex items-center gap-2 text-xs font-semibold">
+                  <ClipboardList className="size-3.5 text-primary" />
+                  Stack framework specifics
+                  <span className="rounded bg-primary/10 px-1.5 py-0.5 font-mono text-[10.5px] text-primary">
+                    {answeredStackQs.length}/{s.techProjectQuestions.length} answered
+                  </span>
+                </span>
+                <span className="flex items-center gap-1 text-[11px] text-muted-foreground">
+                  {stackQuestionsOpen ? "Hide" : "Edit"}
+                  <ChevronDown className={cn("size-3.5 transition-transform", stackQuestionsOpen && "rotate-180")} />
+                </span>
+              </div>
+              {!stackQuestionsOpen && answeredStackQs.length > 0 && (
+                <div className="flex flex-wrap gap-1.5">
+                  {answeredStackQs.map((tq) => {
+                    const vals = s.projectAnswers[tq.id] ?? [];
+                    const labels = tq.options
+                      ? vals.map((id) => tq.options?.find((o) => o.id === id)?.label).filter(Boolean).join(", ")
+                      : vals[0];
+                    return (
+                      <span
+                        key={tq.id}
+                        className="inline-flex items-center gap-1 rounded-md border bg-card px-2 py-0.5 text-[11px]"
+                      >
+                        <Check className="size-3 text-success" />
+                        <span className="font-medium">{tq.label}:</span>
+                        <span className="text-muted-foreground">{labels}</span>
+                      </span>
+                    );
+                  })}
+                </div>
+              )}
+            </button>
+            {stackQuestionsOpen && (
+              <div className="border-t border-border/60 p-4">
+                <QuestionList s={s} questions={s.techProjectQuestions} />
+              </div>
+            )}
+          </div>
+        )}
+      </Panel>
+
+      {/* 3. Capabilities Workspace — Defaults to "Selected only" so only active items are shown unless browsing */}
       <section id="capabilities" className="min-w-0 scroll-mt-4 overflow-hidden rounded-xl border bg-card/70">
-        <div className="border-b border-border/60 bg-muted/30 px-2 pt-2">
+        <div className="border-b border-border/60 bg-muted/30 px-3 pt-2.5">
+          <div className="mb-2 flex flex-wrap items-center justify-between gap-2 px-1">
+            <div>
+              <h2 className="text-sm font-semibold">3. Kit capabilities & guardrails</h2>
+              <p className="text-xs text-muted-foreground">
+                Showing the capabilities enabled for your project. Switch to &ldquo;Browse all&rdquo; to add or remove items.
+              </p>
+            </div>
+            {!catalogOpen && (
+              <div className="inline-flex rounded-lg border bg-background/80 p-0.5 text-xs">
+                <button
+                  type="button"
+                  onClick={() => setShowAllCaps(false)}
+                  className={cn(
+                    "inline-flex items-center gap-1.5 rounded-md px-2.5 py-1 text-[11.5px] font-medium transition-colors",
+                    !effectiveShowAll
+                      ? "bg-primary text-primary-foreground shadow-xs"
+                      : "text-muted-foreground hover:text-foreground",
+                  )}
+                >
+                  <Check className="size-3" />
+                  Selected only ({selectedInTab.length})
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setShowAllCaps(true)}
+                  className={cn(
+                    "inline-flex items-center gap-1.5 rounded-md px-2.5 py-1 text-[11.5px] font-medium transition-colors",
+                    effectiveShowAll
+                      ? "bg-primary text-primary-foreground shadow-xs"
+                      : "text-muted-foreground hover:text-foreground",
+                  )}
+                >
+                  <Filter className="size-3" />
+                  Browse all ({tab.items.length})
+                </button>
+              </div>
+            )}
+          </div>
+
           <div role="tablist" aria-label="Capabilities" className="flex gap-1 overflow-x-auto pb-2 [scrollbar-width:thin]">
             {tabs.map((t) => (
               <SegmentTab
@@ -441,46 +628,52 @@ export function StepStack({ s }: { s: KitBuilderState }) {
           </div>
         ) : (
           <>
-        <div className="flex flex-col gap-3 border-b border-border/60 px-4 py-3 @3xl:flex-row @3xl:items-center @3xl:justify-between">
-          <p className="text-xs text-muted-foreground">{tab.hint}</p>
-          <div className="flex flex-wrap items-center gap-2">
-            <div className="relative">
-              <Search className="pointer-events-none absolute top-1/2 left-2.5 size-3.5 -translate-y-1/2 text-muted-foreground" />
-              <Input
-                value={query}
-                onChange={(e) => setQuery(e.target.value)}
-                placeholder={`Filter ${tab.label.toLowerCase()}…`}
-                aria-label={`Filter ${tab.label}`}
-                className="h-8 w-52 pl-8 text-xs md:text-xs"
-              />
+            <div className="flex flex-col gap-3 border-b border-border/60 px-4 py-2.5 @3xl:flex-row @3xl:items-center @3xl:justify-between">
+              <p className="text-xs text-muted-foreground">{tab.hint}</p>
+              <div className="flex flex-wrap items-center gap-2">
+                <div className="relative">
+                  <Search className="pointer-events-none absolute top-1/2 left-2.5 size-3.5 -translate-y-1/2 text-muted-foreground" />
+                  <Input
+                    value={query}
+                    onChange={(e) => setQuery(e.target.value)}
+                    placeholder={`Filter ${tab.label.toLowerCase()}…`}
+                    aria-label={`Filter ${tab.label}`}
+                    className="h-8 w-48 pl-8 text-xs md:text-xs"
+                  />
+                </div>
+                {effectiveShowAll && (
+                  <BulkActions onAll={() => setAll(true)} onNone={() => setAll(false)} onReset={() => tab.setOverride(new Map())} />
+                )}
+              </div>
             </div>
-            <BulkActions onAll={() => setAll(true)} onNone={() => setAll(false)} onReset={() => tab.setOverride(new Map())} />
-          </div>
-        </div>
 
-        <div key={tab.id} className="animate-fade-in p-4">
-          {visible.length === 0 ? (
-            <p className="py-8 text-center text-sm text-muted-foreground">No {tab.label.toLowerCase()} match “{query}”.</p>
-          ) : tab.packs ? (
-            <div className="flex flex-col gap-5">
-              {Object.entries(tab.packs).map(([packId, packLabel]) => {
-                const group = visible.filter((i) => i.pack === packId);
-                if (group.length === 0) return null;
-                return (
-                  <div key={packId}>
-                    <GroupLabel count={`${group.filter((i) => isOn(tab, i)).length}/${group.length}`}>{packLabel}</GroupLabel>
-                    <div className={tileGridClass}>{group.map(renderItem)}</div>
-                  </div>
-                );
-              })}
+            <div key={`${tab.id}-${effectiveShowAll}`} className="animate-fade-in p-4">
+              {visible.length === 0 ? (
+                <p className="py-8 text-center text-sm text-muted-foreground">
+                  No {tab.label.toLowerCase()} match &ldquo;{query}&rdquo;.
+                </p>
+              ) : effectiveShowAll && tab.packs ? (
+                <div className="flex flex-col gap-5">
+                  {Object.entries(tab.packs).map(([packId, packLabel]) => {
+                    const group = visible.filter((i) => i.pack === packId);
+                    if (group.length === 0) return null;
+                    return (
+                      <div key={packId}>
+                        <GroupLabel count={`${group.filter((i) => isOn(tab, i)).length}/${group.length}`}>
+                          {packLabel}
+                        </GroupLabel>
+                        <div className={tileGridClass}>{group.map(renderItem)}</div>
+                      </div>
+                    );
+                  })}
+                </div>
+              ) : (
+                <div className={tileGridClass}>{visible.map(renderItem)}</div>
+              )}
             </div>
-          ) : (
-            <div className={tileGridClass}>{visible.map(renderItem)}</div>
-          )}
-        </div>
           </>
         )}
       </section>
-    </>
+    </div>
   );
 }

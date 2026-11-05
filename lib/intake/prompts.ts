@@ -30,6 +30,9 @@ import {
   PERSONA,
 } from "./instructions";
 import { normalizeAdkProject } from "@/lib/adk/normalize";
+import { syncEnvVarsFromProjectAndBrief, synthesizeAdkFromBrief } from "@/lib/adk/catalog";
+import type { AdkProject } from "@/contracts/adk";
+import { enrichDiscoveryBriefHeuristics } from "./guided";
 
 // ── shared context ───────────────────────────────────────────────────────────
 
@@ -188,6 +191,80 @@ export function normalizeBrief(b: z.infer<typeof LooseBrief>): Brief {
   };
 }
 
+const LooseAdkSystem = z.object({
+  packageName: z.string().describe("snake_case Python package name derived from the domain"),
+  title: z.string(),
+  description: z.string(),
+  rootAgent: z.string().describe("name of the root llm orchestrator agent"),
+  agents: z.array(
+    z.object({
+      name: z.string(),
+      type: z.enum(["llm", "sequential", "parallel", "loop"]),
+      description: z.string(),
+      model: z.string().describe("llm only; approved Gemini model id"),
+      instruction: z.string().describe("llm only; empty for workflow agents"),
+      tools: z
+        .array(z.string())
+        .describe("tool names; empty for workflow agents"),
+      subAgents: z.array(z.string()),
+      outputKey: z
+        .string()
+        .describe("session state key for this agent's output, or empty"),
+      maxIterations: z.number().describe("loop only; 1-10, else 0"),
+    }),
+  ),
+  tools: z.array(
+    z.object({
+      name: z.string(),
+      kind: z.enum(["builtin", "function"]),
+      description: z.string(),
+      builtin: z
+        .string()
+        .describe("builtin only: the ADK builtin name; else empty"),
+      code: z
+        .string()
+        .describe(
+          "function only: complete Python def with docstring; else empty",
+        ),
+      imports: z.array(z.string()),
+      dependencies: z.array(z.string()),
+    }),
+  ),
+  envVars: z.array(
+    z.object({
+      name: z.string(),
+      example: z.string(),
+      description: z.string(),
+    }),
+  ),
+});
+
+function normalizeLooseAdkSystem(
+  adkSystem: z.infer<typeof LooseAdkSystem>,
+  brief: Brief,
+): AdkProject {
+  const normalized = normalizeAdkProject(
+    {
+      ...adkSystem,
+      agents: adkSystem.agents.map((a) => ({
+        ...a,
+        model: a.model || undefined,
+        instruction: a.instruction || undefined,
+        outputKey: a.outputKey || undefined,
+        maxIterations: a.maxIterations || undefined,
+      })),
+      tools: adkSystem.tools.map((t) => ({
+        ...t,
+        builtin: t.builtin || undefined,
+        code: t.code || undefined,
+      })),
+    },
+    adkSystem.title || brief.title || "Agent Orchestration",
+  );
+  normalized.envVars = syncEnvVarsFromProjectAndBrief(normalized, brief);
+  return normalized;
+}
+
 // ── Material Analyst ─────────────────────────────────────────────────────────
 
 export const AnalyzeModelSchema = z.object({
@@ -204,9 +281,12 @@ export const AnalyzeModelSchema = z.object({
   message: z.string().describe("Short readout for the chat, under 90 words."),
 });
 
-export const ANALYZE_SYSTEM = [PERSONA, ANALYST_INSTRUCTIONS, GUARDRAILS].join(
-  "\n\n",
-);
+export const ANALYZE_SYSTEM = [
+  PERSONA,
+  ANALYST_INSTRUCTIONS,
+  ADK_DESIGN_INSTRUCTIONS,
+  GUARDRAILS,
+].join("\n\n");
 
 export function analyzePrompt(req: AnalyzeRequest): string {
   const fresh = req.materials.filter((m) => req.analyze.includes(m.id));
@@ -224,9 +304,14 @@ export function analyzePrompt(req: AnalyzeRequest): string {
 }
 
 export function normalizeAnalyze(
-  out: z.infer<typeof AnalyzeModelSchema>,
+  out: z.infer<typeof AnalyzeModelSchema> & { adkDraft?: z.infer<typeof LooseAdkSystem> },
   ids: string[],
 ): AnalyzeResponse {
+  const brief = enrichDiscoveryBriefHeuristics(normalizeBrief(out.brief));
+  const adkDraft =
+    out.adkDraft && out.adkDraft.agents.length > 0
+      ? normalizeLooseAdkSystem(out.adkDraft, brief)
+      : synthesizeAdkFromBrief(brief);
   return {
     insights: out.insights
       .filter((i) => ids.includes(i.materialId))
@@ -238,7 +323,8 @@ export function normalizeAnalyze(
         technologies: clipList(i.technologies, 12, 60),
         gaps: clipList(i.gaps, 3, 300),
       })),
-    brief: normalizeBrief(out.brief),
+    brief,
+    adkDraft,
     message: clip(out.message.trim(), 2_000),
     mode: "ai",
   };
@@ -270,6 +356,7 @@ export const FollowUpModelSchema = z.object({
 export const FOLLOWUP_SYSTEM = [
   PERSONA,
   FOLLOWUP_PLAYBOOK,
+  ADK_DESIGN_INSTRUCTIONS,
   `Brief field weights for completeness: ${Object.entries(FIELD_META)
     .map(([f, m]) => `${f}=${m.weight}`)
     .join(", ")}.`,
@@ -290,7 +377,7 @@ export function followUpPrompt(req: FollowUpRequest): string {
 }
 
 export function normalizeFollowUp(
-  out: z.infer<typeof FollowUpModelSchema>,
+  out: z.infer<typeof FollowUpModelSchema> & { adkDraft?: z.infer<typeof LooseAdkSystem> },
   round: number,
   asked: string[],
 ): FollowUpResponse {
@@ -303,8 +390,14 @@ export function normalizeFollowUp(
     multi: q.multi,
   }));
   const fresh = questions.filter((q) => !asked.includes(q.id));
+  const brief = enrichDiscoveryBriefHeuristics(normalizeBrief(out.brief));
+  const adkDraft =
+    out.adkDraft && out.adkDraft.agents.length > 0
+      ? normalizeLooseAdkSystem(out.adkDraft, brief)
+      : synthesizeAdkFromBrief(brief);
   return {
-    brief: normalizeBrief(out.brief),
+    brief,
+    adkDraft,
     questions: out.done ? [] : fresh,
     message: clip(out.message.trim(), 2_000),
     done: out.done || fresh.length === 0,

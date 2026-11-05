@@ -14,7 +14,15 @@ import {
   isTechQuestion,
   projectProfileRule,
   relevantQuestions,
+  recommendStandardsFromBrief,
+  mapBriefToProjectAnswers,
+  inferDeployTargetFromBrief,
+  matchMcpServersFromBrief,
+  inferTechnologiesFromBrief,
 } from "../lib/kit/project-questions";
+import { EMPTY_BRIEF } from "../lib/intake/brief";
+import { enrichDiscoveryBriefHeuristics } from "../lib/intake/guided";
+import { synthesizeAdkFromBrief } from "../lib/adk/catalog";
 import {
   projectTypeRule,
   projectTypeSkills,
@@ -164,6 +172,61 @@ const cloudRunFiles = buildKit({ ...sel, deployTarget: "cloud_run" }, "google-ad
 assert(
   cloudRunFiles.some((f) => f.path === "Dockerfile"),
   "[google-adk] Dockerfile emitted when deployTarget is cloud_run",
+);
+
+// Verify Phase 2 Stage-by-Stage Discovery -> Steps 2, 3 (Greenfield), 4, 5, 6/7 alignment
+const discoveryBrief = enrichDiscoveryBriefHeuristics({
+  ...EMPTY_BRIEF,
+  title: "Vendor Invoice Reconciliation & SAP Approval",
+  problem: "400 vendor invoices a week arrive in SharePoint and need PO matching in SAP and PostgreSQL.",
+  inScope: [
+    "Extract invoice line items from SharePoint PDFs",
+    "Validate PO and vendor records in SAP and PostgreSQL",
+    "Escalate variances over 5k to Finance Manager",
+  ],
+  goals: ["Cut manual triage time by 80%", "100% SOX audit trail"],
+  users: ["Finance Operations team", "Approving Managers"],
+  audience: "department",
+  stack: ["Python", "PostgreSQL", "Next.js"],
+  integrations: ["SharePoint", "SAP", "Jira"],
+  dataCompliance: "Confidential financial records, SOX audit trail, GDPR vendor contact PII",
+  constraints: ["Approvals over 5k require explicit human sign-off"],
+  successMetrics: ["<2 min processing time", "Zero unapproved SAP writes"],
+});
+const discoveryAdk = synthesizeAdkFromBrief(discoveryBrief);
+const recStds = recommendStandardsFromBrief(discoveryBrief);
+assert(
+  recStds.orgGuidelineIds.includes("gdpr-data-protection") &&
+    recStds.orgGuidelineIds.includes("data-handling-privacy") &&
+    recStds.standardTemplateIds.includes("std-contract-parity-testing"),
+  "Step 2 standards recommended from Discovery brief",
+);
+const mappedAnswers = mapBriefToProjectAnswers(discoveryBrief, null, discoveryAdk, [
+  { id: "m1", name: "invoice-spec.md", kind: "file", text: "# Invoice Spec" },
+]);
+assert(
+  mappedAnswers["greenfield-inputs"]?.includes("requirements-doc") &&
+    mappedAnswers["greenfield-inputs"]?.includes("api-contracts") &&
+    mappedAnswers["greenfield-users"]?.[0] === "internal-org" &&
+    mappedAnswers["greenfield-auth"]?.[0] === "sso" &&
+    mappedAnswers["compliance-requirements"]?.includes("gdpr") &&
+    mappedAnswers["compliance-requirements"]?.includes("soc2") &&
+    Boolean(mappedAnswers["project-notes"]?.[0]?.includes("Vendor Invoice")),
+  "Step 3 Greenfield projectAnswers mapped deterministically from Discovery brief",
+);
+const matchedMcp = matchMcpServersFromBrief(discoveryBrief, discoveryAdk);
+assert(
+  matchedMcp.includes("postgres-mcp") && matchedMcp.includes("jira-mcp") && matchedMcp.includes("confluence-mcp"),
+  "Step 4 MCP servers matched from Discovery brief",
+);
+const inferredTech = inferTechnologiesFromBrief(discoveryBrief, null, true);
+assert(
+  inferredTech.includes("python") && inferredTech.includes("postgresql"),
+  "Step 4 technologies inferred from Discovery brief",
+);
+assert(
+  inferDeployTargetFromBrief(discoveryBrief, discoveryAdk) === "agent_engine",
+  "Step 5 deployTarget inferred from Discovery brief",
 );
 
 assert(typeof proxy === "function", "proxy.ts exports a synchronous function named `proxy`");

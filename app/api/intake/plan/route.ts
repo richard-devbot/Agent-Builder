@@ -23,8 +23,11 @@ export async function POST(req: Request) {
     const res: PlanResponse = { plan: normalizePlan(out, ALLOWED_TECH, await matchSkills(out.skillNeeds)), mode: "ai" };
     return json(res);
   } catch (e) {
-    console.error("[intake/plan]", e);
-    const message = e instanceof IntakeModelError ? e.message : "The AI service is unavailable right now";
-    return json({ error: message }, 502);
+    console.warn("[intake/plan] Falling back to document-driven guided blueprint:", e instanceof IntakeModelError ? e.message : e);
+    const res: PlanResponse = {
+      plan: guidedPlan(techFromBrief(body.brief), await matchSkills(guidedNeeds(body.brief)), body.brief),
+      mode: "guided",
+    };
+    return json(res);
   }
 }

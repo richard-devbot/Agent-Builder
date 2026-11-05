@@ -121,6 +121,107 @@ const an = guidedAnalyze({
 assert.equal(an.insights.length, 1, "only requested materials are analysed");
 assert.deepEqual(an.insights[0].technologies, ["Next.js", "PostgreSQL"]);
 assert.ok(an.insights[0].facts.includes("400 invoices a week"));
+assert.ok(an.insights[0].gaps.length >= 1, "document-specific agentic workflow gaps extracted");
 assert.deepEqual(an.brief.stack, ["Next.js", "PostgreSQL"]);
 assert.ok(an.brief.systems.some((s) => s.name === "SharePoint"), "SharePoint detected from material text");
-console.log("PASS: guided free-form messages and material analysis");
+
+// Verify follow-up questions after document upload are grounded in the uploaded document (not generic boilerplate)
+const docFollowUp = guidedFollowUp({
+  role: "developer",
+  brief: an.brief,
+  materials: [{ id: "a", name: "spec.md", kind: "file", text: "# Spec\nThe portal is built on Next.js and PostgreSQL and reads SharePoint lists.\n- 400 invoices a week\n- Approvals over 5k need a manager" }],
+  answers: [],
+  asked: [],
+  transcript: [],
+  message: "",
+  round: 0,
+});
+assert.ok(docFollowUp.questions.length > 0, "follow-up questions generated for uploaded document");
+assert.ok(
+  docFollowUp.questions.some((q) => q.question.includes("spec.md") || q.question.includes("400 invoices a week") || q.question.includes("SharePoint")),
+  "questions explicitly reference the uploaded document name, extracted facts, or detected systems",
+);
+assert.ok(
+  !docFollowUp.questions.some((q) => q.question === "What is going wrong today, and who feels it most?"),
+  "generic boilerplate questions are replaced by document-grounded workflow questions",
+);
+assert.ok(an.adkDraft && an.adkDraft.agents.length >= 3, "guidedAnalyze returns domain-specific adkDraft");
+assert.ok(
+  an.adkDraft!.packageName !== "workflow_workflow" &&
+    docFollowUp.adkDraft &&
+    docFollowUp.adkDraft.packageName !== "workflow_workflow",
+  "guidedAnalyze and guidedFollowUp never return workflow_workflow boilerplate",
+);
+
+// Verify markdown disclaimer stripping, clean word clipping, dynamic system extraction, and conversational Q&A
+const sampleDocText = `# Order Exception Resolution Hub
+*Built with Google ADK; integrated with AcmeERP and approved enterprise systems.**
+
+> **Status:** Proposed production design, not a verified description of internal processes. Workflows, integration capabilities, volumes, policies, and deployment requirements must be confirmed.
+
+# 1. Business case
+Operations and finance teams must resolve purchasing exceptions that cross several systems and business units:
+- A receipt is missing.
+- The invoice differs from the PO.
+- The available PO balance is insufficient.
+- Required information is missing.
+Systems: SAP, AcmeERP, Email / Exchange Online, Next.js, Google Cloud.`;
+
+const procAnalyzed = guidedAnalyze({
+  role: "developer",
+  brief: EMPTY_BRIEF,
+  materials: [{ id: "proc-1", name: "discovery-brief.md", kind: "file", text: sampleDocText }],
+  analyze: ["proc-1"],
+});
+assert.equal(procAnalyzed.brief.title, "Order Exception Resolution Hub", "extracts clean document title instead of generic section heading");
+assert.ok(
+  !procAnalyzed.insights[0].summary.includes("Status:") &&
+    !procAnalyzed.insights[0].facts.some((f) => f.includes("Status:") || f.includes("Built with Google ADK")),
+  "disclaimer blockquotes and metadata subtitles are stripped from insights",
+);
+assert.ok(
+  procAnalyzed.brief.systems.some((s) => s.name === "AcmeERP") &&
+    procAnalyzed.brief.systems.some((s) => s.name === "SAP"),
+  "dynamically detects systems named in the document without hardcoding vendor lists",
+);
+
+const procFollowUp = guidedFollowUp({
+  role: "developer",
+  brief: procAnalyzed.brief,
+  materials: [{ id: "proc-1", name: "discovery-brief.md", kind: "file", text: sampleDocText }],
+  answers: [],
+  asked: [],
+  transcript: [],
+  message: "",
+  round: 0,
+});
+assert.ok(
+  !procFollowUp.questions.some(
+    (q) =>
+      q.question.includes("Status:") ||
+      q.suggestions.some((s) => s.includes("Status:") || s.includes("Built with Google ADK") || s.endsWith("purchasi)")),
+  ),
+  "generated questions and suggestion chips never include status disclaimers or mid-word truncations",
+);
+
+const readinessAsk = guidedFollowUp({
+  role: "developer",
+  brief: procAnalyzed.brief,
+  materials: [{ id: "proc-1", name: "discovery-brief.md", kind: "file", text: sampleDocText }],
+  answers: [],
+  asked: [],
+  transcript: [],
+  message: "what elae we need are we mising any thing ?",
+  round: 2,
+});
+assert.ok(
+  !readinessAsk.message.includes("I can't answer questions in guided mode"),
+  "never refuses to answer questions in guided mode",
+);
+assert.ok(
+  readinessAsk.message.includes("Order Exception Resolution Hub") &&
+    readinessAsk.message.includes("complete") &&
+    readinessAsk.message.includes("AcmeERP"),
+  "answers 'what else do we need / are we missing anything?' with a concrete readiness and gap summary",
+);
+console.log("PASS: guided free-form messages, deep material analysis, and document-specific workflow questions");

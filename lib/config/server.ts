@@ -100,7 +100,24 @@ export function loadVertexAiServerConfig(
 ) {
   const model = env.GEMINI_MODEL?.trim() || DEFAULT_GEMINI_MODEL;
   const location = env.GOOGLE_CLOUD_LOCATION?.trim() || "global";
-  const project = env.GOOGLE_CLOUD_PROJECT?.trim() || "";
+  let saProject = "";
+  if (env.GOOGLE_SERVICE_ACCOUNT_JSON?.trim()) {
+    try {
+      const parsed = JSON.parse(env.GOOGLE_SERVICE_ACCOUNT_JSON.trim()) as {
+        project_id?: string;
+      };
+      if (parsed && typeof parsed.project_id === "string") {
+        saProject = parsed.project_id.trim();
+      }
+    } catch {
+      // handled later if service account JSON is invalid
+    }
+  }
+  const project =
+    env.GOOGLE_CLOUD_PROJECT?.trim() ||
+    saProject ||
+    env.NEXT_PUBLIC_GCP_DEV_PROJECT_ID?.trim() ||
+    "";
   const useVertex = env.GOOGLE_GENAI_USE_VERTEXAI === "true" && Boolean(project);
   return {
     configured: useVertex,
