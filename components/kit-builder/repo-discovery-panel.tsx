@@ -1,14 +1,10 @@
 "use client";
 
 /**
- * "Analyze a GitHub repo" panel (discovery step) — sends a repo URL to the
- * repo-discovery Lambda; the result pre-selects suggested technologies and
- * adds project-context.md to the kit.
- *
- * Private repos: the user can supply their own GitHub token for the session.
- * It lives only in component state (never localStorage or the kit) and is
- * sent with the analyze request, so each user works with their own access.
- * Shown disabled when NEXT_PUBLIC_REPO_DISCOVERY_API is not configured.
+ * "Fetch & Read GitLab Repository" panel — reads a GitLab repository using the
+ * connected GitLab Personal Access Token (or OAuth session) via
+ * `/api/gitlab/read-repo`, pre-selects suggested technologies, and adds
+ * `project-context.md` to the kit.
  */
 
 import { useState } from "react";
@@ -57,22 +53,24 @@ export function RepoDiscoveryPanel({
     <Card className="surface gap-0 p-4 ring-0">
       <div className="mb-2 flex items-center gap-2">
         <GitBranch className="size-4 text-primary" />
-        <span className="text-sm font-semibold">Analyze a GitHub repo</span>
+        <span className="text-sm font-semibold">Fetch &amp; Read GitLab Repository</span>
         <Badge variant="secondary" className="text-[11px]">
-          Beta
+          GitLab PAT / OAuth
         </Badge>
       </div>
       <p className="mb-3 text-[13px] leading-relaxed text-muted-foreground">
-        Point at a GitHub repository and we&apos;ll analyze its stack,
-        pre-select matching technologies, and add a project-context.md to your
-        kit. Public repos need no credentials.
+        Enter a GitLab repository URL or{" "}
+        <code className="font-mono text-xs">group/project</code> path to fetch its
+        file tree and manifests, pre-select matching technologies, and add{" "}
+        <code className="font-mono text-xs">project-context.md</code> to your kit.
+        Uses your connected GitLab token automatically.
       </p>
 
       <div className="flex flex-wrap items-center gap-2">
         <Input
           value={repoUrl}
           onChange={(e) => setRepoUrl(e.target.value)}
-          placeholder="e.g. https://git.example.org/my-team-agent"
+          placeholder="e.g. my-group/my-agent or https://git.example.org/group/repo"
           className="h-8 max-w-sm text-[13px]"
           disabled={disabled || loading}
         />
@@ -84,11 +82,11 @@ export function RepoDiscoveryPanel({
         >
           {loading ? (
             <>
-              <Loader2 className="size-3.5 animate-spin" /> Analyzing…
+              <Loader2 className="size-3.5 animate-spin" /> Fetching…
             </>
           ) : (
             <>
-              <Search className="size-3.5" /> Analyze
+              <Search className="size-3.5" /> Fetch &amp; Read
             </>
           )}
         </Button>
@@ -102,7 +100,9 @@ export function RepoDiscoveryPanel({
             onClick={() => setShowToken((v) => !v)}
           >
             <KeyRound className="size-3" />
-            {showToken ? "Hide access token" : "Private repo? Add a temporary access token"}
+            {showToken
+              ? "Hide access token override"
+              : "Override with a custom GitLab Personal Access Token (glpat-...)"}
           </button>
           {showToken && (
             <div className="mt-2 max-w-sm">
@@ -110,15 +110,14 @@ export function RepoDiscoveryPanel({
                 type="password"
                 value={githubToken}
                 onChange={(e) => setGithubToken(e.target.value)}
-                placeholder="GitHub fine-grained token (read-only Contents)"
-                className="h-8 text-[13px]"
+                placeholder="glpat-..."
+                className="h-8 font-mono text-[13px]"
                 autoComplete="off"
                 disabled={loading}
               />
               <p className="mt-1 text-[11px] leading-relaxed text-muted-foreground">
-                Used only for this analysis and kept in memory for this tab —
-                never saved, never added to your kit. Use a fine-grained token
-                with read-only Contents access and revoke it anytime.
+                Optional override if not using your Step 5 / server GitLab token.
+                Kept in memory for this tab only.
               </p>
             </div>
           )}
@@ -126,7 +125,8 @@ export function RepoDiscoveryPanel({
       )}
 
       {disabled && (
-        <p className="mt-2.5 inline-flex items-center gap-1.5 rounded-md bg-muted px-2 py-1 text-[11px] text-muted-foreground"><span className="size-1.5 rounded-full bg-warning" aria-hidden />
+        <p className="mt-2.5 inline-flex items-center gap-1.5 rounded-md bg-muted px-2 py-1 text-[11px] text-muted-foreground">
+          <span className="size-1.5 rounded-full bg-warning" aria-hidden />
           Requires the repo-discovery service. Not connected in this environment.
         </p>
       )}

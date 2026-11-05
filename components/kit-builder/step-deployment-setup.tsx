@@ -65,6 +65,8 @@ export interface GitLabGroupOption {
 
 export interface GitLabConnectionStatus {
   connected: boolean;
+  authMode?: "oauth" | "pat_cookie" | "pat_env";
+  hasEnvToken?: boolean;
   user?: {
     id: number;
     username: string;
@@ -163,6 +165,9 @@ export function StepDeploymentSetup({
   const [loadingGitlab, setLoadingGitlab] = useState(true);
   const [userRoles, setUserRoles] = useState<AppRole[]>(["Builder"]);
   const [showBootstrapHelper, setShowBootstrapHelper] = useState(false);
+  const [showPatInput, setShowPatInput] = useState(false);
+  const [patToken, setPatToken] = useState("");
+  const [connectingPat, setConnectingPat] = useState(false);
 
   const setup = s ? s.deploymentSetup : localSetup;
   const updateSetup = (patch: Partial<DeploymentSetupState>) => {
@@ -187,6 +192,10 @@ export function StepDeploymentSetup({
       if (glRes.ok) {
         const data = (await glRes.json()) as GitLabConnectionStatus;
         setGitlabStatus(data);
+        const suggestedGroup = data.groupPath || data.groups?.[0]?.fullPath;
+        if (suggestedGroup && !setup.gitlabGroupPath.trim()) {
+          updateSetup({ gitlabGroupPath: suggestedGroup });
+        }
       }
       if (authRes.ok) {
         const sess = (await authRes.json()) as {
@@ -214,6 +223,10 @@ export function StepDeploymentSetup({
         if (glRes.ok) {
           const data = (await glRes.json()) as GitLabConnectionStatus;
           setGitlabStatus(data);
+          const suggestedGroup = data.groupPath || data.groups?.[0]?.fullPath;
+          if (suggestedGroup && !setup.gitlabGroupPath.trim()) {
+            updateSetup({ gitlabGroupPath: suggestedGroup });
+          }
         }
         if (authRes.ok) {
           const sess = (await authRes.json()) as {
@@ -231,7 +244,48 @@ export function StepDeploymentSetup({
     return () => {
       active = false;
     };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  async function connectWithPat(useEnvToken = false) {
+    if (!useEnvToken && !patToken.trim()) {
+      toast.error("Paste a GitLab Personal Access Token (e.g. glpat-...) first.");
+      return;
+    }
+    setConnectingPat(true);
+    try {
+      const res = await fetch("/api/gitlab/token", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify(
+          useEnvToken ? { useEnvToken: true } : { token: patToken.trim() },
+        ),
+      });
+      const data = (await res.json()) as GitLabConnectionStatus & {
+        error?: string;
+      };
+      if (!res.ok) {
+        toast.error(data.error || "Failed to connect with GitLab token.");
+        return;
+      }
+      setGitlabStatus(data);
+      setPatToken("");
+      setShowPatInput(false);
+      const suggestedGroup = data.groupPath || data.groups?.[0]?.fullPath;
+      if (suggestedGroup && !setup.gitlabGroupPath.trim()) {
+        updateSetup({ gitlabGroupPath: suggestedGroup });
+      }
+      toast.success(
+        data.user
+          ? `Connected to GitLab as @${data.user.username} via Personal Access Token.`
+          : "Connected to GitLab via Personal Access Token.",
+      );
+    } catch {
+      toast.error("Network error while verifying GitLab Personal Access Token.");
+    } finally {
+      setConnectingPat(false);
+    }
+  }
 
   async function disconnectGitLab() {
     try {
@@ -293,10 +347,10 @@ export function StepDeploymentSetup({
       label: "GitLab connected",
       ok: gitlabStatus.connected,
       okText: gitlabStatus.user
-        ? `Connected as @${gitlabStatus.user.username} (${gitlabStatus.user.name})`
-        : "Connected via OAuth 2.0 + PKCE",
+        ? `Connected as @${gitlabStatus.user.username} (${gitlabStatus.user.name}) · ${gitlabStatus.authMode === "oauth" ? "OAuth 2.0" : "Personal Access Token"}`
+        : "Connected via OAuth 2.0 / PAT",
       fixText:
-        "Click 'Connect GitLab' in the GitLab Connection card to sign in with your corporate GitLab account.",
+        "Connect via OAuth ('Connect GitLab') or paste a GitLab Personal Access Token ('Use Access Token') in the GitLab Connection card.",
     },
     {
       id: "group-configured",
@@ -347,9 +401,9 @@ export function StepDeploymentSetup({
           id="gitlab-connection"
           icon={GitBranch}
           title="GitLab Connection"
-          description="OAuth 2.0 + PKCE repository connection. Tokens are encrypted in an httpOnly cookie."
+          description="Connect via OAuth 2.0 + PKCE or a GitLab Personal Access Token (PAT). Tokens are encrypted in an httpOnly cookie."
           actions={
-            <div className="flex items-center gap-2">
+            <div className="flex flex-wrap items-center gap-2">
               <Button
                 type="button"
                 variant="ghost"
@@ -361,6 +415,15 @@ export function StepDeploymentSetup({
                 <RefreshCw
                   className={cn("size-3.5", loadingGitlab && "animate-spin")}
                 />
+              </Button>
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                onClick={() => setShowPatInput((v) => !v)}
+              >
+                <KeyRound className="size-3.5" />
+                {gitlabStatus.connected ? "Switch Token" : "Use Access Token"}
               </Button>
               {gitlabStatus.connected ? (
                 <Button
@@ -376,7 +439,7 @@ export function StepDeploymentSetup({
                   href={`/api/gitlab/login?returnTo=${encodeURIComponent(standalone ? "/integrations" : "/studio")}`}
                   className="inline-flex h-8 items-center gap-1.5 rounded-lg bg-primary px-3 text-xs font-medium text-primary-foreground shadow-xs hover:bg-primary/90"
                 >
-                  <GitBranch className="size-3.5" /> Connect GitLab
+                  <GitBranch className="size-3.5" /> Connect OAuth
                 </a>
               )}
             </div>
@@ -393,6 +456,15 @@ export function StepDeploymentSetup({
                     ? `@${gitlabStatus.user.username}`
                     : "Not connected"}
                 </span>
+                {gitlabStatus.connected && (
+                  <span className="mt-0.5 block text-[10px] text-emerald-500">
+                    {gitlabStatus.authMode === "oauth"
+                      ? "OAuth 2.0 + PKCE"
+                      : gitlabStatus.authMode === "pat_env"
+                        ? "PAT (.env.local)"
+                        : "Personal Access Token"}
+                  </span>
+                )}
               </div>
               <div>
                 <span className="block text-[10.5px] font-semibold uppercase tracking-wider text-muted-foreground">
@@ -414,6 +486,65 @@ export function StepDeploymentSetup({
                 </span>
               </div>
             </div>
+
+            {/* Personal Access Token (PAT) Fallback Panel */}
+            {(showPatInput || !gitlabStatus.connected) && (
+              <div className="rounded-lg border border-primary/25 bg-primary/5 p-3 space-y-2.5">
+                <div className="flex items-center justify-between gap-2">
+                  <span className="inline-flex items-center gap-1.5 text-xs font-semibold text-foreground">
+                    <KeyRound className="size-3.5 text-primary" />
+                    GitLab Personal Access Token (PAT) Fallback
+                  </span>
+                  {gitlabBaseUrl && (
+                    <a
+                      href={`${gitlabBaseUrl}/-/user_settings/personal_access_tokens?name=Agent+Builder&scopes=api,read_user`}
+                      target="_blank"
+                      rel="noreferrer"
+                      className="inline-flex items-center gap-1 text-[11px] font-medium text-primary hover:underline"
+                    >
+                      Create GitLab token <ExternalLink className="size-3" />
+                    </a>
+                  )}
+                </div>
+                <p className="text-[11px] text-muted-foreground">
+                  If GitLab OAuth is unavailable, paste a Personal Access Token (scopes:{" "}
+                  <code className="font-mono">api</code>,{" "}
+                  <code className="font-mono">read_user</code>) to push repositories, fetch projects, and trigger CI/CD pipelines.
+                </p>
+                <div className="flex flex-col gap-2 sm:flex-row">
+                  <Input
+                    type="password"
+                    value={patToken}
+                    onChange={(e) => setPatToken(e.target.value)}
+                    placeholder="glpat-..."
+                    autoComplete="off"
+                    spellCheck={false}
+                    className="h-8 flex-1 font-mono text-xs"
+                  />
+                  <Button
+                    type="button"
+                    size="sm"
+                    onClick={() => connectWithPat(false)}
+                    disabled={connectingPat || !patToken.trim()}
+                    className="h-8 text-xs"
+                  >
+                    {connectingPat ? "Verifying…" : "Connect with Token"}
+                  </Button>
+                  {gitlabStatus.hasEnvToken && !gitlabStatus.connected && (
+                    <Button
+                      type="button"
+                      variant="secondary"
+                      size="sm"
+                      onClick={() => connectWithPat(true)}
+                      disabled={connectingPat}
+                      className="h-8 text-xs"
+                    >
+                      Use Server Token (.env)
+                    </Button>
+                  )}
+                </div>
+              </div>
+            )}
 
             {gitlabBaseUrl && (
               <p className="text-[11px] text-muted-foreground">

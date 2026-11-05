@@ -15,7 +15,12 @@ export async function POST(req: NextRequest) {
   try {
     const config = loadGitLabServerConfig();
     const tokens = readGitLabTokensFromRequest(req, config.tokenEncKey);
-    if (tokens?.access_token) {
+    if (
+      tokens?.access_token &&
+      tokens.auth_mode !== "pat" &&
+      config.clientId &&
+      config.clientSecret
+    ) {
       await fetch(`${config.baseUrl}/oauth/revoke`, {
         method: "POST",
         headers: { "content-type": "application/x-www-form-urlencoded" },

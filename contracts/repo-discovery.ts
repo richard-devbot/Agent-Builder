@@ -1,21 +1,21 @@
 /**
- * Shared request/response contract for the repo-discovery Lambda.
+ * Shared request/response contract for the repo-discovery service.
  *
  * Imported by BOTH sides of the wire so they cannot drift:
- *   - UI client:      lib/kit/repo-discovery-client.ts (future)
- *   - Lambda handler: backend/repo-discovery/index.ts
+ *   - UI client:      lib/kit/repo-discovery-client.ts
+ *   - Route handler:  app/api/gitlab/read-repo/route.ts
  */
 
 import { z } from "zod";
 
 export const RepoDiscoveryRequestSchema = z.object({
-  /** Public GitHub repository URL, e.g. https://github.com/org/repo */
-  repoUrl: z.string().url().max(500),
+  /** GitLab/GitHub repository URL or group/project path */
+  repoUrl: z.string().min(3).max(500),
   /** Optional branch/ref (default: the repo's default branch). */
   ref: z.string().max(200).optional(),
   /**
-   * Optional GitHub access token supplied by the user for this request only
-   * (private repos / rate limits). Never stored server-side or client-side.
+   * Optional access token supplied by the user for this request only.
+   * Never stored client-side.
    */
   githubToken: z.string().min(1).max(300).optional(),
 });

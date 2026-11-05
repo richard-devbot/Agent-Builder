@@ -4,6 +4,7 @@ import {
   getValidGitLabAuth,
   gitlabFetch,
   mapGitLabErrorResponse,
+  resolveGitLabNamespace,
   withRefreshedCookie,
 } from "@/lib/gitlab/client";
 
@@ -17,7 +18,10 @@ export async function GET(req: NextRequest) {
     const authCtx = await getValidGitLabAuth(req);
     if (!authCtx) {
       return NextResponse.json(
-        { error: "Connect GitLab first via OAuth before listing group projects." },
+        {
+          error:
+            "Connect GitLab first via OAuth or Personal Access Token before listing projects.",
+        },
         { status: 401 },
       );
     }
@@ -26,32 +30,26 @@ export async function GET(req: NextRequest) {
       .get("groupPath")
       ?.trim()
       .replace(/^\/+|\/+$/g, "");
-    const effectiveGroupPath = queryGroup || authCtx.config.groupPath;
-    if (!effectiveGroupPath) {
-      return NextResponse.json(
-        {
-          error:
-            "Target GitLab group is not set. Select or enter a GitLab group path in Step 5 (Deployment Setup).",
-        },
-        { status: 400 },
-      );
-    }
-
-    const encodedGroupPath = encodeURIComponent(effectiveGroupPath);
-    const groupRes = await gitlabFetch(authCtx, `/groups/${encodedGroupPath}`);
-    if (!groupRes.ok) {
+    const resolved = await resolveGitLabNamespace(authCtx, queryGroup);
+    if (!resolved.ok) {
       return mapGitLabErrorResponse(
-        groupRes.status,
+        resolved.status,
         authCtx.config,
-        `Could not resolve GitLab group "${effectiveGroupPath}".`,
+        resolved.detail,
       );
     }
-    const groupData = (await groupRes.json()) as { id: number };
 
-    const projectsRes = await gitlabFetch(
-      authCtx,
-      `/groups/${groupData.id}/projects?include_subgroups=true&per_page=50&order_by=last_activity_at&sort=desc`,
-    );
+    const { namespace } = resolved;
+    const projectsRes =
+      namespace.kind === "group"
+        ? await gitlabFetch(
+            authCtx,
+            `/groups/${namespace.id}/projects?include_subgroups=true&per_page=50&order_by=last_activity_at&sort=desc`,
+          )
+        : await gitlabFetch(
+            authCtx,
+            `/users/${encodeURIComponent(namespace.fullPath)}/projects?per_page=50&order_by=last_activity_at&sort=desc`,
+          );
     if (!projectsRes.ok) {
       return mapGitLabErrorResponse(projectsRes.status, authCtx.config);
     }

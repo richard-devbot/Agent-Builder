@@ -1,8 +1,8 @@
 /**
- * Client for the repo-discovery Lambda (backend/repo-discovery).
+ * Client for repository discovery & context reading.
  *
- * The endpoint is injected at build time via NEXT_PUBLIC_REPO_DISCOVERY_API.
- * When unset the feature is shown disabled and the site stays fully static.
+ * Uses NEXT_PUBLIC_REPO_DISCOVERY_API when set, or defaults to the built-in
+ * server-side GitLab repository reader (`/api/gitlab/read-repo`).
  */
 
 import {
@@ -19,7 +19,9 @@ const ENV = process.env.NEXT_PUBLIC_ENV ?? "dev";
 
 export const REPO_DISCOVERY_API =
   process.env.NEXT_PUBLIC_REPO_DISCOVERY_API ??
-  (API_BASE ? `${API_BASE.replace(/\/$/, "")}/${ENV}/repo-discovery` : "");
+  (API_BASE
+    ? `${API_BASE.replace(/\/$/, "")}/${ENV}/repo-discovery`
+    : "/api/gitlab/read-repo");
 
 export async function discoverRepo(
   req: RepoDiscoveryRequest,

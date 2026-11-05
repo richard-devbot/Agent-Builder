@@ -14,12 +14,14 @@ import type { NextRequest, NextResponse } from "next/server";
 
 export const GITLAB_TOKEN_COOKIE = "ab_gitlab_tokens";
 export const GITLAB_PKCE_COOKIE = "ab_gitlab_pkce";
+export const GITLAB_DISCONNECTED_COOKIE = "ab_gitlab_disconnected";
 export const GITLAB_COOKIE_PATH = "/api/gitlab";
 
 export interface GitLabTokenSet {
   access_token: string;
   refresh_token: string;
   expires_at: number; // epoch milliseconds
+  auth_mode?: "oauth" | "pat";
 }
 
 export interface GitLabPkceState {
@@ -84,6 +86,7 @@ export function decryptGitLabTokens(cookieValue: string, rawKey: string): GitLab
     access_token: data.access_token,
     refresh_token: data.refresh_token,
     expires_at: data.expires_at,
+    auth_mode: data.auth_mode === "pat" ? "pat" : "oauth",
   };
 }
 
@@ -98,7 +101,14 @@ export function setGitLabTokenCookie(
     secure: process.env.NODE_ENV === "production",
     sameSite: "lax",
     path: GITLAB_COOKIE_PATH,
-    maxAge: 60 * 60 * 24 * 14, // 14 days (refresh token lifecycle)
+    maxAge: 60 * 60 * 24 * 30, // 30 days
+  });
+  res.cookies.set(GITLAB_DISCONNECTED_COOKIE, "", {
+    httpOnly: true,
+    secure: process.env.NODE_ENV === "production",
+    sameSite: "lax",
+    path: GITLAB_COOKIE_PATH,
+    maxAge: 0,
   });
 }
 
@@ -109,6 +119,13 @@ export function clearGitLabTokenCookie(res: NextResponse): void {
     sameSite: "lax",
     path: GITLAB_COOKIE_PATH,
     maxAge: 0,
+  });
+  res.cookies.set(GITLAB_DISCONNECTED_COOKIE, "1", {
+    httpOnly: true,
+    secure: process.env.NODE_ENV === "production",
+    sameSite: "lax",
+    path: GITLAB_COOKIE_PATH,
+    maxAge: 60 * 60 * 24 * 7,
   });
 }
 
