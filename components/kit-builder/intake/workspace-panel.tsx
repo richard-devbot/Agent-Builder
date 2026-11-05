@@ -33,20 +33,25 @@ export function WorkspacePanel({
       id: "pipeline",
       label: "ADK Flow & Team",
       icon: Network,
-      badge: String(intake.liveAdk.agents.length),
+      badge: intake.hasAdkFlow ? String(intake.liveAdk.agents.length) : "0",
     },
     { id: "brief", label: "Brief", icon: ClipboardList, badge: `${intake.score}%` },
     {
       id: "systems",
       label: "Systems & Connections",
       icon: PlugZap,
-      badge: systemsCount > 0 ? String(systemsCount) : String(intake.liveAdk.envVars.length || ""),
+      badge:
+        systemsCount > 0
+          ? String(systemsCount)
+          : intake.hasAdkFlow && intake.liveAdk.envVars.length > 0
+            ? String(intake.liveAdk.envVars.length)
+            : undefined,
     },
     {
       id: "blueprint",
       label: "Blueprint",
       icon: Wand2,
-      badge: intake.plan ? "ready" : "live",
+      badge: intake.plan ? "ready" : intake.hasAdkFlow ? "live" : "idle",
     },
   ];
   return (

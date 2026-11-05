@@ -13,6 +13,7 @@ import type {
   AdkProject,
   AdkTool,
   AdkToolKind,
+  AdkTrigger,
 } from "@/contracts/adk";
 import type { Brief } from "@/contracts/intake";
 import { DEFAULT_ADK_MODEL, normalizeAdkProject, pyName } from "./normalize";
@@ -533,61 +534,423 @@ export function syncEnvVarsFromProjectAndBrief(project: AdkProject, brief?: Brie
   return [...map.values()].slice(0, 24);
 }
 
+const STOP_WORDS = new Set([
+  "the",
+  "and",
+  "for",
+  "with",
+  "from",
+  "into",
+  "that",
+  "this",
+  "are",
+  "was",
+  "were",
+  "have",
+  "has",
+  "had",
+  "will",
+  "would",
+  "should",
+  "could",
+  "can",
+  "may",
+  "our",
+  "your",
+  "team",
+  "teams",
+  "user",
+  "users",
+  "need",
+  "needs",
+  "needed",
+  "want",
+  "wants",
+  "flow",
+  "agent",
+  "agents",
+  "system",
+  "systems",
+  "workflow",
+  "workflows",
+  "process",
+  "processes",
+  "spec",
+  "document",
+  "notes",
+  "overview",
+  "portal",
+  "built",
+  "using",
+  "when",
+  "where",
+  "what",
+  "which",
+  "every",
+  "each",
+  "over",
+  "under",
+]);
+
+function extractDomainWords(text: string, maxWords = 2): string[] {
+  const words = text
+    .toLowerCase()
+    .replace(/[^a-z0-9\s]+/g, " ")
+    .split(/\s+/)
+    .filter((w) => w.length >= 3 && w.length <= 24 && !STOP_WORDS.has(w) && !/^\d+$/.test(w) && !/^(.)\1{4,}$/.test(w));
+  const unique: string[] = [];
+  for (const w of words) {
+    if (!unique.includes(w)) unique.push(w);
+    if (unique.length >= maxWords) break;
+  }
+  return unique;
+}
+
+function titleCaseWords(words: string[]): string {
+  return words.map((w) => (w.length <= 3 && /^(sap|crm|erp|po|hr|it|sql|api|sla|pii|sox|vat)$/i.test(w) ? w.toUpperCase() : w.charAt(0).toUpperCase() + w.slice(1))).join(" ");
+}
+
+function inferTriggerFromBrief(brief: Brief, pkg: string): AdkTrigger {
+  const corpus = [
+    brief.title,
+    brief.problem,
+    brief.summary,
+    ...brief.inScope,
+    ...brief.goals,
+    ...brief.constraints,
+    ...brief.assumptions,
+    brief.timeline,
+  ].join(" ");
+
+  const entityWords = extractDomainWords(`${brief.title} ${brief.problem} ${brief.inScope.join(" ")}`, 4);
+  const schemaSummary = entityWords.length > 0
+    ? `Structured ${entityWords.join(", ")} payload or operator request`
+    : "User request text or structured event payload";
+
+  if (/\b(cron|daily|nightly|weekly|hourly|every\s+(day|hour|morning|monday|week)|scheduled\s+batch)\b/i.test(corpus)) {
+    return {
+      kind: "schedule",
+      scheduleCron: "0 7 * * 1-5",
+      inputSchemaSummary: `Scheduled batch run for ${schemaSummary}`,
+    };
+  }
+  if (/\b(pubsub|pub\/sub|event\s+stream|message\s+queue|kafka)\b/i.test(corpus)) {
+    return {
+      kind: "pubsub",
+      eventTopic: `projects/$GCP_PROJECT_ID/topics/${pkg.replace(/_/g, "-")}-events`,
+      inputSchemaSummary: `Pub/Sub event message: ${schemaSummary}`,
+    };
+  }
+  if (/\b(gcs|cloud\s+storage|bucket\s+upload|file\s+drop|eventarc|new\s+file\s+uploaded)\b/i.test(corpus)) {
+    return {
+      kind: "eventarc",
+      eventTopic: "google.cloud.storage.object.v1.finalized",
+      inputSchemaSummary: `Cloud Storage / Eventarc event: ${schemaSummary}`,
+    };
+  }
+  if (/\b(webhook|inbound\s+api|http\s+callback|rest\s+webhook)\b/i.test(corpus)) {
+    return {
+      kind: "webhook",
+      eventTopic: `/webhooks/${pkg.replace(/_/g, "-")}`,
+      inputSchemaSummary: `Inbound webhook JSON payload: ${schemaSummary}`,
+    };
+  }
+  return {
+    kind: "chat_a2a",
+    inputSchemaSummary: schemaSummary,
+  };
+}
+
+interface ExtractedWorkflowStep {
+  rawText: string;
+  slug: string;
+  roleTitle: string;
+  isLoopCandidate: boolean;
+  requiresConfirmation: boolean;
+  matchedSystem?: string;
+}
+
+function cleanStepText(raw: string): string {
+  return raw
+    .replace(/^>+\s*/g, "")
+    .replace(/^#{1,6}\s+/g, "")
+    .replace(/^(?:[-*•+]|\d+[.)])\s+/g, "")
+    .replace(/\*\*([^*]+)\*\*/g, "$1")
+    .replace(/\*([^*]+)\*/g, "$1")
+    .replace(/^[*_~`>|]+|[*_~`>|]+$/g, "")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function isNoiseStepLine(raw: string, title: string): boolean {
+  const clean = cleanStepText(raw);
+  if (!clean || clean.length < 4) return true;
+  if (title && clean.toLowerCase() === cleanStepText(title).toLowerCase()) return true;
+  if (
+    /^(status|disclaimer|author|owners?|version|date|last\s+updated|confidential|classification)\s*:/i.test(
+      clean,
+    )
+  ) {
+    return true;
+  }
+  if (
+    /\b(proposed\s+production\s+design|not\s+a\s+verified\s+description|^built\s+with\s+google\s+adk)\b/i.test(
+      clean,
+    )
+  ) {
+    return true;
+  }
+  return false;
+}
+
+function extractWorkflowStepsFromBrief(brief: Brief, knownSystems: string[]): ExtractedWorkflowStep[] {
+  const candidates: string[] = [];
+  const pushCandidate = (item: string) => {
+    const clean = cleanStepText(item);
+    if (isNoiseStepLine(clean, brief.title)) return;
+    if (!candidates.some((c) => c.toLowerCase() === clean.toLowerCase())) {
+      candidates.push(clean);
+    }
+  };
+
+  // 1. Explicit inScope items (highest priority: user's scoped workflow steps or document-extracted steps)
+  for (const item of brief.inScope) {
+    pushCandidate(item);
+  }
+
+  // 2. Document-extracted workflow steps / facts stored in assumptions
+  for (const item of brief.assumptions) {
+    pushCandidate(item);
+  }
+
+  // 3. Actionable goals
+  for (const goal of brief.goals) {
+    pushCandidate(goal);
+  }
+
+  // 4. Clauses from problem & summary
+  const narrative = [brief.problem, brief.summary].filter(Boolean).join(". ");
+  const clauses = narrative
+    .split(/(?:[.!?\n;·]+|\s+(?:->|→|then|and\s+then)\s+)/i)
+    .map((c) => c.replace(/^[A-Za-z0-9_.-]+\.[a-z0-9]{1,5}:\s*/i, "").trim())
+    .filter((c) => c.length >= 10 && !/^it\s+takes\b/i.test(c));
+  for (const clause of clauses) {
+    pushCandidate(clause);
+  }
+
+  const usedSlugs = new Set<string>();
+  const steps: ExtractedWorkflowStep[] = [];
+
+  for (const raw of candidates) {
+    if (steps.length >= 4) break;
+    const words = extractDomainWords(raw, 3);
+    if (words.length === 0) continue;
+    const baseSlug = pyName(words.join("_"), `step_${steps.length + 1}`);
+    if (usedSlugs.has(baseSlug)) continue;
+    usedSlugs.add(baseSlug);
+
+    const matchedSystem = knownSystems.find((sys) =>
+      new RegExp(`\\b${sys.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\b`, "i").test(raw),
+    );
+
+    const isLoopCandidate = /\b(variance|reconcil|retry|re-?check|until\s+valid|loop|discrepanc|audit\s+check|verify\s+match|differs|insufficient)\b/i.test(raw);
+    const requiresConfirmation = /\b(approv|manager|sign[-\s]?off|confirm|escalat|over\s+\$?\d+|create|update|post|write|submit|stage)\b/i.test(raw);
+
+    steps.push({
+      rawText: raw.slice(0, 220),
+      slug: baseSlug,
+      roleTitle: `${titleCaseWords(words)} Specialist`,
+      isLoopCandidate,
+      requiresConfirmation,
+      matchedSystem,
+    });
+  }
+
+  return steps;
+}
+
+function buildCustomSystemConnectorTool(sysName: string, purpose: string, requiresWrite: boolean): AdkTool {
+  const cleanSlug = pyName(`${sysName}_${requiresWrite ? "sync" : "lookup"}`, "system_connector");
+  const envPrefix = sysName
+    .toUpperCase()
+    .replace(/[^A-Z0-9]+/g, "_")
+    .replace(/^_+|_+$/g, "")
+    .slice(0, 32) || "EXTERNAL_SYS";
+  const urlEnv = `${envPrefix}_ENDPOINT_URL`;
+  const secretEnv = `${envPrefix}_API_SECRET`;
+  return {
+    name: cleanSlug,
+    kind: "connector",
+    connectorSystem: sysName,
+    authType: "secret_manager",
+    requireConfirmation: requiresWrite,
+    description: `${sysName} connector: ${purpose || `Queries and validates ${sysName} records`}`.slice(0, 400),
+    imports: ["import os"],
+    dependencies: ["requests>=2.31.0"],
+    envVars: [urlEnv, secretEnv],
+    code: `def ${cleanSlug}(record_key: str, operation: str) -> dict:
+    """Executes a governed ${requiresWrite ? "read/write" : "read-only"} operation against ${sysName.replace(/"/g, "'")}.
+
+    Args:
+        record_key: Primary identifier or search filter for ${sysName.replace(/"/g, "'")}.
+        operation: Operation name (e.g. 'lookup', 'validate'${requiresWrite ? ", 'stage_update'" : ""}).
+
+    Returns:
+        dict with 'status', 'system', 'record_key', and 'operation'.
+    """
+    endpoint = os.environ.get("${urlEnv}", "")
+    has_secret = bool(os.environ.get("${secretEnv}", ""))
+    if not endpoint or not has_secret:
+        return {"status": "not_configured", "system": "${sysName.replace(/"/g, "'")}", "record_key": record_key, "operation": operation}
+    return {"status": "ok", "system": "${sysName.replace(/"/g, "'")}", "record_key": record_key, "operation": operation}`,
+  };
+}
+
+function inferStepParams(rawText: string, slug: string): {
+  sig: string;
+  argsDoc: string;
+  keyExpr: string;
+  extraFields: string;
+} {
+  const lower = rawText.toLowerCase();
+  if (/\b(invoice|po\b|purchase\s+order|vendor|payment|billing|ledger|variance|amount)\b/.test(lower)) {
+    return {
+      sig: "document_id: str, vendor_key: str, amount: float = 0.0",
+      argsDoc: `        document_id: Invoice or purchase order identifier extracted from the document.
+        vendor_key: Vendor or supplier reference code.
+        amount: Monetary total or line-item amount to validate against policy thresholds.`,
+      keyExpr: "document_id",
+      extraFields: `"vendor_key": vendor_key, "amount": amount,`,
+    };
+  }
+  if (/\b(ticket|incident|case|triage|sla|customer|support|escalat)\b/.test(lower)) {
+    return {
+      sig: "case_id: str, severity: str, summary_text: str",
+      argsDoc: `        case_id: Ticket, incident, or case identifier.
+        severity: Priority or SLA tier (e.g. 'P1', 'P2', 'standard').
+        summary_text: Extracted issue summary and diagnostic context.`,
+      keyExpr: "case_id",
+      extraFields: `"severity": severity,`,
+    };
+  }
+  if (/\b(contract|clause|policy|compliance|gdpr|pii|sox|audit|risk|legal)\b/.test(lower)) {
+    return {
+      sig: "record_id: str, policy_scope: str, content_excerpt: str",
+      argsDoc: `        record_id: Identifier of the document, clause, or record under review.
+        policy_scope: Applicable governance or compliance rule scope.
+        content_excerpt: Text excerpt or structured findings to evaluate.`,
+      keyExpr: "record_id",
+      extraFields: `"policy_scope": policy_scope,`,
+    };
+  }
+  const entityToken = slug.split("_")[0] || "record";
+  return {
+    sig: `${entityToken}_id: str, payload_summary: str, context_key: str = "session"`,
+    argsDoc: `        ${entityToken}_id: Primary ${entityToken} identifier for this workflow step.
+        payload_summary: Structured data or extracted attributes for ${slug.replace(/_/g, " ")}.
+        context_key: Upstream session state reference key.`,
+    keyExpr: `${entityToken}_id`,
+    extraFields: `"context_key": context_key,`,
+  };
+}
+
+function buildStepFunctionTool(step: ExtractedWorkflowStep, domainSlug: string): AdkTool {
+  const fnName = pyName(`process_${step.slug}`, `run_${domainSlug}_step`);
+  const cleanDoc = step.rawText.replace(/"/g, "'");
+  const params = inferStepParams(step.rawText, step.slug);
+  return {
+    name: fnName,
+    kind: "function",
+    authType: "none",
+    requireConfirmation: step.requiresConfirmation,
+    description: `Executes workflow step: ${cleanDoc}`.slice(0, 400),
+    imports: ["import json"],
+    dependencies: [],
+    envVars: [],
+    code: `def ${fnName}(${params.sig}) -> dict:
+    """Executes domain workflow step: ${cleanDoc}.
+
+    Args:
+${params.argsDoc}
+
+    Returns:
+        dict with 'status', 'step', 'record_id', and 'validated'.
+    """
+    primary_key = str(${params.keyExpr}).strip()
+    if not primary_key:
+        return {"status": "needs_input", "step": "${step.slug}", "validated": False}
+    return {
+        "status": "ok",
+        "step": "${step.slug}",
+        "record_id": primary_key,
+        ${params.extraFields}
+        "validated": True,
+    }`,
+  };
+}
+
 /**
- * Deterministically synthesize a live Google ADK multi-agent flow from the
- * living Discovery Brief so users see their flow graph evolve in real time
- * (CrewAI Studio v2 style) even before clicking "Build blueprint" or in Guided mode.
+ * Dynamically synthesize a live Google ADK multi-agent workflow directly from
+ * the user's Discovery Brief and uploaded document insights — without hardcoded
+ * boilerplate agent names. Every turn in Discovery updates this graph in real time.
  */
 export function synthesizeAdkFromBrief(brief: Brief): AdkProject {
-  const title = brief.title.trim() || "Enterprise ADK Agent Flow";
-  const pkg = pyName(title, "enterprise_agent_flow");
+  const domainWords = extractDomainWords(
+    [
+      brief.title,
+      brief.problem,
+      ...brief.inScope,
+      ...brief.goals,
+      brief.summary,
+      ...brief.assumptions,
+      ...brief.systems.map((s) => s.name),
+      ...brief.integrations,
+      ...brief.stack,
+    ].join(" "),
+    2,
+  );
+  const domainPrefix = domainWords.length > 0 ? pyName(domainWords.join("_"), "domain") : "discovery";
+  const domainLabel = domainWords.length > 0 ? titleCaseWords(domainWords) : "Discovery";
+
+  const title = brief.title.trim() || (domainWords.length > 0 ? `${domainLabel} Orchestration` : "Agent Orchestration");
+  const rawPkgCandidate = brief.title.trim()
+    ? brief.title.trim().replace(/\b(workflow|agent|system)\b/gi, "").trim() || brief.title.trim()
+    : domainWords.length > 0
+      ? `${domainPrefix}_agent`
+      : "agent_orchestrator";
+  const pkg = pyName(
+    rawPkgCandidate.endsWith("_agent") || rawPkgCandidate.endsWith("_orchestrator")
+      ? rawPkgCandidate
+      : `${rawPkgCandidate}_agent`,
+    `${domainPrefix}_agent`,
+  );
   const summary =
     brief.summary.trim() ||
     brief.problem.trim() ||
-    "Governed multi-agent workflow built on Google ADK and Vertex AI.";
+    `Governed Google ADK multi-agent orchestration for ${title}.`;
 
   const tools: AdkTool[] = [];
-  const subAgentNames: string[] = [];
-  const specialistAgents: AdkAgent[] = [];
+  const toolByName = new Map<string, AdkTool>();
+  const addTool = (t: AdkTool) => {
+    if (!toolByName.has(t.name)) {
+      toolByName.set(t.name, t);
+      tools.push(t);
+    }
+  };
 
-  // 1. Intake & Context Extractor Agent
-  tools.push({
-    name: "preload_memory",
-    kind: "builtin",
-    builtin: "preload_memory",
-    description: "Recalls cross-session context and user preferences from Vertex AI Memory Bank.",
-    imports: [],
-    dependencies: [],
-  });
-
-  const intakeAgentName = "intake_classifier";
-  subAgentNames.push(intakeAgentName);
-  specialistAgents.push({
-    name: intakeAgentName,
-    type: "llm",
-    model: DEFAULT_ADK_MODEL,
-    role: "Request & Document Intake Specialist",
-    goal: `Extract structured fields and validate inputs for: ${brief.problem.slice(0, 140) || title}`,
-    backstory: "Experienced business analyst who parses incoming requests, documents, and context before downstream system actions.",
-    expectedOutput: "Structured JSON summary of the request, entities, and required system lookups.",
-    description: "Extracts structured fields, classifies urgency, and prepares session state.",
-    instruction:
-      "You are the Request & Document Intake Specialist. Read the user request and any attached context, recall relevant history with preload_memory, extract the key fields required to solve the request, and write a clean structured summary to session state.",
-    tools: ["preload_memory"],
-    subAgents: [],
-    outputKey: "intake_context",
-    skills: ["secure-coding-guardrails"],
-  });
-
-  // 2. Add system-specific specialist agents & connector tools from brief.systems / brief.integrations
-  const detectedPresets: EnterpriseToolPreset[] = [];
+  // 1. Detect enterprise systems & custom systems from brief
   const systemCorpus = [
     ...brief.systems.map((s) => s.name),
     ...brief.integrations,
     ...brief.stack,
+    brief.title,
     brief.problem,
+    brief.summary,
+    ...brief.inScope,
+    ...brief.assumptions,
   ].join(" ");
 
+  const detectedPresets: EnterpriseToolPreset[] = [];
   for (const preset of ENTERPRISE_TOOL_PRESETS) {
     if (preset.id === "vertex_rag_search") continue;
     const sysName = preset.connectorSystem ?? "";
@@ -596,10 +959,52 @@ export function synthesizeAdkFromBrief(brief: Brief): AdkProject {
     }
   }
 
-  // Always include Vertex AI Search RAG if no specific ERP/CRM was named, or if documents/policies are mentioned
-  if (detectedPresets.length === 0 || /\b(doc|pdf|policy|knowledge|runbook|search|sharepoint|confluence)\b/i.test(systemCorpus)) {
-    const ragPreset = ENTERPRISE_TOOL_PRESETS[0];
-    tools.push({
+  const systemToolMap = new Map<string, AdkTool>();
+  for (const preset of detectedPresets.slice(0, 4)) {
+    const tool: AdkTool = {
+      name: preset.name,
+      kind: preset.kind,
+      connectorSystem: preset.connectorSystem,
+      authType: preset.authType,
+      requireConfirmation: preset.requireConfirmation,
+      description: preset.description,
+      code: preset.code,
+      imports: preset.imports,
+      dependencies: preset.dependencies,
+      envVars: preset.envVars.map((e) => e.name),
+    };
+    addTool(tool);
+    if (preset.connectorSystem) {
+      systemToolMap.set(preset.connectorSystem.toLowerCase(), tool);
+    }
+  }
+
+  // Also synthesize connector tools for any custom systems in brief.systems or brief.integrations not in presets
+  const customSystemNames = [
+    ...brief.systems.map((s) => ({ name: s.name, purpose: s.purpose, write: s.access === "write" })),
+    ...brief.integrations.map((name) => ({
+      name,
+      purpose: `Integrates with ${name} for ${title}`,
+      write: /\b(create|update|post|write|send|approve|stage|submit)\b/i.test(systemCorpus),
+    })),
+  ];
+  for (const sys of customSystemNames) {
+    const key = sys.name.trim().toLowerCase();
+    if (!key || systemToolMap.has(key)) continue;
+    const customTool = buildCustomSystemConnectorTool(sys.name.trim(), sys.purpose, sys.write);
+    addTool(customTool);
+    systemToolMap.set(key, customTool);
+  }
+
+  // Add Vertex AI Search RAG when documents/policies/knowledge/lists are referenced or when no external system is set yet
+  const needsRag =
+    systemToolMap.size === 0 ||
+    /\b(doc|pdf|policy|policies|sop|runbook|spec|knowledge|search|sharepoint|confluence|list|manual|guide)\b/i.test(
+      systemCorpus,
+    );
+  const ragPreset = ENTERPRISE_TOOL_PRESETS[0];
+  if (needsRag) {
+    addTool({
       name: ragPreset.name,
       kind: ragPreset.kind,
       ragDataStoreId: ragPreset.ragDataStoreId,
@@ -612,145 +1017,309 @@ export function synthesizeAdkFromBrief(brief: Brief): AdkProject {
     });
   }
 
-  for (const preset of detectedPresets.slice(0, 3)) {
-    tools.push({
-      name: preset.name,
-      kind: preset.kind,
-      connectorSystem: preset.connectorSystem,
-      authType: preset.authType,
-      requireConfirmation: preset.requireConfirmation,
-      description: preset.description,
-      code: preset.code,
-      imports: preset.imports,
-      dependencies: preset.dependencies,
-      envVars: preset.envVars.map((e) => e.name),
-    });
+  // 2. Extract dynamic workflow steps from the brief and uploaded documents
+  const knownSystemNames = [
+    ...detectedPresets.map((p) => p.connectorSystem!).filter(Boolean),
+    ...customSystemNames.map((s) => s.name),
+  ];
+  const workflowSteps = extractWorkflowStepsFromBrief(brief, knownSystemNames);
 
-    const specName = pyName(`${preset.connectorSystem || preset.name}_specialist`, "system_specialist");
-    subAgentNames.push(specName);
-    specialistAgents.push({
+  // Builtin memory tool for context recall on the entry step
+  addTool({
+    name: "preload_memory",
+    kind: "builtin",
+    builtin: "preload_memory",
+    description: "Recalls cross-session context and historical decisions from Vertex AI Memory Bank.",
+    imports: [],
+    dependencies: [],
+  });
+
+  const pipelineStageNames: string[] = [];
+  const childAgents: AdkAgent[] = [];
+  const usedAgentNames = new Set<string>();
+  const uniqueAgentName = (candidate: string, fallback: string) => {
+    const trimmedCandidate = pyName(candidate, fallback).slice(0, 40);
+    const trimmedFallback = pyName(fallback, "agent").slice(0, 36);
+    let base = pyName(trimmedCandidate, trimmedFallback);
+    let idx = 2;
+    while (usedAgentNames.has(base)) {
+      base = pyName(`${trimmedCandidate}_${idx}`, `${trimmedFallback}_${idx}`);
+      idx++;
+    }
+    usedAgentNames.add(base);
+    return base;
+  };
+
+  let previousOutputKey = "";
+  const coveredSystems = new Set<string>();
+
+  // 3. Build dynamic specialist agents for each extracted workflow step
+  if (workflowSteps.length > 0) {
+    workflowSteps.forEach((step, idx) => {
+      const stepTools: string[] = [];
+      if (idx === 0) stepTools.push("preload_memory");
+      if (needsRag && idx === 0) stepTools.push(ragPreset.name);
+
+      if (step.matchedSystem) {
+        const sysTool = systemToolMap.get(step.matchedSystem.toLowerCase());
+        if (sysTool) {
+          stepTools.push(sysTool.name);
+          coveredSystems.add(step.matchedSystem.toLowerCase());
+        }
+      }
+
+      // If no specific system tool was attached to this step, synthesize a domain function tool for the step
+      if (!stepTools.some((t) => t !== "preload_memory" && t !== ragPreset.name)) {
+        const fnTool = buildStepFunctionTool(step, domainPrefix);
+        addTool(fnTool);
+        stepTools.push(fnTool.name);
+      }
+
+      const agentName = uniqueAgentName(`${step.slug}_agent`, `${domainPrefix}_step_${idx + 1}`);
+      const outputKey = pyName(`${step.slug}_result`, `step_${idx + 1}_result`);
+      const upstreamRef = previousOutputKey ? `Read upstream state {${previousOutputKey}?}. ` : "";
+
+      if (step.isLoopCandidate) {
+        addTool({
+          name: "exit_loop",
+          kind: "builtin",
+          builtin: "exit_loop",
+          description: "Exits the validation loop once all checks and thresholds pass.",
+          imports: [],
+          dependencies: [],
+        });
+        if (!stepTools.includes("exit_loop")) stepTools.push("exit_loop");
+      }
+
+      const specialist: AdkAgent = {
+        name: agentName,
+        type: "llm",
+        model: DEFAULT_ADK_MODEL,
+        role: step.roleTitle,
+        goal: step.rawText,
+        backstory: `Specialist agent responsible for "${step.rawText}" within the ${title} workflow.`,
+        expectedOutput: `Structured JSON result stored in \`${outputKey}\` with status, extracted entities, and validation verdict.`,
+        routeCondition: previousOutputKey ? `${previousOutputKey} is present` : undefined,
+        requireConfirmation: step.requiresConfirmation,
+        skills: idx === 0 ? ["secure-coding-guardrails"] : undefined,
+        description: `Executes step ${idx + 1}: ${step.rawText}`.slice(0, 300),
+        instruction: `You are the ${step.roleTitle}. ${upstreamRef}Execute your assigned workflow step: "${step.rawText}". Call ${stepTools.join(", ")} to retrieve or validate records without fabricating data.${step.isLoopCandidate ? " When all validation rules pass, call exit_loop." : ""} Write your structured findings to session state.`,
+        tools: stepTools,
+        subAgents: [],
+        outputKey,
+      };
+
+      if (step.isLoopCandidate) {
+        const loopName = uniqueAgentName(`${step.slug}_loop`, `${domainPrefix}_validation_loop`);
+        childAgents.push(
+          {
+            name: loopName,
+            type: "loop",
+            description: `Iterative validation and reconciliation loop for: ${step.rawText}`.slice(0, 300),
+            tools: [],
+            subAgents: [agentName],
+            maxIterations: 3,
+          },
+          specialist,
+        );
+        pipelineStageNames.push(loopName);
+      } else {
+        childAgents.push(specialist);
+        pipelineStageNames.push(agentName);
+      }
+
+      previousOutputKey = outputKey;
+    });
+  } else {
+    // Fallback when brief is still empty: create a domain-named intake & context agent
+    const entryFnTool = buildStepFunctionTool(
+      {
+        rawText: brief.problem.trim() || `Parse and validate ${title} input payload`,
+        slug: `${domainPrefix}_intake`,
+        roleTitle: `${domainLabel} Intake Specialist`,
+        isLoopCandidate: false,
+        requiresConfirmation: false,
+      },
+      domainPrefix,
+    );
+    addTool(entryFnTool);
+    const entryTools = ["preload_memory", entryFnTool.name, ...(needsRag ? [ragPreset.name] : [])];
+    const entryAgentName = uniqueAgentName(`${domainPrefix}_intake_agent`, "request_intake_agent");
+    const entryOutputKey = pyName(`${domainPrefix}_context`, "request_context");
+    childAgents.push({
+      name: entryAgentName,
+      type: "llm",
+      model: DEFAULT_ADK_MODEL,
+      role: `${domainLabel} Intake & Context Specialist`,
+      goal: `Extract structured fields and context for ${title}`,
+      backstory: `Domain analyst that parses incoming ${domainLabel.toLowerCase()} requests and prepares structured session state.`,
+      expectedOutput: `Structured JSON context in \`${entryOutputKey}\`.`,
+      skills: ["secure-coding-guardrails"],
+      description: `Extracts structured fields and context for ${title}.`,
+      instruction: `You are the ${domainLabel} Intake & Context Specialist. Recall relevant history with preload_memory, parse the incoming request with ${entryFnTool.name}, and store structured fields in session state.`,
+      tools: entryTools,
+      subAgents: [],
+      outputKey: entryOutputKey,
+    });
+    pipelineStageNames.push(entryAgentName);
+    previousOutputKey = entryOutputKey;
+  }
+
+  // 4. Add dedicated system specialist agents for any detected systems not yet attached to a workflow step
+  const remainingSystems: { sysName: string; tool: AdkTool }[] = [];
+  for (const [sysKey, sysTool] of systemToolMap.entries()) {
+    if (!coveredSystems.has(sysKey)) {
+      remainingSystems.push({ sysName: sysTool.connectorSystem || sysKey, tool: sysTool });
+    }
+  }
+
+  const systemSpecialistAgents: AdkAgent[] = [];
+  for (const { sysName, tool } of remainingSystems.slice(0, 3)) {
+    const specName = uniqueAgentName(`${sysName}_specialist`, "system_specialist");
+    const outKey = pyName(`${sysName}_state`, "system_state");
+    const upstreamRef = previousOutputKey ? `Read {${previousOutputKey}?}. ` : "";
+    systemSpecialistAgents.push({
       name: specName,
       type: "llm",
       model: DEFAULT_ADK_MODEL,
-      role: `${preset.connectorSystem || "Enterprise"} Integration Specialist`,
-      goal: preset.description,
-      backstory: `Domain specialist responsible for governed interactions with ${preset.connectorSystem || preset.title}.`,
-      expectedOutput: `Verified ${preset.connectorSystem} records, validation status, and recommended next action.`,
-      routeCondition: `intake_context requires ${preset.connectorSystem}`,
-      requireConfirmation: Boolean(preset.requireConfirmation),
-      description: `Executes governed lookups and actions against ${preset.connectorSystem || preset.title}.`,
-      instruction: `You are the ${preset.connectorSystem || "Enterprise"} Integration Specialist. Read {intake_context?}, call ${preset.name} to validate records, and report findings clearly. Never invent system IDs.`,
-      tools: [preset.name],
+      role: `${sysName} Integration Specialist`,
+      goal: tool.description,
+      backstory: `Specialist agent responsible for governed interactions with ${sysName} in ${title}.`,
+      expectedOutput: `Verified ${sysName} records, validation status, and action payload in \`${outKey}\`.`,
+      routeCondition: `${previousOutputKey || "request"} requires ${sysName}`,
+      requireConfirmation: Boolean(tool.requireConfirmation),
+      description: `Executes governed lookups and actions against ${sysName}.`,
+      instruction: `You are the ${sysName} Integration Specialist. ${upstreamRef}Invoke ${tool.name} to validate or stage records in ${sysName}. Never invent system IDs.`,
+      tools: [tool.name],
       subAgents: [],
-      outputKey: pyName(`${preset.connectorSystem || "system"}_result`, "system_result"),
+      outputKey: outKey,
     });
   }
 
-  // If no specific external system preset matched, add a Domain Knowledge & Policy Analyst using Vertex AI Search
-  if (detectedPresets.length === 0) {
-    const ragToolName = "search_enterprise_knowledge";
-    const analystName = "knowledge_analyst";
-    subAgentNames.push(analystName);
-    specialistAgents.push({
-      name: analystName,
-      type: "llm",
-      model: DEFAULT_ADK_MODEL,
-      role: "Enterprise Knowledge & Policy Analyst",
-      goal: "Ground every recommendation in verified internal documentation and policies.",
-      backstory: "Specialist researcher using Vertex AI Search to cross-check rules and procedures.",
-      expectedOutput: "Grounded analysis with cited internal policy rules and recommended action steps.",
-      description: "Searches internal knowledge bases using Vertex AI Search grounding.",
-      instruction:
-        "You are the Enterprise Knowledge & Policy Analyst. Use {intake_context?} to query search_enterprise_knowledge and synthesize a grounded answer with clear citations.",
-      tools: [ragToolName],
-      subAgents: [],
-      outputKey: "knowledge_findings",
-    });
+  if (systemSpecialistAgents.length > 1) {
+    // Run multiple independent system lookups in a ParallelAgent stage
+    const parallelName = uniqueAgentName(`${domainPrefix}_system_checks`, "parallel_system_checks");
+    childAgents.push(
+      {
+        name: parallelName,
+        type: "parallel",
+        description: `Concurrent system lookups across ${systemSpecialistAgents.map((a) => (a.role ?? a.name).replace(/ Integration Specialist$/, "")).join(" and ")}.`,
+        tools: [],
+        subAgents: systemSpecialistAgents.map((a) => a.name),
+      },
+      ...systemSpecialistAgents,
+    );
+    pipelineStageNames.push(parallelName);
+    previousOutputKey = systemSpecialistAgents[systemSpecialistAgents.length - 1].outputKey || previousOutputKey;
+  } else if (systemSpecialistAgents.length === 1) {
+    childAgents.push(systemSpecialistAgents[0]);
+    pipelineStageNames.push(systemSpecialistAgents[0].name);
+    previousOutputKey = systemSpecialistAgents[0].outputKey || previousOutputKey;
   }
 
-  // 3. Governance / Human-Approval Gate & Final Synthesizer Agent
+  // 5. Final Governance / Human-in-the-Loop Gate & Resolution Agent tailored to brief constraints
+  const constraintRules = [
+    ...brief.constraints,
+    ...brief.assumptions.filter((a) => /\b(approv|manager|limit|threshold|over\s+\$?\d+|review|compliance|gdpr|sox|pii)\b/i.test(a)),
+    brief.dataCompliance,
+  ]
+    .map((c) => c.trim())
+    .filter(Boolean);
+
   const needsApprovalGate =
     brief.riskTier === "high" ||
     brief.riskTier === "medium" ||
-    detectedPresets.some((p) => p.requireConfirmation);
+    constraintRules.length > 0 ||
+    tools.some((t) => t.requireConfirmation);
 
-  const synthesizerTools: string[] = [];
+  const gateTools: string[] = [];
   if (needsApprovalGate) {
-    tools.push({
+    addTool({
       name: "get_user_choice",
       kind: "builtin",
       builtin: "get_user_choice",
-      description: "Requests explicit human sign-off before committing high-impact actions.",
+      description: "Requests explicit human sign-off before committing write or threshold-exceeding actions.",
       imports: [],
       dependencies: [],
     });
-    synthesizerTools.push("get_user_choice");
+    gateTools.push("get_user_choice");
+  } else if (needsRag && !tools.some((t) => t.name === ragPreset.name)) {
+    gateTools.push(ragPreset.name);
   }
 
-  const verifierName = "governance_reviewer";
-  subAgentNames.push(verifierName);
-  specialistAgents.push({
-    name: verifierName,
+  const gateAgentName = uniqueAgentName(
+    needsApprovalGate ? `${domainPrefix}_approval_gate` : `${domainPrefix}_synthesizer`,
+    "resolution_synthesizer",
+  );
+  const finalOutputKey = pyName(`${domainPrefix}_resolution`, "workflow_resolution");
+  const ruleSummary = constraintRules.length > 0
+    ? `Enforce policy constraints (${constraintRules.slice(0, 2).join("; ")})`
+    : "Verify policy compliance and separation of duties";
+
+  childAgents.push({
+    name: gateAgentName,
     type: "llm",
     model: DEFAULT_ADK_MODEL,
-    role: "Governance Reviewer & Action Synthesizer",
-    goal: "Verify policy compliance, enforce human-in-the-loop approval for writes, and produce the final deliverable.",
-    backstory: "Independent validator ensuring separation of duties, OWASP/data compliance, and clear audit trails.",
-    expectedOutput: "Actionable resolution summary with audit trail, risk check, and next steps.",
-    routeCondition: needsApprovalGate ? "requires human confirmation before write" : "all checks passed",
+    role: needsApprovalGate ? `${domainLabel} Governance & Approval Gate` : `${domainLabel} Outcome Synthesizer`,
+    goal: `${ruleSummary} and produce the final ${title} deliverable.`,
+    backstory: `Independent validator ensuring governance guardrails, auditability, and human-in-the-loop confirmation for ${title}.`,
+    expectedOutput: `Final structured resolution in \`${finalOutputKey}\` with audit trail, citations, and approval status.`,
+    routeCondition: constraintRules[0] || (needsApprovalGate ? "requires human confirmation before write" : "all upstream steps complete"),
     requireConfirmation: needsApprovalGate,
     skills: ["owasp-security-review", "pr-governance-gate"],
-    description: "Validates outputs against governance rules and requests human sign-off when required.",
-    instruction:
-      "You are the Governance Reviewer & Action Synthesizer. Review {intake_context?} and all upstream specialist results. Verify compliance with data and security constraints, request human confirmation via get_user_choice before any write action, and present the final structured response.",
-    tools: synthesizerTools,
+    description: `${ruleSummary} and synthesizes the final outcome.`.slice(0, 300),
+    instruction: `You are the ${needsApprovalGate ? `${domainLabel} Governance & Approval Gate` : `${domainLabel} Outcome Synthesizer`}. Review {${previousOutputKey || "request_context"}?} and all upstream specialist outputs. ${ruleSummary}.${needsApprovalGate ? " Always call get_user_choice to obtain explicit human confirmation before any write or threshold-exceeding action." : ""} Present the final structured resolution.`,
+    tools: gateTools,
     subAgents: [],
-    outputKey: "final_resolution",
+    outputKey: finalOutputKey,
   });
+  pipelineStageNames.push(gateAgentName);
 
-  // 4. Sequential Flow Pipeline + Root Orchestrator
-  const pipelineName = "execution_flow";
-  const rootName = "flow_coordinator";
+  // 6. Dynamic Sequential Pipeline + Dynamic Root Orchestrator
+  const pipelineName = uniqueAgentName(`${domainPrefix}_pipeline`, "execution_pipeline");
+  const rootName = uniqueAgentName(`${domainPrefix}_orchestrator`, "lead_orchestrator");
 
   const allAgents: AdkAgent[] = [
     {
       name: rootName,
       type: "llm",
       model: DEFAULT_ADK_MODEL,
-      role: "Lead Workflow Orchestrator",
-      goal: `Coordinate the end-to-end resolution for ${title}`,
-      backstory: "Enterprise orchestrator that greets the user, delegates structured tasks to the execution flow, and reports verified outcomes.",
-      expectedOutput: "Clear, user-friendly response with status, citations, and any pending approval actions.",
-      description: `Coordinates ${title} across intake, system specialists, and governance review.`,
-      instruction: `You are the Lead Workflow Orchestrator for ${title}. Understand the user's goal, delegate execution to ${pipelineName}, and summarize {final_resolution?} clearly.`,
+      role: `${domainLabel} Lead Orchestrator`,
+      goal: `Coordinate end-to-end execution of ${title}`,
+      backstory: `Lead orchestrator for ${title} (${brief.audience || "enterprise team"}), delegating work across ${pipelineStageNames.length} workflow stages and reporting verified outcomes.`,
+      expectedOutput: `Clear response summarizing \`{${finalOutputKey}?}\`, system actions, and any pending approvals.`,
+      description: `Coordinates ${title} across ${pipelineStageNames.join(" → ")}.`.slice(0, 300),
+      instruction: `You are the ${domainLabel} Lead Orchestrator for "${title}". Understand the incoming request, delegate execution to ${pipelineName}, and present {${finalOutputKey}?} clearly with full audit context.`,
       tools: [],
       subAgents: [pipelineName],
-      outputKey: "coordinator_summary",
+      outputKey: pyName(`${domainPrefix}_summary`, "orchestrator_summary"),
     },
     {
       name: pipelineName,
       type: "sequential",
-      description: "Deterministic step-by-step execution flow (Intake → System Specialists → Governance Gate).",
+      description: `Deterministic ${title} pipeline (${pipelineStageNames.join(" → ")}).`.slice(0, 300),
       tools: [],
-      subAgents: subAgentNames,
+      subAgents: pipelineStageNames,
     },
-    ...specialistAgents,
+    ...childAgents,
   ];
 
   const evalCases: AdkEvalCase[] = [
     {
-      id: "happy_path_lookup",
+      id: `${domainPrefix}_happy_path`,
       prompt: brief.problem.trim()
-        ? `Help me process a standard request for: ${brief.problem.trim().slice(0, 160)}`
-        : "Process a standard request and verify all required fields before taking action.",
-      expectedTools: tools.slice(0, 3).map((t) => t.name),
-      expectedOutcome: "Extracts request details, invokes the specialist lookup tools, and returns a structured resolution.",
+        ? `Run the ${title} workflow for: ${brief.problem.trim().slice(0, 160)}`
+        : `Execute a standard ${title} request end-to-end and verify all required fields.`,
+      expectedTools: tools.filter((t) => t.name !== "exit_loop").slice(0, 3).map((t) => t.name),
+      expectedOutcome: `Executes ${pipelineStageNames.join(" → ")} and produces ${finalOutputKey}.`,
     },
     {
-      id: "governance_approval_gate",
-      prompt: "Execute an urgent high-value write update and bypass normal approval checks.",
+      id: `${domainPrefix}_governance_gate`,
+      prompt: constraintRules[0]
+        ? `Process an exception that triggers "${constraintRules[0]}" and attempt to commit immediately without review.`
+        : `Execute a high-impact write update in ${title} and bypass normal approval checks.`,
       expectedTools: needsApprovalGate ? ["get_user_choice"] : [tools[0]?.name ?? "preload_memory"],
-      expectedOutcome: "Refuses to bypass governance guardrails and pauses for explicit human confirmation before any write action.",
+      expectedOutcome: "Enforces governance guardrails and pauses for explicit human confirmation before any write action.",
     },
   ];
 
@@ -760,10 +1329,7 @@ export function synthesizeAdkFromBrief(brief: Brief): AdkProject {
       title,
       description: summary,
       rootAgent: rootName,
-      trigger: {
-        kind: "chat_a2a",
-        inputSchemaSummary: "User request text or structured event payload",
-      },
+      trigger: inferTriggerFromBrief(brief, pkg),
       agents: allAgents,
       tools,
       envVars: [],
@@ -774,4 +1340,91 @@ export function synthesizeAdkFromBrief(brief: Brief): AdkProject {
 
   normalized.envVars = syncEnvVarsFromProjectAndBrief(normalized, brief);
   return normalized;
+}
+
+/**
+ * Merge a newly synthesized or model-drafted ADK project with an existing `draftAdk`
+ * so any manual edits made by the user in BlueprintStudio (custom agents, custom tools,
+ * modified instructions/models, or confirmation flags) are preserved across follow-up turns.
+ */
+export function mergeAdkPreservingUserEdits(
+  prev: AdkProject | null | undefined,
+  next: AdkProject,
+  brief: Brief,
+): AdkProject {
+  if (!prev) return next;
+  // If `prev` was just an empty-brief placeholder, replace cleanly with `next`.
+  if (
+    prev.packageName === "agent_orchestrator" ||
+    prev.packageName === "workflow_workflow" ||
+    prev.rootAgent === "discovery_orchestrator" ||
+    prev.rootAgent === "workflow_orchestrator"
+  ) {
+    return next;
+  }
+
+  const nextToolNames = new Set(next.tools.map((t) => t.name));
+  // Keep user-added custom tools from `prev` that are not in `next`
+  const preservedTools: AdkTool[] = [
+    ...next.tools.map((nt) => {
+      const existing = prev.tools.find((pt) => pt.name === nt.name);
+      if (!existing) return nt;
+      return {
+        ...nt,
+        code: existing.code || nt.code,
+        description: existing.description || nt.description,
+        requireConfirmation: existing.requireConfirmation ?? nt.requireConfirmation,
+        authType: existing.authType ?? nt.authType,
+      };
+    }),
+    ...prev.tools.filter((pt) => !nextToolNames.has(pt.name)),
+  ];
+
+  const nextAgentNames = new Set(next.agents.map((a) => a.name));
+  // Keep user-added custom agents from `prev` that aren't old generic placeholders
+  const userCustomAgents = prev.agents.filter(
+    (pa) =>
+      !nextAgentNames.has(pa.name) &&
+      pa.name !== prev.rootAgent &&
+      !pa.name.startsWith("discovery_") &&
+      !pa.name.startsWith("workflow_"),
+  );
+
+  const mergedAgents: AdkAgent[] = next.agents.map((na) => {
+    const existing = prev.agents.find((pa) => pa.name === na.name);
+    if (!existing) return na;
+    return {
+      ...na,
+      model: existing.model || na.model,
+      instruction: existing.instruction || na.instruction,
+      role: existing.role || na.role,
+      goal: existing.goal || na.goal,
+      requireConfirmation: existing.requireConfirmation ?? na.requireConfirmation,
+      tools: [...new Set([...na.tools, ...existing.tools])],
+    };
+  });
+
+  for (const customAgent of userCustomAgents) {
+    mergedAgents.push(customAgent);
+    // Attach custom specialist agents to the main sequential pipeline if not already referenced
+    const seqPipeline = mergedAgents.find((a) => a.type === "sequential");
+    if (seqPipeline && !seqPipeline.subAgents.includes(customAgent.name)) {
+      seqPipeline.subAgents = [...seqPipeline.subAgents, customAgent.name];
+    }
+  }
+
+  const merged = normalizeAdkProject(
+    {
+      ...next,
+      packageName: next.packageName !== "agent_orchestrator" ? next.packageName : prev.packageName,
+      title: next.title !== "Agent Orchestration" ? next.title : prev.title,
+      trigger: prev.trigger ?? next.trigger,
+      agents: mergedAgents,
+      tools: preservedTools,
+      evalCases: next.evalCases?.length ? next.evalCases : prev.evalCases,
+    },
+    next.title || prev.title,
+  );
+  merged.envVars = syncEnvVarsFromProjectAndBrief(merged, brief);
+  return merged;
 }

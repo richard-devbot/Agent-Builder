@@ -76,55 +76,86 @@ export function BlueprintView({ s }: { s: KitBuilderState }) {
             <div>
               <p className="text-sm font-semibold">Live Google ADK Flow (Draft)</p>
               <p className="text-xs text-muted-foreground">
-                You can open the visual ADK Studio now to customize agents, tools, MCP servers, and Secret Manager connections, or build the full solution blueprint.
+                {intake.hasAdkFlow
+                  ? "Open the visual ADK Studio to customize agents, tools, MCP servers, and Secret Manager connections, build the full blueprint, or apply directly to Steps 2–7."
+                  : "Describe your workflow or drop a document in Discovery chat so the Discovery Agent can design your multi-agent ADK blueprint."}
               </p>
             </div>
-            <Button
-              size="sm"
-              onClick={intake.buildPlan}
-              disabled={!intake.hasContent || Boolean(intake.busy)}
-            >
-              <Wand2 className="size-3.5" /> Build full blueprint
-            </Button>
+            <div className="flex flex-wrap items-center gap-1.5">
+              {intake.hasAdkFlow && (
+                <Button
+                  size="sm"
+                  variant={intake.applied ? "outline" : "default"}
+                  onClick={() => {
+                    s.applyIntakePlan();
+                    if (intake.applied) s.setStep(2);
+                  }}
+                  disabled={Boolean(intake.busy)}
+                >
+                  <CheckCircle2 className="size-3.5" />{" "}
+                  {intake.applied ? "Applied · Continue to Step 2" : "Apply to kit"}
+                </Button>
+              )}
+              <Button
+                size="sm"
+                variant={intake.hasAdkFlow ? "outline" : "default"}
+                onClick={intake.buildPlan}
+                disabled={!intake.hasContent || Boolean(intake.busy)}
+              >
+                <Wand2 className="size-3.5" /> Build full blueprint
+              </Button>
+            </div>
           </div>
         </div>
 
-        <section className="overflow-hidden rounded-xl border border-primary/30 bg-card/80">
-          <div className="flex items-center justify-between border-b border-border/60 bg-gradient-to-r from-primary/10 to-transparent p-3">
-            <div>
-              <p className="text-[13px] font-semibold">{adk.title}</p>
-              <p className="truncate font-mono text-[11px] text-muted-foreground">
-                {adk.packageName} · {adk.agents.length} agents · {adk.tools.length} tools ·{" "}
-                {adk.envVars.length} connections/env
-              </p>
+        {intake.hasAdkFlow ? (
+          <section className="overflow-hidden rounded-xl border border-primary/30 bg-card/80">
+            <div className="flex items-center justify-between border-b border-border/60 bg-gradient-to-r from-primary/10 to-transparent p-3">
+              <div>
+                <p className="text-[13px] font-semibold">{adk.title}</p>
+                <p className="truncate font-mono text-[11px] text-muted-foreground">
+                  {adk.packageName} · {adk.agents.length} agents · {adk.tools.length} tools ·{" "}
+                  {adk.envVars.length} connections/env
+                </p>
+              </div>
+              <Button size="sm" onClick={() => openStudioAt("graph")}>
+                <Maximize2 className="size-3.5" /> Open ADK Studio
+              </Button>
             </div>
-            <Button size="sm" onClick={() => openStudioAt("graph")}>
-              <Maximize2 className="size-3.5" /> Open ADK Studio
-            </Button>
-          </div>
-          <div
-            onClick={() => openStudioAt("graph")}
-            className="h-64 cursor-zoom-in bg-muted/10 transition-colors hover:bg-muted/30"
-          >
-            <AdkFlow project={adk} interactive={false} showTools={true} view="simple" />
-          </div>
-          <div className="flex flex-wrap gap-2 border-t border-border/60 p-3">
-            <Button size="sm" variant="outline" onClick={() => openStudioAt("tools")}>
-              <Plug className="size-3.5 text-info" /> Tools & Skills
-            </Button>
-            <Button size="sm" variant="outline" onClick={() => openStudioAt("connections")}>
-              <PlugZap className="size-3.5 text-warning" /> Connections & Env
-            </Button>
-            <Button
-              size="sm"
-              variant="outline"
-              className="ml-auto"
-              onClick={() => downloadAdk(adk)}
+            <div
+              onClick={() => openStudioAt("graph")}
+              className="h-64 cursor-zoom-in bg-muted/10 transition-colors hover:bg-muted/30"
             >
-              <Download className="size-3.5" /> Download ADK Zip
-            </Button>
+              <AdkFlow project={adk} interactive={false} showTools={true} view="simple" />
+            </div>
+            <div className="flex flex-wrap gap-2 border-t border-border/60 p-3">
+              <Button size="sm" variant="outline" onClick={() => openStudioAt("tools")}>
+                <Plug className="size-3.5 text-info" /> Tools & Skills
+              </Button>
+              <Button size="sm" variant="outline" onClick={() => openStudioAt("connections")}>
+                <PlugZap className="size-3.5 text-warning" /> Connections & Env
+              </Button>
+              <Button
+                size="sm"
+                variant="outline"
+                className="ml-auto"
+                onClick={() => downloadAdk(adk)}
+              >
+                <Download className="size-3.5" /> Download ADK Zip
+              </Button>
+            </div>
+          </section>
+        ) : (
+          <div className="flex min-h-64 flex-col items-center justify-center rounded-xl border border-dashed border-primary/30 bg-muted/10 p-6 text-center">
+            <span className="mb-3 flex size-11 items-center justify-center rounded-2xl bg-primary/12 text-primary">
+              <Bot className="size-5" />
+            </span>
+            <p className="text-sm font-semibold">Waiting for Discovery Input</p>
+            <p className="mt-1 max-w-md text-xs leading-relaxed text-muted-foreground">
+              Share your problem statement or upload a specification document in chat. As soon as Discovery starts, your domain-specific ADK agent topology, tools, and Secret Manager bindings will appear here live.
+            </p>
           </div>
-        </section>
+        )}
 
         <BlueprintStudio
           key={studioPane}

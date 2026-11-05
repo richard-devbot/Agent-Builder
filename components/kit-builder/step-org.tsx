@@ -3,7 +3,8 @@
 /** Step 2 — organisation-wide guidelines and engineering standards layered onto every project. */
 
 import { useState } from "react";
-import { BookOpenCheck, Building2, ShieldCheck } from "lucide-react";
+import { BookOpenCheck, Building2, RefreshCw, ShieldCheck, Sparkles } from "lucide-react";
+import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import {
   ORG_GUIDELINES,
@@ -80,6 +81,28 @@ export function StepOrg({ s }: { s: KitBuilderState }) {
           )
         }
       />
+
+      {s.intake.hasContent && (
+        <div className="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-primary/30 bg-primary/[0.06] px-4 py-2.5">
+          <div className="flex items-center gap-2 text-xs">
+            <Sparkles className="size-4 shrink-0 text-primary" />
+            <span>
+              <strong>Recommended from Discovery:</strong> Auto-selected{" "}
+              <span className="font-mono font-semibold">{s.discoveryRecommendedStdIds.size}</span>{" "}
+              engineering standards and{" "}
+              <span className="font-mono font-semibold">{s.discoveryRecommendedOrgIds.size}</span>{" "}
+              organisation policies based on your{" "}
+              <span className="font-mono uppercase">{s.intake.brief.riskTier}</span> risk tier
+              {s.intake.brief.systems.length > 0
+                ? ` and ${s.intake.brief.systems.map((sys) => sys.name).join(", ")}`
+                : ""}.
+            </span>
+          </div>
+          <Button size="sm" variant="outline" className="h-7 text-xs" onClick={s.applyIntakePlan}>
+            <RefreshCw className="size-3" /> Re-sync from Discovery
+          </Button>
+        </div>
+      )}
 
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div
@@ -190,7 +213,7 @@ export function StepOrg({ s }: { s: KitBuilderState }) {
                       recommended={Boolean(t.recommended)}
                       onToggle={() => s.toggleStandardTemplate(t.id)}
                     >
-                      <span className="mt-1.5 flex items-center gap-1.5">
+                      <span className="mt-1.5 flex flex-wrap items-center gap-1.5">
                         <span
                           className={
                             t.enforcement === "hard"
@@ -200,6 +223,11 @@ export function StepOrg({ s }: { s: KitBuilderState }) {
                         >
                           {t.enforcement === "hard" ? "Hard · Blocking" : "Soft · Advisory"}
                         </span>
+                        {s.intake.hasContent && s.discoveryRecommendedStdIds.has(t.id) && (
+                          <span className="inline-flex items-center gap-1 rounded bg-primary/12 px-1.5 py-0.5 font-mono text-[10px] font-medium text-primary">
+                            <Sparkles className="size-2.5" /> Recommended from Discovery
+                          </span>
+                        )}
                       </span>
                     </SelectableRow>
                   ))}
@@ -289,7 +317,13 @@ export function StepOrg({ s }: { s: KitBuilderState }) {
                       selected={s.orgGuidelineSel.has(g.id)}
                       recommended={Boolean(g.recommended)}
                       onToggle={() => s.toggleOrgGuideline(g.id)}
-                    />
+                    >
+                      {s.intake.hasContent && s.discoveryRecommendedOrgIds.has(g.id) && (
+                        <span className="mt-1.5 inline-flex items-center gap-1 rounded bg-primary/12 px-1.5 py-0.5 font-mono text-[10px] font-medium text-primary">
+                          <Sparkles className="size-2.5" /> Recommended from Discovery
+                        </span>
+                      )}
+                    </SelectableRow>
                   ))}
                 </div>
               </Panel>

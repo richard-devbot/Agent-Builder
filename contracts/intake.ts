@@ -149,6 +149,8 @@ export const FollowUpResponseSchema = z.object({
   message: z.string().max(2_000),
   done: z.boolean(),
   mode: z.enum(["ai", "guided"]),
+  /** Live ADK multi-agent orchestration designed/updated on this turn. */
+  adkDraft: AdkProjectSchema.nullable().optional(),
 });
 
 const slug = z.string().regex(/^[a-z0-9][a-z0-9-]{1,47}$/);
@@ -221,6 +223,8 @@ export const AnalyzeResponseSchema = z.object({
   brief: BriefSchema,
   message: z.string().max(2_000),
   mode: z.enum(["ai", "guided"]),
+  /** Live ADK multi-agent orchestration synthesized from the analysed materials. */
+  adkDraft: AdkProjectSchema.nullable().optional(),
 });
 
 export const IntakeStatusSchema = z.object({

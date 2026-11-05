@@ -28,6 +28,11 @@ import {
   isTechQuestion,
   relevantQuestions,
   projectProfileRule,
+  recommendStandardsFromBrief,
+  mapBriefToProjectAnswers,
+  inferDeployTargetFromBrief,
+  matchMcpServersFromBrief,
+  inferTechnologiesFromBrief,
   type ProjectAnswers,
 } from "@/lib/kit/project-questions";
 import {
@@ -169,6 +174,7 @@ export function useKitBuilderState({
   // Step 3 — project details.
   const [projectName, setProjectNameState] = useState("");
   const [projectAnswers, setProjectAnswers] = useState<ProjectAnswers>({});
+  const [discoverySyncedAnswerKeys, setDiscoverySyncedAnswerKeys] = useState<string[]>([]);
 
   // Step 5 — deployment setup.
   const [deploymentSetup, setDeploymentSetup] = useState<DeploymentSetupState>(
@@ -350,22 +356,103 @@ export function useKitBuilderState({
   const catalogStatus = (id: string): CatalogFetch | undefined =>
     catalogFetch.get(id) ?? (catalogSel.get(id)?.copyable ? { status: "loading" } : undefined);
 
-  /** Push the accepted parts of the Discovery plan into the later steps. */
+  const discoveryRecommendations = useMemo(
+    () =>
+      intake.hasContent
+        ? recommendStandardsFromBrief(intake.brief)
+        : { orgGuidelineIds: [] as string[], standardTemplateIds: [] as string[] },
+    [intake.hasContent, intake.brief],
+  );
+  const discoveryRecommendedOrgIds = useMemo(
+    () => new Set(discoveryRecommendations.orgGuidelineIds),
+    [discoveryRecommendations.orgGuidelineIds],
+  );
+  const discoveryRecommendedStdIds = useMemo(
+    () => new Set(discoveryRecommendations.standardTemplateIds),
+    [discoveryRecommendations.standardTemplateIds],
+  );
+
+  /** Push Discovery brief, live ADK architecture, and Blueprint outputs into Steps 2–7. */
   async function applyIntakePlan() {
+    if (!intake.hasContent && !intake.plan && !intake.hasAdkFlow) return;
     const plan = intake.plan;
-    if (!plan) return;
-    if (plan.projectType !== "none") setProjectType(plan.projectType);
-    if (plan.technologies.length) setTech((prev) => new Set([...prev, ...plan.technologies]));
-    if (!projectName && intake.brief.title) setProjectName(intake.brief.title);
-    const picked = plan.skills.flatMap((s) => s.skillIds).filter((id) => intake.accepted.includes(id));
-    const curated = picked.filter((id) => id.startsWith("curated:")).map((id) => id.slice("curated:".length));
-    if (curated.length) {
-      const next = new Map(skillOverride);
-      for (const slug of curated) next.set(slug, true);
-      setSkillOverride(next);
+
+    // 1. Step 2 — Organisation Guidelines & Engineering Standards
+    const recStds = recommendStandardsFromBrief(intake.brief);
+    if (recStds.orgGuidelineIds.length > 0) {
+      setOrgGuidelineSel((prev) => new Set([...prev, ...recStds.orgGuidelineIds]));
     }
+    if (recStds.standardTemplateIds.length > 0) {
+      setStandardTemplateSel((prev) => new Set([...prev, ...recStds.standardTemplateIds]));
+    }
+
+    // 2. Step 3 — Greenfield / Brownfield / Legacy Project Details & Answers
+    const targetProjectType: ProjectType =
+      plan && plan.projectType !== "none"
+        ? plan.projectType
+        : projectType ?? "greenfield";
+    setProjectType(targetProjectType);
+
+    const resolvedTitle =
+      intake.brief.title.trim() ||
+      (intake.hasAdkFlow ? intake.liveAdk.title.trim() : "");
+    if (resolvedTitle) {
+      setProjectName(resolvedTitle);
+    }
+
+    const mappedAnswers = mapBriefToProjectAnswers(
+      intake.brief,
+      plan,
+      intake.hasAdkFlow ? intake.liveAdk : null,
+      intake.materials,
+    );
+    setProjectAnswers((prev) => ({ ...prev, ...mappedAnswers }));
+    setDiscoverySyncedAnswerKeys(Object.keys(mappedAnswers));
+
+    // 3. Step 4 — Stack, Skills, MCP Servers & ADK Settings
+    const inferredTech = inferTechnologiesFromBrief(
+      intake.brief,
+      plan,
+      intake.hasAdkFlow,
+    );
+    if (inferredTech.length > 0) {
+      setTech((prev) => new Set([...prev, ...inferredTech]));
+    }
+
+    const matchedMcp = matchMcpServersFromBrief(
+      intake.brief,
+      intake.hasAdkFlow ? intake.liveAdk : null,
+    );
+    if (matchedMcp.length > 0) {
+      setMcpOverride((prev) => {
+        const next = new Map(prev);
+        for (const slug of matchedMcp) next.set(slug, true);
+        return next;
+      });
+    }
+
+    const agentSkills = intake.hasAdkFlow
+      ? intake.liveAdk.agents.flatMap((a) => a.skills ?? [])
+      : [];
+    const picked = (plan?.skills ?? [])
+      .flatMap((s) => s.skillIds)
+      .filter((id) => intake.accepted.includes(id));
+    const curated = [
+      ...picked
+        .filter((id) => id.startsWith("curated:"))
+        .map((id) => id.slice("curated:".length)),
+      ...agentSkills,
+    ];
+    if (curated.length > 0) {
+      setSkillOverride((prev) => {
+        const next = new Map(prev);
+        for (const slug of curated) next.set(slug, true);
+        return next;
+      });
+    }
+
     const external = picked.filter((id) => !id.startsWith("curated:"));
-    if (external.length) {
+    if (external.length > 0) {
       const index = await loadCatalog();
       const byId = new Map(index.skills.map((k) => [k.id, k]));
       setCatalogSel((prev) => {
@@ -377,7 +464,73 @@ export function useKitBuilderState({
         return next;
       });
     }
+
+    if (intake.hasAdkFlow && (intake.accepted.includes("adk") || !plan)) {
+      setProvider("google-adk");
+      const rootAgent = intake.liveAdk.agents.find(
+        (a) => a.name === intake.liveAdk.rootAgent,
+      );
+      if (rootAgent?.model) setAdkModel(rootAgent.model);
+      if (rootAgent?.instruction) setAdkInstruction(rootAgent.instruction);
+      const nextTools = new Set([
+        "context",
+        "validation",
+        "guardrails",
+        "memory",
+        "database",
+      ]);
+      const toolCorpus = intake.liveAdk.tools
+        .map((t) => `${t.name} ${t.connectorSystem ?? ""}`)
+        .join(" ");
+      if (/\bjira\b/i.test(toolCorpus) || matchedMcp.includes("jira-mcp")) {
+        nextTools.add("jira");
+      }
+      setAdkTools(nextTools);
+    }
+
+    // 4. Step 5 — Deployment Setup (agentFolderName, gitlabProjectSlug, deployTarget)
+    if (intake.hasAdkFlow) {
+      const pkg = intake.liveAdk.packageName;
+      const slugSource = intake.brief.title.trim() || pkg;
+      const cleanSlug = slugSource
+        .toLowerCase()
+        .replace(/[^a-z0-9-_]+/g, "-")
+        .replace(/^[^a-z0-9]+/, "")
+        .replace(/-+/g, "-")
+        .replace(/-$/, "")
+        .slice(0, 62);
+      const inferredTarget = inferDeployTargetFromBrief(
+        intake.brief,
+        intake.liveAdk,
+      );
+      updateDeploymentSetup({
+        agentFolderName: /^[a-z][a-z0-9_]{1,62}$/.test(pkg)
+          ? pkg
+          : deploymentSetup.agentFolderName,
+        gitlabProjectSlug:
+          cleanSlug.length >= 2 ? cleanSlug : deploymentSetup.gitlabProjectSlug,
+        deployTarget: inferredTarget,
+        agentDisplayName:
+          intake.liveAdk.title ||
+          intake.brief.title ||
+          deploymentSetup.agentDisplayName,
+        agentDescription:
+          intake.liveAdk.description ||
+          intake.brief.summary ||
+          intake.brief.problem ||
+          deploymentSetup.agentDescription,
+      });
+    }
+
     intake.markApplied();
+  }
+
+  function handleSetStep(nextStep: number | ((prev: number) => number)) {
+    const resolved = typeof nextStep === "function" ? nextStep(step) : nextStep;
+    if (step === 1 && resolved > 1 && intake.hasContent && !intake.applied) {
+      void applyIntakePlan();
+    }
+    setStep(resolved);
   }
 
   function retryCatalogSkill(id: string) {
@@ -562,13 +715,21 @@ export function useKitBuilderState({
       projectName,
     );
     const typeRule = projectTypeRule(projectType);
+    const activeAdkProject =
+      intake.hasAdkFlow && (intake.accepted.includes("adk") || !intake.plan)
+        ? intake.liveAdk
+        : null;
     return {
       projectName: projectName.trim() || undefined,
-      agentFolderName: deploymentSetup.agentFolderName.trim() || undefined,
+      agentFolderName:
+        deploymentSetup.agentFolderName.trim() ||
+        activeAdkProject?.packageName ||
+        undefined,
       deployTarget: deploymentSetup.deployTarget,
       adkModel,
       adkInstruction: adkInstruction.trim() || undefined,
       adkTools: Array.from(adkTools),
+      adkProject: activeAdkProject,
       technologies: [...tech],
       agents: [...selectedAgents.map((a: KitAgent) => applyBody(a, `agent:${a.id}`)), ...intakeAgents],
       rules: [
@@ -614,6 +775,10 @@ export function useKitBuilderState({
     adkTools,
     intakeAgents,
     intakeSkills,
+    intake.hasAdkFlow,
+    intake.accepted,
+    intake.plan,
+    intake.liveAdk,
   ]);
 
   const files = useMemo(() => {
@@ -625,13 +790,11 @@ export function useKitBuilderState({
       });
     }
     out.push(...catalogFiles([...catalogSel.values()], catalogFetch, provider));
-    // The runnable ADK agent system designed in Discovery, under its own folder.
-    const adkToEmit =
-      intake.applied && intake.plan?.adk && intake.accepted.includes("adk")
-        ? intake.plan.adk
-        : intake.draftAdk ?? null;
-    if (adkToEmit) {
-      for (const f of generateAdkProject(adkToEmit, { deployTarget: deploymentSetup.deployTarget }))
+    // For non-google-adk providers, include the ADK agent system under adk-agent/.
+    // For google-adk, buildKit(selection, "google-adk") already emits the unified
+    // multi-agent ADK orchestration directly inside <agentFolderName>/ at the repo root!
+    if (provider !== "google-adk" && selection.adkProject) {
+      for (const f of generateAdkProject(selection.adkProject, { deployTarget: deploymentSetup.deployTarget }))
         out.push({ path: `adk-agent/${f.path}`, contents: f.contents });
     }
     if (intake.hasContent) {
@@ -644,7 +807,7 @@ export function useKitBuilderState({
       const custom = fileEdits.get(f.path);
       return custom !== undefined ? { ...f, contents: custom } : f;
     });
-  }, [selection, provider, discovery, fileEdits, catalogSel, catalogFetch, intake.hasContent, intake.brief, intake.role, intake.materials, intake.answers, intake.plan, intake.draftAdk, intake.applied, intake.accepted, deploymentSetup.deployTarget]);
+  }, [selection, provider, discovery, fileEdits, catalogSel, catalogFetch, intake.hasContent, intake.brief, intake.role, intake.materials, intake.answers, intake.plan, deploymentSetup.deployTarget]);
 
   function download() {
     const blob = createZip(files);
@@ -738,7 +901,7 @@ export function useKitBuilderState({
     toggleAdkTool,
     // wizard
     step,
-    setStep,
+    setStep: handleSetStep,
     orgName,
     setOrgName,
     orgGuidelineSel,
@@ -747,6 +910,9 @@ export function useKitBuilderState({
     standardTemplateSel,
     setStandardTemplateSel,
     toggleStandardTemplate,
+    discoveryRecommendedOrgIds,
+    discoveryRecommendedStdIds,
+    discoverySyncedAnswerKeys,
     projectName,
     setProjectName,
     deploymentSetup,

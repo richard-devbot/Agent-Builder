@@ -15,8 +15,7 @@ export async function POST(req: Request) {
     const out = await generateStructured(AnalyzeModelSchema, ANALYZE_SYSTEM, analyzePrompt(body));
     return json(normalizeAnalyze(out, body.analyze));
   } catch (e) {
-    console.error("[intake/analyze]", e);
-    const message = e instanceof IntakeModelError ? e.message : "The AI service is unavailable right now";
-    return json({ error: message }, 502);
+    console.warn("[intake/analyze] Falling back to document-driven guided analysis:", e instanceof IntakeModelError ? e.message : e);
+    return json(guidedAnalyze(body));
   }
 }

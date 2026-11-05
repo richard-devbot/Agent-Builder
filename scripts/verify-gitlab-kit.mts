@@ -21,6 +21,9 @@ import { mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "nod
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { buildKit, type Selection } from "../lib/kit/build-kit";
+import { EMPTY_BRIEF } from "../lib/intake/brief";
+import { enrichDiscoveryBriefHeuristics } from "../lib/intake/guided";
+import { synthesizeAdkFromBrief } from "../lib/adk/catalog";
 
 const agentFolder = "finance_invoice_agent";
 
@@ -166,6 +169,52 @@ try {
   );
 } finally {
   rmSync(tmp, { recursive: true, force: true });
+}
+
+// Verify Step 6/7 unified Discovery multi-agent ADK emission inside <agentFolder>/
+const discoveryAdk = synthesizeAdkFromBrief(
+  enrichDiscoveryBriefHeuristics({
+    ...EMPTY_BRIEF,
+    title: "Finance Invoice Reconciliation",
+    problem: "Reconcile SAP purchase orders and ServiceNow exception tickets with manager approval over 5k.",
+    inScope: ["Parse invoice PDF", "Match SAP purchase order", "Stage ServiceNow exception ticket"],
+    integrations: ["SAP", "ServiceNow"],
+    constraints: ["Manager approval required over 5k"],
+  }),
+);
+const unifiedKitFiles = buildKit(
+  {
+    ...baseSelection,
+    adkProject: discoveryAdk,
+  },
+  "google-adk",
+);
+const unifiedAgentPy = unifiedKitFiles.find((f) => f.path === `${agentFolder}/agent.py`)?.contents ?? "";
+assert.ok(
+  unifiedAgentPy.includes("SequentialAgent") &&
+    unifiedAgentPy.includes("sap_erp_lookup_and_stage") &&
+    unifiedAgentPy.includes("servicenow_ticket_action") &&
+    unifiedAgentPy.includes("root_agent ="),
+  "Step 6/7 <agentFolder>/agent.py emits the full multi-agent Discovery ADK orchestration",
+);
+const tmpUnified = mkdtempSync(join(tmpdir(), "agent-builder-unified-adk-"));
+try {
+  for (const file of unifiedKitFiles) {
+    const target = join(tmpUnified, file.path);
+    mkdirSync(dirname(target), { recursive: true });
+    writeFileSync(target, file.contents, "utf8");
+  }
+  const stdoutUnified = execFileSync(
+    "python3",
+    ["scripts/check_mandatory_files.py", "--agent", agentFolder],
+    { cwd: tmpUnified, encoding: "utf8" },
+  );
+  assert.ok(
+    stdoutUnified.includes("All mandatory files and settings are present"),
+    "check_mandatory_files.py succeeded on unified multi-agent Discovery ADK kit",
+  );
+} finally {
+  rmSync(tmpUnified, { recursive: true, force: true });
 }
 
 console.log(

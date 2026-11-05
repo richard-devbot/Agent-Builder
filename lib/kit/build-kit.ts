@@ -34,6 +34,8 @@ import {
   renderAgentEnvExample,
 } from "./kit-templates";
 import { buildStandardsMarkdown } from "./standard-templates";
+import type { AdkProject } from "@/contracts/adk";
+import { generateAdkProject } from "@/lib/adk/generate";
 
 // Provider type + label map are owned by provider-profile.ts (the single
 // source of truth for per-tool delivery). Re-exported here for existing
@@ -54,6 +56,8 @@ export type Selection = {
   adkInstruction?: string;
   /** Enabled ADK tools and connectors. */
   adkTools?: string[];
+  /** Multi-agent ADK orchestration designed in Step 1 Discovery & Blueprint Studio. */
+  adkProject?: AdkProject | null;
   /** Technology ids (catalog ids or free-text). */
   technologies: string[];
   /** Selected agents (bodies may have been edited in the UI). */
@@ -819,6 +823,159 @@ function buildGoogleAdkKit(sel: Selection): KitFile[] {
     contents: instructions,
   });
 
+  const guardrailsCallbackPy = `"""Enterprise guardrail callbacks enforcing least privilege and human-in-the-loop checks."""
+from typing import Any, Dict, Optional
+
+
+def model_guardrail_callback(callback_context: Any, llm_request: Any) -> Optional[Any]:
+    """Prompt-injection and secret shield executed before every model call."""
+    return None
+
+
+def guardrail_callback(tool: Any, args: Dict[str, Any], tool_context: Any) -> Optional[Any]:
+    """Inspect tool execution requests before running to prevent destructive operations.
+
+    Blocks filesystem wipes (rm -rf), SQL drops/truncates, and forced git pushes.
+    """
+    cmd = str(args.get("command", "") or args.get("cmd", "")).lower()
+    destructive = ["rm -rf", "drop table", "truncate", "git push --force"]
+    for pattern in destructive:
+        if pattern in cmd:
+            raise PermissionError(f"Operation blocked by enterprise guardrail policy: {pattern}")
+    return None
+`;
+
+  const fastApiAppPy = `"""Production FastAPI application serving Google ADK routes and A2A Agent Card.
+Protected by Microsoft Entra ID (security/entra_auth.py) per docs/AUTH-STANDARD.md."""
+import json
+from pathlib import Path
+from fastapi import APIRouter, Depends, FastAPI
+from security.entra_auth import require_user
+from .agent import root_agent
+
+app = FastAPI(title=${JSON.stringify(displayProjectName)}, version="1.0.0")
+router = APIRouter(dependencies=[Depends(require_user)])
+
+@app.get("/healthz")
+def health_check():
+    """Unauthenticated service health probe for Google Cloud Run."""
+    return {"status": "healthy", "agent": root_agent.name, "model": getattr(root_agent, "model", "")}
+
+@router.get("/agent-card.json")
+def get_agent_card():
+    """Serve A2A Gemini Enterprise Agent Card descriptor (Entra SSO required)."""
+    card_path = Path(__file__).parents[1] / "deployment" / "agent-card.json"
+    if card_path.exists():
+        return json.loads(card_path.read_text(encoding="utf-8"))
+    return {"name": root_agent.name, "model": getattr(root_agent, "model", ""), "status": "active"}
+
+app.include_router(router)
+`;
+
+  if (sel.adkProject && sel.adkProject.agents.length > 0) {
+    // Emit the exact multi-agent ADK orchestration designed in Discovery & Blueprint Studio
+    // directly into <agentPkg>/ so CI, check_mandatory_files.py, and deploy_gcp.py deploy it!
+    const customInstr = sel.adkInstruction ? sel.adkInstruction.trim() : "";
+    const adkWithFolder: AdkProject = {
+      ...sel.adkProject,
+      packageName: agentPkg,
+      title: sel.projectName?.trim() || sel.adkProject.title || displayProjectName,
+      agents: sel.adkProject.agents.map((a) =>
+        a.name === sel.adkProject!.rootAgent
+          ? {
+              ...a,
+              model: sel.adkModel || a.model || modelId,
+              instruction: customInstr || a.instruction,
+            }
+          : a,
+      ),
+    };
+
+    const generatedAdkFiles = generateAdkProject(adkWithFolder, {
+      deployTarget: sel.deployTarget ?? "agent_engine",
+    });
+    for (const gf of generatedAdkFiles) {
+      files.push({
+        path: gf.path === "README.md" ? `${agentPkg}/README.md` : gf.path,
+        contents: gf.contents,
+      });
+    }
+
+    files.push({
+      path: `${agentPkg}/callbacks/__init__.py`,
+      contents:
+        "from .guardrails import guardrail_callback, model_guardrail_callback\n\n__all__ = ['guardrail_callback', 'model_guardrail_callback']\n",
+    });
+    files.push({
+      path: `${agentPkg}/callbacks/guardrails.py`,
+      contents: guardrailsCallbackPy,
+    });
+    files.push({ path: `${agentPkg}/fast_api_app.py`, contents: fastApiAppPy });
+
+    const rootAgentObj = adkWithFolder.agents.find((a) => a.name === adkWithFolder.rootAgent);
+    const expectedRootName = rootAgentObj?.name ?? adkWithFolder.rootAgent;
+    const expectedModel = rootAgentObj?.model ?? modelId;
+
+    const testPy = `import unittest
+from ${agentPkg}.agent import root_agent, before_tool_guardrail
+from ${agentPkg}.callbacks.guardrails import guardrail_callback
+
+
+class AgentContractTest(unittest.TestCase):
+    def test_agent_contract(self):
+        self.assertEqual(root_agent.name, ${JSON.stringify(expectedRootName)})
+        self.assertEqual(getattr(root_agent, "model", ""), ${JSON.stringify(expectedModel)})
+        self.assertTrue(len(getattr(root_agent, "sub_agents", [])) >= 1 or len(getattr(root_agent, "tools", [])) >= 1)
+
+    def test_guardrail_callback_blocks_destructive_commands(self):
+        with self.assertRaises(PermissionError):
+            guardrail_callback(None, {"command": "rm -rf /var/data"}, None)
+
+        with self.assertRaises(PermissionError):
+            guardrail_callback(None, {"command": "DROP TABLE users"}, None)
+
+        blocked = before_tool_guardrail(None, {"command": "rm -rf /var/data"}, None)
+        self.assertIsInstance(blocked, dict)
+        self.assertEqual(blocked.get("status"), "blocked_by_guardrail")
+
+
+if __name__ == "__main__":
+    unittest.main()
+`;
+    files.push({ path: "tests/__init__.py", contents: "" });
+    files.push({ path: "tests/test_agent.py", contents: testPy });
+
+    // 8. Scoped rules in .gemini/rules/
+    for (const rule of scopedRules(sel.rules)) {
+      const applyTo = rule.globs.join(",");
+      const fm = ["---", `applyTo: "${applyTo}"`, "---", ""].join("\n");
+      files.push({
+        path: `.gemini/rules/${rule.id}.md`,
+        contents: fm + rule.body.trim() + "\n",
+      });
+    }
+
+    // 9. Skills in .gemini/skills/
+    for (const skill of sel.skills) {
+      const fm = [
+        "---",
+        `name: ${skill.skillName}`,
+        `description: ${skill.description}`,
+        "---",
+        "",
+      ].join("\n");
+      files.push({
+        path: `.gemini/skills/${skill.skillName}/SKILL.md`,
+        contents: fm + skill.body.trim() + "\n",
+      });
+    }
+
+    // 10. Guardrail shell scripts in guardrails/
+    files.push(...guardrailFiles(sel));
+
+    return files;
+  }
+
   // 2. Custom Function Tools & Connectors in <agentPkg>/tools/
   const toolImports: string[] = [];
   const toolCallables: string[] = [];
@@ -1016,28 +1173,6 @@ ${inst} = Agent(
     contents: `${specialistExports.map((e) => `from .${e.replace(/_agent$/, "")} import ${e}`).join("\n")}\n\n__all__ = [${specialistExports.map((e) => JSON.stringify(e)).join(", ")}]\n`,
   });
 
-  // 4. Callbacks for guardrails & human authorization in <agentPkg>/callbacks/
-  const guardrailsCallbackPy = `"""Enterprise guardrail callbacks enforcing least privilege and human-in-the-loop checks."""
-from typing import Any, Dict, Optional
-
-
-def model_guardrail_callback(callback_context: Any, llm_request: Any) -> Optional[Any]:
-    """Prompt-injection and secret shield executed before every model call."""
-    return None
-
-
-def guardrail_callback(tool: Any, args: Dict[str, Any], tool_context: Any) -> Optional[Any]:
-    """Inspect tool execution requests before running to prevent destructive operations.
-
-    Blocks filesystem wipes (rm -rf), SQL drops/truncates, and forced git pushes.
-    """
-    cmd = str(args.get("command", "") or args.get("cmd", "")).lower()
-    destructive = ["rm -rf", "drop table", "truncate", "git push --force"]
-    for pattern in destructive:
-        if pattern in cmd:
-            raise PermissionError(f"Operation blocked by enterprise guardrail policy: {pattern}")
-    return None
-`;
   files.push({
     path: `${agentPkg}/callbacks/__init__.py`,
     contents:
@@ -1085,33 +1220,6 @@ root_agent = Agent(
     before_model_callback=model_guardrail_callback,
     before_tool_callback=guardrail_callback,
 )
-`;
-
-  const fastApiAppPy = `"""Production FastAPI application serving Google ADK routes and A2A Agent Card.
-Protected by Microsoft Entra ID (security/entra_auth.py) per docs/AUTH-STANDARD.md."""
-import json
-from pathlib import Path
-from fastapi import APIRouter, Depends, FastAPI
-from security.entra_auth import require_user
-from .agent import root_agent
-
-app = FastAPI(title=${JSON.stringify(displayProjectName)}, version="1.0.0")
-router = APIRouter(dependencies=[Depends(require_user)])
-
-@app.get("/healthz")
-def health_check():
-    """Unauthenticated service health probe for Google Cloud Run."""
-    return {"status": "healthy", "agent": root_agent.name, "model": root_agent.model}
-
-@router.get("/agent-card.json")
-def get_agent_card():
-    """Serve A2A Gemini Enterprise Agent Card descriptor (Entra SSO required)."""
-    card_path = Path(__file__).parents[1] / "deployment" / "agent-card.json"
-    if card_path.exists():
-        return json.loads(card_path.read_text(encoding="utf-8"))
-    return {"name": root_agent.name, "model": root_agent.model, "status": "active"}
-
-app.include_router(router)
 `;
 
   files.push({

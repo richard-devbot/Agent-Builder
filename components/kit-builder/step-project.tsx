@@ -2,12 +2,13 @@
 
 /**
  * Step 3 — Project. Pick a project type (illustrated cards), name the project,
- * then answer type-specific questions grouped into sections. A sticky preview
- * shows the facts the agent will treat as ground truth.
+ * then review/refine type-specific questions grouped into sections. A sticky
+ * preview shows the facts and Discovery architecture the agent treats as ground truth.
  */
 
 import { useState } from "react";
-import { Check, X } from "lucide-react";
+import { Check, ChevronsUpDown, RefreshCw, Sparkles, X } from "lucide-react";
+import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { cn } from "@/lib/utils";
 import { PROJECT_TYPES } from "@/lib/kit/project-types";
@@ -22,23 +23,84 @@ const NEUTRAL = "#14b8a6";
 export function StepProject({ s }: { s: KitBuilderState }) {
   const questions = s.baseProjectQuestions;
   const sections = SECTION_ORDER.map((sec) => ({ sec, qs: questions.filter((q) => q.section === sec) })).filter((x) => x.qs.length);
-  // First unfinished section starts open; the user can open any others.
-  const [open, setOpen] = useState<Set<string>>(() => new Set());
-  const firstOpen = sections.find((x) => x.qs.some((q) => !answered(s, q)))?.sec;
-  const isOpen = (sec: string) => open.has(sec) || (open.size === 0 && sec === firstOpen);
+  // First unfinished section (or the first section when all are synced) starts open; the user can toggle any or expand/collapse all.
+  const firstOpen = (sections.find((x) => x.qs.some((q) => !answered(s, q))) ?? sections[0])?.sec;
+  const [open, setOpen] = useState<Set<string> | null>(null);
+  const activeOpen = open ?? (firstOpen ? new Set([firstOpen]) : new Set<string>());
+  const isOpen = (sec: string) => activeOpen.has(sec);
   const toggle = (sec: string) =>
     setOpen((prev) => {
-      const next = new Set(prev.size === 0 && firstOpen ? [firstOpen] : prev);
+      const next = new Set(prev ?? (firstOpen ? [firstOpen] : []));
       if (next.has(sec)) next.delete(sec);
       else next.add(sec);
       return next;
     });
+  const allExpanded = sections.length > 0 && sections.every((x) => activeOpen.has(x.sec));
+  const toggleAll = () => {
+    if (allExpanded) {
+      setOpen(new Set());
+    } else {
+      setOpen(new Set(sections.map((x) => x.sec)));
+    }
+  };
 
   const accent = s.projectType ? TYPE_META[s.projectType].accent : NEUTRAL;
+  const answeredQuestions = questions.filter((q) => answered(s, q));
 
   return (
     <div style={{ "--t": accent } as React.CSSProperties} className="flex flex-col gap-5">
       <StepHeader n={3} />
+
+      {s.intake.hasContent && (
+        <div className="flex flex-col gap-2.5 rounded-2xl border border-primary/35 bg-primary/[0.06] p-4">
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <div className="flex items-center gap-2.5">
+              <span className="flex size-8 shrink-0 items-center justify-center rounded-xl bg-primary/15 text-primary">
+                <Sparkles className="size-4" />
+              </span>
+              <div>
+                <p className="text-sm font-semibold">
+                  Synced with Discovery: {s.projectName || s.intake.brief.title || "Agentic Workflow"}
+                </p>
+                <p className="text-xs text-muted-foreground">
+                  Pre-populated{" "}
+                  <span className="font-mono font-semibold text-foreground">
+                    {answeredQuestions.length}/{questions.length}
+                  </span>{" "}
+                  project profile settings,{" "}
+                  <span className="font-mono font-semibold text-foreground">
+                    {s.intake.liveAdk.agents.length}
+                  </span>{" "}
+                  ADK agents (<code className="font-mono text-[11px]">{s.intake.liveAdk.packageName}</code>), and{" "}
+                  <span className="font-mono font-semibold text-foreground">
+                    {s.intake.brief.systems.length}
+                  </span>{" "}
+                  connected enterprise system{s.intake.brief.systems.length === 1 ? "" : "s"}.
+                </p>
+              </div>
+            </div>
+            <div className="flex items-center gap-2">
+              <Button
+                size="sm"
+                variant="ghost"
+                className="h-8 text-xs"
+                onClick={toggleAll}
+              >
+                <ChevronsUpDown className="size-3.5" />
+                {allExpanded ? "Collapse sections" : "Expand all sections"}
+              </Button>
+              <Button
+                size="sm"
+                variant="outline"
+                className="h-8 text-xs"
+                onClick={s.applyIntakePlan}
+              >
+                <RefreshCw className="size-3.5" /> Re-sync Discovery
+              </Button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Project type */}
       <section aria-labelledby="project-type-title" id="project-type" className="scroll-mt-4">
@@ -123,9 +185,14 @@ export function StepProject({ s }: { s: KitBuilderState }) {
                 className="h-10 text-base"
               />
             </div>
-            <p className="text-xs leading-relaxed text-muted-foreground @3xl:max-w-xs @3xl:pb-2">
-              Shown in the studio and written into the profile and the ADK package name.
-            </p>
+            <div className="text-xs leading-relaxed text-muted-foreground @3xl:max-w-xs @3xl:pb-1">
+              <p>Shown in the studio and written into the profile and the ADK package name.</p>
+              {s.deploymentSetup.agentFolderName && (
+                <p className="mt-0.5 font-mono text-[11px] text-foreground/80">
+                  ADK package: <code>{s.deploymentSetup.agentFolderName}</code>
+                </p>
+              )}
+            </div>
           </div>
 
           {!s.projectType && (

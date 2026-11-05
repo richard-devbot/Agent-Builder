@@ -15,7 +15,10 @@
  */
 
 import type { RulePack } from "./rules";
+import type { Brief, Material, Plan } from "@/contracts/intake";
+import type { AdkProject } from "@/contracts/adk";
 import { COMPLIANCE_OPTIONS } from "@/lib/config/public";
+import { TECHNOLOGIES } from "./technologies";
 
 export type ProjectQuestionOption = { id: string; label: string };
 
@@ -607,4 +610,445 @@ export function projectProfileRule(
     globs: ["**/*"],
     body,
   };
+}
+
+/**
+ * Recommend Step 2 Organisation Guidelines & Engineering Standard Templates
+ * directly from the Discovery Brief (`dataCompliance`, `riskTier`, `systems`, `stack`).
+ */
+export function recommendStandardsFromBrief(brief: Brief): {
+  orgGuidelineIds: string[];
+  standardTemplateIds: string[];
+} {
+  const corpus = [
+    brief.title,
+    brief.summary,
+    brief.problem,
+    brief.dataCompliance,
+    brief.riskReason,
+    ...brief.inScope,
+    ...brief.constraints,
+    ...brief.stack,
+    ...brief.integrations,
+    ...brief.systems.map((s) => `${s.name} ${s.purpose} ${s.dataClassification}`),
+  ].join(" ");
+
+  const orgIds = new Set<string>([
+    "secure-coding",
+    "ai-usage-disclosure",
+    "code-review-bar",
+    "testing-pyramid",
+    "git-conventions",
+    "observability-logging",
+    "accessibility-baseline",
+    "dependency-hygiene",
+    "api-design-contracts",
+    "error-handling-resilience",
+  ]);
+
+  if (
+    brief.riskTier !== "low" ||
+    brief.dataCompliance.trim().length > 0 ||
+    /\b(pii|gdpr|personal|confidential|privacy|customer|employee|hr|finance|sox|hipaa|pci)\b/i.test(corpus)
+  ) {
+    orgIds.add("data-handling-privacy");
+    orgIds.add("compliance-baseline");
+  }
+  if (/\b(gdpr|pii|personal\s+data|privacy|eu\b|erasure|consent|dsar)\b/i.test(corpus)) {
+    orgIds.add("gdpr-data-protection");
+  }
+
+  const stdIds = new Set<string>([
+    "std-sdlc-governance",
+    "std-security-guardrails",
+    "std-observability-slo",
+    "std-git-cicd-pr",
+    "std-testing-quality",
+    "std-design-patterns",
+  ]);
+
+  if (
+    brief.systems.length > 0 ||
+    brief.integrations.length > 0 ||
+    /\b(api|webhook|rest|graphql|sap|servicenow|salesforce|sharepoint|workday|jira|postgres)\b/i.test(corpus)
+  ) {
+    stdIds.add("std-contract-parity-testing");
+  }
+  if (/\b(bigquery|bq\b|warehouse|analytics|dataset|sql)\b/i.test(corpus)) {
+    stdIds.add("std-bigquery-least-privilege");
+  }
+  if (/\b(java|spring\s+boot|maven|gradle)\b/i.test(corpus)) {
+    stdIds.add("std-java-spring");
+  }
+  if (/\b(react|next\.?js|tailwind|frontend|portal|dashboard|ui)\b/i.test(corpus)) {
+    stdIds.add("std-precision-light-tokens");
+  }
+
+  return {
+    orgGuidelineIds: [...orgIds],
+    standardTemplateIds: [...stdIds],
+  };
+}
+
+/**
+ * Deterministically map the Step 1 Discovery Brief, uploaded materials, and
+ * Live ADK orchestration into Step 3 `ProjectAnswers` (covering Greenfield,
+ * Brownfield, Legacy Migration, tech-specific, and shared architecture/quality questions).
+ */
+export function mapBriefToProjectAnswers(
+  brief: Brief,
+  plan?: Plan | null,
+  liveAdk?: AdkProject | null,
+  materials?: Material[],
+): ProjectAnswers {
+  const answers: ProjectAnswers = {};
+  const corpus = [
+    brief.title,
+    brief.summary,
+    brief.problem,
+    ...brief.goals,
+    ...brief.users,
+    brief.audience,
+    ...brief.inScope,
+    ...brief.outOfScope,
+    ...brief.stack,
+    ...brief.integrations,
+    brief.dataCompliance,
+    ...brief.constraints,
+    brief.timeline,
+    ...brief.successMetrics,
+    ...brief.risks,
+    ...brief.assumptions,
+    ...brief.systems.map((s) => `${s.name} ${s.purpose} ${s.dataAccessed} ${s.connectionMethod}`),
+  ].join(" ");
+
+  // ── 1. Greenfield questions ───────────────────────────────────────────────
+  const gfInputs = new Set<string>();
+  if ((materials && materials.length > 0) || brief.summary.trim() || brief.problem.trim()) {
+    gfInputs.add("requirements-doc");
+  }
+  if (/\b(figma|wireframe|mockup|screen\s+design|ui\s+design)\b/i.test(corpus)) {
+    gfInputs.add("ui-designs");
+  }
+  if (
+    brief.systems.length > 0 ||
+    brief.integrations.length > 0 ||
+    /\b(api|openapi|swagger|webhook|endpoint|connector|rest|graphql)\b/i.test(corpus)
+  ) {
+    gfInputs.add("api-contracts");
+  }
+  if (/\b(schema|table|postgres|sql|bigquery|database|record|invoice|po\b|ticket|list|field)\b/i.test(corpus)) {
+    gfInputs.add("db-schema");
+  }
+  if (brief.inScope.length > 0 || brief.goals.length > 0) {
+    gfInputs.add("user-stories");
+  }
+  if (gfInputs.size === 0) gfInputs.add("requirements-doc");
+  answers["greenfield-inputs"] = [...gfInputs];
+
+  if (/\b(poc|proof\s+of\s+concept|prototype|spike|experiment|sandbox\s+pilot)\b/i.test(corpus)) {
+    answers["greenfield-stage"] = ["poc"];
+  } else if (
+    brief.riskTier === "high" ||
+    /\b(production[-\s]ready|enterprise[-\s]wide|whole\s+company|mission[-\s]critical|sox|hipaa|pci)\b/i.test(corpus)
+  ) {
+    answers["greenfield-stage"] = ["production"];
+  } else {
+    answers["greenfield-stage"] = ["mvp"];
+  }
+
+  const userCorpus = `${brief.audience} ${brief.users.join(" ")}`;
+  if (/\b(public|consumer|b2c|open\s+web)\b/i.test(userCorpus)) {
+    answers["greenfield-users"] = ["public"];
+  } else if (/\b(b2b|partner|client|external\s+customer|external\s+user)\b/i.test(userCorpus)) {
+    answers["greenfield-users"] = ["external-b2b"];
+  } else if (
+    /\b(whole\s+company|department|organisation|organization|enterprise|all\s+employees|cross[-\s]team|managers)\b/i.test(
+      userCorpus,
+    )
+  ) {
+    answers["greenfield-users"] = ["internal-org"];
+  } else {
+    answers["greenfield-users"] = ["internal-small"];
+  }
+
+  const triggerKind = liveAdk?.trigger?.kind ?? "chat_a2a";
+  if (triggerKind !== "chat_a2a" && /\b(webhook|api[-\s]key|service[-\s]to[-\s]service|batch|cron|pubsub|eventarc)\b/i.test(corpus)) {
+    answers["greenfield-auth"] = ["api-keys"];
+  } else if (/\b(oauth|social\s+login)\b/i.test(corpus) && !/\b(entra|sso|corporate)\b/i.test(corpus)) {
+    answers["greenfield-auth"] = ["social"];
+  } else {
+    answers["greenfield-auth"] = ["sso"];
+  }
+
+  if (/\b(separate\s+frontend|fe[-\s]be)\b/i.test(corpus)) {
+    answers["greenfield-repos"] = ["fe-be-repos"];
+  } else if (/\b(multi[-\s]repo|separate\s+repos|multiple\s+service\s+repos)\b/i.test(corpus)) {
+    answers["greenfield-repos"] = ["multi-repo"];
+  } else {
+    answers["greenfield-repos"] = ["single-repo"];
+  }
+
+  // ── 2. Brownfield questions ───────────────────────────────────────────────
+  const bfGoals = new Set<string>(["new-features"]);
+  if (/\b(refactor|untangle|clean\s+up)\b/i.test(corpus)) bfGoals.add("refactor");
+  if (/\b(outage|bug|incident\s+fix|triage)\b/i.test(corpus)) bfGoals.add("bugs");
+  if (/\b(scale|throughput|latency|performance)\b/i.test(corpus)) bfGoals.add("performance");
+  if (brief.riskTier !== "low" || /\b(security|compliance|sox|gdpr|pii)\b/i.test(corpus)) bfGoals.add("security");
+  answers["brownfield-goal"] = [...bfGoals];
+  answers["brownfield-state"] = ["active-team", "good-docs"];
+  answers["brownfield-size"] = ["medium"];
+  const hotspotItems = [...brief.constraints, ...brief.outOfScope].filter(Boolean).slice(0, 3);
+  if (hotspotItems.length > 0) {
+    answers["brownfield-hotspots"] = [hotspotItems.join("; ")];
+  }
+  answers["brownfield-ci"] = ["full-ci-cd"];
+
+  // ── 3. Legacy migration questions ─────────────────────────────────────────
+  if (/\b(\.net\s+framework|wcf|webforms|vb\.net)\b/i.test(corpus)) {
+    answers["legacy-source"] = ["dotnet-framework"];
+  } else if (/\b(cobol|mainframe)\b/i.test(corpus)) {
+    answers["legacy-source"] = ["cobol-mainframe"];
+  } else if (/\b(java\s+ee|weblogic|websphere|jboss|struts|ejb)\b/i.test(corpus)) {
+    answers["legacy-source"] = ["java-monolith"];
+  } else {
+    answers["legacy-source"] = ["other-legacy"];
+  }
+
+  if (/\b(spring\s+boot|java)\b/i.test(corpus)) {
+    answers["legacy-target"] = ["spring-boot-microservices"];
+  } else if (/\b(serverless|cloud\s+run|agent\s+engine)\b/i.test(corpus)) {
+    answers["legacy-target"] = ["serverless-target"];
+  } else {
+    answers["legacy-target"] = ["cloud-containers"];
+  }
+  answers["legacy-data"] = ["other-db"];
+  answers["legacy-interfaces"] = ["soap", "batch-files"];
+  answers["legacy-knowledge"] = materials && materials.length > 0 ? ["docs", "sme"] : ["sme"];
+  answers["legacy-approach"] = ["strangler"];
+  answers["legacy-coexistence"] = ["parallel-run"];
+  answers["legacy-downtime"] = ["zero"];
+  answers["legacy-parity"] = ["golden-files", "regression-suite"];
+
+  // ── 4. Tech-specific questions (Python / ADK / React / Java / Node) ───────
+  answers["python-framework"] = ["fastapi"];
+  answers["python-orm"] = /\b(postgres|sqlalchemy|database|sql)\b/i.test(corpus)
+    ? ["sqlalchemy"]
+    : ["raw-sql"];
+  answers["react-framework"] = ["next-app"];
+  answers["react-state"] = ["tanstack-query"];
+  answers["node-framework"] = ["fastify"];
+
+  // ── 5. Shared Architecture, Deployment, Quality & Compliance ──────────────
+  if (/\b(microservice|multi[-\s]service)\b/i.test(corpus)) {
+    answers["architecture-style"] = ["microservices"];
+  } else if (
+    ["pubsub", "eventarc", "webhook"].includes(triggerKind) ||
+    /\b(serverless|cloud\s+run|agent\s+engine|vertex\s+ai)\b/i.test(corpus)
+  ) {
+    answers["architecture-style"] = ["serverless"];
+  } else {
+    answers["architecture-style"] = ["modular-monolith"];
+  }
+
+  answers["deploy-target"] = ["gcp"];
+  answers["environments"] = ["dev", "test", "staging", "prod"];
+
+  const qualities = new Set<string>(["security", "auditability"]);
+  if (/\b(fast|latency|volume|throughput|400|week|daily|sla|minutes|seconds)\b/i.test(corpus)) {
+    qualities.add("performance");
+  }
+  if (brief.riskTier === "high" || /\b(retry|loop|reconcil|availability|24\/7|resilien)\b/i.test(corpus)) {
+    qualities.add("availability");
+  }
+  answers["quality-priorities"] = [...qualities].slice(0, 3);
+
+  const complianceCorpus = `${brief.dataCompliance} ${brief.constraints.join(" ")} ${brief.riskReason}`;
+  const validComplianceIds = new Set(COMPLIANCE_OPTIONS.map((c) => c.id));
+  const matchedCompliance = new Set<string>();
+  if (/\b(gdpr|pii|personal\s+data|privacy|eu\b)\b/i.test(complianceCorpus) && validComplianceIds.has("gdpr")) {
+    matchedCompliance.add("gdpr");
+  }
+  if (
+    (/\b(soc\s*2|sox|iso\s*27001|financial|audit\s+trail|confidential|approval|manager)\b/i.test(complianceCorpus) ||
+      brief.riskTier !== "low") &&
+    validComplianceIds.has("soc2")
+  ) {
+    matchedCompliance.add("soc2");
+  }
+  if (/\b(hipaa|phi|health|patient|medical)\b/i.test(complianceCorpus) && validComplianceIds.has("hipaa")) {
+    matchedCompliance.add("hipaa");
+  }
+  if (/\b(pci|cardholder|payment\s+card)\b/i.test(complianceCorpus) && validComplianceIds.has("pci")) {
+    matchedCompliance.add("pci");
+  }
+  if (/\b(fedramp|federal|government)\b/i.test(complianceCorpus) && validComplianceIds.has("fedramp")) {
+    matchedCompliance.add("fedramp");
+  }
+  if (matchedCompliance.size === 0 && validComplianceIds.has("internal-only")) {
+    matchedCompliance.add("internal-only");
+  }
+  answers["compliance-requirements"] = [...matchedCompliance];
+
+  if (/\b(just\s+me|solo|individual)\b/i.test(userCorpus)) {
+    answers["team-size"] = ["solo"];
+  } else if (/\b(whole\s+company|enterprise|organisation|organization)\b/i.test(userCorpus)) {
+    answers["team-size"] = ["large"];
+  } else if (/\b(department|cross[-\s]team|multiple\s+teams)\b/i.test(userCorpus) || brief.systems.length >= 2) {
+    answers["team-size"] = ["medium"];
+  } else {
+    answers["team-size"] = ["small"];
+  }
+
+  // Synthesize rich ground-truth project notes from Discovery Brief + ADK Topology
+  const noteParts: string[] = [];
+  if (brief.title.trim()) {
+    noteParts.push(`Workflow Title: ${brief.title.trim()}`);
+  }
+  if (brief.problem.trim()) {
+    noteParts.push(`Problem & Objective: ${brief.problem.trim()}`);
+  }
+  if (brief.inScope.length > 0) {
+    noteParts.push(`Scoped Workflow Stages: ${brief.inScope.join(" -> ")}`);
+  }
+  if (liveAdk && liveAdk.agents.length > 0) {
+    const agentSummary = liveAdk.agents
+      .map((a) => `${a.name} (${a.type}${a.outputKey ? ` -> {${a.outputKey}}` : ""})`)
+      .join(", ");
+    noteParts.push(`Google ADK Agent Topology (root: ${liveAdk.rootAgent}, trigger: ${triggerKind}): ${agentSummary}`);
+  }
+  if (brief.systems.length > 0) {
+    const sysSummary = brief.systems
+      .map((s) => `${s.name} [${s.access.toUpperCase()} via ${s.connectionMethod}]`)
+      .join("; ");
+    noteParts.push(`Enterprise Systems & Access: ${sysSummary}`);
+  } else if (brief.integrations.length > 0) {
+    noteParts.push(`Integrations: ${brief.integrations.join(", ")}`);
+  }
+  if (brief.constraints.length > 0) {
+    noteParts.push(`Governance & Approval Gates: ${brief.constraints.join("; ")}`);
+  }
+  if (brief.dataCompliance.trim()) {
+    noteParts.push(`Data Sensitivity & Compliance: ${brief.dataCompliance.trim()} (Risk Tier: ${brief.riskTier})`);
+  }
+  if (brief.successMetrics.length > 0) {
+    noteParts.push(`Success & Eval Criteria: ${brief.successMetrics.join("; ")}`);
+  }
+  if (plan?.summary) {
+    noteParts.push(`Blueprint Summary: ${plan.summary}`);
+  }
+  if (noteParts.length > 0) {
+    answers["project-notes"] = [noteParts.join("\n")];
+  }
+
+  return answers;
+}
+
+/**
+ * Infer Step 5 `deployTarget` (`agent_engine` | `cloud_run` | `gemini_enterprise`)
+ * from the Discovery Brief and Live ADK trigger configuration.
+ */
+export function inferDeployTargetFromBrief(
+  brief: Brief,
+  liveAdk?: AdkProject | null,
+): "agent_engine" | "cloud_run" | "gemini_enterprise" {
+  const corpus = [
+    brief.title,
+    brief.summary,
+    brief.problem,
+    ...brief.users,
+    brief.audience,
+    ...brief.inScope,
+    ...brief.stack,
+    ...brief.goals,
+  ].join(" ");
+
+  if (/\b(gemini\s+enterprise|agentspace|workspace\s+assistant|company[-\s]wide\s+assistant|register\s+in\s+gemini)\b/i.test(corpus)) {
+    return "gemini_enterprise";
+  }
+  if (
+    liveAdk?.trigger?.kind === "webhook" ||
+    /\b(cloud\s+run|custom\s+fastapi|webhook\s+endpoint|custom\s+container|dockerfile)\b/i.test(corpus)
+  ) {
+    return "cloud_run";
+  }
+  return "agent_engine";
+}
+
+/**
+ * Match Step 4 MCP server slugs (`jira-mcp`, `confluence-mcp`, `postgres-mcp`,
+ * `github-mcp`, `azure-devops-mcp`, `figma-mcp`, `playwright-mcp`, `filesystem-mcp`)
+ * from the Discovery Brief and ADK tools.
+ */
+export function matchMcpServersFromBrief(
+  brief: Brief,
+  liveAdk?: AdkProject | null,
+): string[] {
+  const corpus = [
+    brief.title,
+    brief.summary,
+    brief.problem,
+    ...brief.inScope,
+    ...brief.stack,
+    ...brief.integrations,
+    ...brief.systems.map((s) => `${s.name} ${s.purpose}`),
+    ...(liveAdk?.tools.map((t) => `${t.name} ${t.connectorSystem ?? ""} ${t.description}`) ?? []),
+  ].join(" ");
+
+  const matched = new Set<string>(["filesystem-mcp"]);
+  if (/\b(jira|atlassian|sprint|ticket|issue\s+tracking)\b/i.test(corpus)) matched.add("jira-mcp");
+  if (/\b(confluence|wiki|runbook|sop|knowledge\s+base|sharepoint|policy\s+doc)\b/i.test(corpus)) {
+    matched.add("confluence-mcp");
+  }
+  if (/\b(postgres|postgresql|sql|database|bigquery|sap|erp|ledger|table|schema)\b/i.test(corpus)) {
+    matched.add("postgres-mcp");
+  }
+  if (/\b(github|git\b|pull\s+request|repository)\b/i.test(corpus)) {
+    matched.add("github-mcp");
+  }
+  if (/\b(azure\s+devops|ado\b|work\s+item|azure\s+boards)\b/i.test(corpus)) {
+    matched.add("azure-devops-mcp");
+  }
+  if (/\b(figma|design\s+system|ui\s+mock)\b/i.test(corpus)) {
+    matched.add("figma-mcp");
+  }
+  if (/\b(playwright|browser|e2e|portal\s+ui|web\s+scraping)\b/i.test(corpus)) {
+    matched.add("playwright-mcp");
+  }
+  return [...matched];
+}
+
+/**
+ * Infer Step 4 technology IDs from the Discovery Brief, Plan, and ADK selection.
+ */
+export function inferTechnologiesFromBrief(
+  brief: Brief,
+  plan?: Plan | null,
+  includeAdk = true,
+): string[] {
+  const ids = new Set<string>(plan?.technologies ?? []);
+  if (includeAdk) ids.add("python");
+
+  const corpus = ` ${[
+    ...brief.stack,
+    ...brief.integrations,
+    ...brief.systems.map((s) => s.name),
+    brief.title,
+    brief.problem,
+    brief.summary,
+  ]
+    .join(" ")
+    .toLowerCase()
+    .replace(/[^a-z0-9+#.]+/g, " ")} `;
+
+  for (const t of TECHNOLOGIES) {
+    const names = [t.id, t.label, ...(t.aliases ?? [])];
+    if (names.some((n) => n.length > 1 && corpus.includes(` ${n.toLowerCase()} `))) {
+      ids.add(t.id);
+    }
+  }
+  if (/\b(postgres|postgresql|sql|database)\b/i.test(corpus)) {
+    ids.add("postgresql");
+  }
+  return [...ids];
 }

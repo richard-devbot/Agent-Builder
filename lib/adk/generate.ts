@@ -185,7 +185,15 @@ function agentPy(p: AdkProject): string {
 }
 
 function requirementsTxt(p: AdkProject): string {
-  const deps = [...new Set(p.tools.flatMap((t) => t.dependencies))]
+  const deps = [
+    ...new Set([
+      "google-genai>=0.1.0",
+      "fastapi>=0.110.0",
+      "uvicorn>=0.28.0",
+      "PyJWT[crypto]>=2.8.0",
+      ...p.tools.flatMap((t) => t.dependencies),
+    ]),
+  ]
     .filter(
       (d) =>
         !d.toLowerCase().startsWith("google-adk") &&

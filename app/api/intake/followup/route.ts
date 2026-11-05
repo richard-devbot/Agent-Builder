@@ -15,8 +15,7 @@ export async function POST(req: Request) {
     const out = await generateStructured(FollowUpModelSchema, FOLLOWUP_SYSTEM, followUpPrompt(body));
     return json(normalizeFollowUp(out, body.round, body.asked));
   } catch (e) {
-    console.error("[intake/followup]", e);
-    const message = e instanceof IntakeModelError ? e.message : "The AI service is unavailable right now";
-    return json({ error: message }, 502);
+    console.warn("[intake/followup] Falling back to document-driven guided follow-up:", e instanceof IntakeModelError ? e.message : e);
+    return json(guidedFollowUp(body));
   }
 }

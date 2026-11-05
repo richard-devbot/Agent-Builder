@@ -97,12 +97,14 @@ function stages(i: IntakeState): Stage[] {
       status:
         i.busy === "planning"
           ? "running"
-          : i.plan || i.score > 0
+          : i.plan || i.hasAdkFlow
             ? "done"
             : "idle",
       detail: i.plan
         ? `${i.plan.milestones.length} milestones · ${i.liveAdk.agents.length} ADK agents`
-        : `${i.liveAdk.agents.length} live ADK agents · ${i.liveAdk.tools.length} tools`,
+        : i.hasAdkFlow
+          ? `${i.liveAdk.agents.length} live ADK agents · ${i.liveAdk.tools.length} tools`
+          : "Waiting for Discovery input",
     },
     {
       id: "builder",
@@ -112,12 +114,14 @@ function stages(i: IntakeState): Stage[] {
       status:
         i.busy === "planning"
           ? "running"
-          : drafts || i.liveAdk.tools.length > 0
+          : drafts || (i.hasAdkFlow && i.liveAdk.tools.length > 0)
             ? "done"
             : "idle",
       detail: drafts
         ? `${drafts} draft${drafts === 1 ? "" : "s"} ready to review`
-        : `${i.liveAdk.tools.length} ADK tools & ${i.liveAdk.envVars.length} env bindings ready`,
+        : i.hasAdkFlow
+          ? `${i.liveAdk.tools.length} ADK tools & ${i.liveAdk.envVars.length} env bindings ready`
+          : "Waiting for Discovery input",
     },
     {
       id: "assembler",
@@ -152,8 +156,14 @@ export function PipelineGraph({ intake }: { intake: IntakeState }) {
           <div className="min-w-0">
             <p className="text-sm font-semibold">Discovery & Live ADK Flow</p>
             <p className="text-[11px] text-muted-foreground">
-              {adk.agents.length} agents · {adk.tools.length} tools ·{" "}
-              {adk.envVars.length} env/secrets ·{" "}
+              {intake.hasAdkFlow ? (
+                <>
+                  {adk.agents.length} agents · {adk.tools.length} tools ·{" "}
+                  {adk.envVars.length} env/secrets ·{" "}
+                </>
+              ) : (
+                <>Waiting for Discovery input · </>
+              )}
               {intake.ai?.configured
                 ? `${intake.ai.provider === "vertex-ai" ? "Vertex AI" : "Gemini API"}`
                 : "guided mode"}
@@ -189,73 +199,102 @@ export function PipelineGraph({ intake }: { intake: IntakeState }) {
       </div>
 
       {subView === "adk" ? (
-        <div className="overflow-hidden rounded-xl border border-primary/30 bg-card/80">
-          <div className="flex flex-wrap items-center justify-between gap-2 border-b border-border/60 bg-muted/20 px-3 py-2">
-            <div className="min-w-0">
-              <p className="truncate text-xs font-semibold">{adk.title}</p>
-              <p className="truncate font-mono text-[10.5px] text-muted-foreground">
-                {adk.packageName} · root: {adk.rootAgent}
-              </p>
+        intake.hasAdkFlow ? (
+          <div className="overflow-hidden rounded-xl border border-primary/30 bg-card/80">
+            <div className="flex flex-wrap items-center justify-between gap-2 border-b border-border/60 bg-muted/20 px-3 py-2">
+              <div className="min-w-0">
+                <p className="truncate text-xs font-semibold">{adk.title}</p>
+                <p className="truncate font-mono text-[10.5px] text-muted-foreground">
+                  {adk.packageName} · root: {adk.rootAgent}
+                </p>
+              </div>
+              <div className="flex items-center gap-1">
+                <Button
+                  size="sm"
+                  variant="ghost"
+                  className="h-7 px-2 text-[11px]"
+                  onClick={intake.resyncAdkFromBrief}
+                  title="Re-synthesize ADK flow from current Discovery brief"
+                >
+                  <RefreshCw className="size-3" /> Sync
+                </Button>
+                <Button
+                  size="sm"
+                  className="h-7 px-2.5 text-[11px]"
+                  onClick={() => openStudioAt("graph")}
+                >
+                  <Maximize2 className="size-3" /> Open Studio
+                </Button>
+              </div>
             </div>
-            <div className="flex items-center gap-1">
+
+            <div
+              onClick={() => openStudioAt("graph")}
+              className="h-80 cursor-zoom-in bg-muted/10 transition-colors hover:bg-muted/25"
+            >
+              <AdkFlow
+                project={adk}
+                interactive={false}
+                showTools={true}
+                view="simple"
+              />
+            </div>
+
+            <div className="flex flex-wrap items-center gap-1.5 border-t border-border/60 bg-muted/15 p-2.5">
+              <Button
+                size="sm"
+                variant="outline"
+                className="h-7 text-[11px]"
+                onClick={() => openStudioAt("tools")}
+              >
+                <Plug className="size-3 text-info" /> Tools, MCP & Skills ({adk.tools.length})
+              </Button>
+              <Button
+                size="sm"
+                variant="outline"
+                className="h-7 text-[11px]"
+                onClick={() => openStudioAt("connections")}
+              >
+                <PlugZap className="size-3 text-warning" /> Connections & Env ({adk.envVars.length})
+              </Button>
               <Button
                 size="sm"
                 variant="ghost"
-                className="h-7 px-2 text-[11px]"
-                onClick={intake.resyncAdkFromBrief}
-                title="Re-synthesize ADK flow from current Discovery brief"
+                className="ml-auto h-7 text-[11px]"
+                onClick={() => downloadAdk(adk)}
               >
-                <RefreshCw className="size-3" /> Sync
-              </Button>
-              <Button
-                size="sm"
-                className="h-7 px-2.5 text-[11px]"
-                onClick={() => openStudioAt("graph")}
-              >
-                <Maximize2 className="size-3" /> Open Studio
+                <Download className="size-3" /> Zip
               </Button>
             </div>
           </div>
-
-          <div
-            onClick={() => openStudioAt("graph")}
-            className="h-80 cursor-zoom-in bg-muted/10 transition-colors hover:bg-muted/25"
-          >
-            <AdkFlow
-              project={adk}
-              interactive={false}
-              showTools={true}
-              view="simple"
-            />
+        ) : (
+          <div className="flex min-h-80 flex-col items-center justify-center rounded-xl border border-dashed border-primary/30 bg-muted/10 p-6 text-center">
+            <span className="mb-3 flex size-12 items-center justify-center rounded-2xl bg-primary/12 text-primary">
+              <Network className="size-6" />
+            </span>
+            <p className="text-sm font-semibold">Waiting for Discovery Input</p>
+            <p className="mt-1.5 max-w-md text-xs leading-relaxed text-muted-foreground">
+              Describe your workflow in chat or drop a process document, spec, or spreadsheet.
+              The Discovery Agent will design a domain-specific Google ADK multi-agent topology (
+              <code className="font-mono text-[11px] text-foreground">SequentialAgent</code>,{" "}
+              <code className="font-mono text-[11px] text-foreground">ParallelAgent</code>,{" "}
+              <code className="font-mono text-[11px] text-foreground">LoopAgent</code>, specialist{" "}
+              <code className="font-mono text-[11px] text-foreground">LlmAgent</code>s, typed tools, and{" "}
+              <code className="font-mono text-[11px] text-foreground">{"{output_key}"}</code> state handoffs) turn by turn.
+            </p>
+            <div className="mt-4 flex flex-wrap justify-center gap-1.5 text-[11px] text-muted-foreground">
+              <span className="rounded-md border bg-background/70 px-2 py-0.5 font-mono">
+                Zero hardcoded boilerplate
+              </span>
+              <span className="rounded-md border bg-background/70 px-2 py-0.5 font-mono">
+                Live tool & Secret Manager bindings
+              </span>
+              <span className="rounded-md border bg-background/70 px-2 py-0.5 font-mono">
+                Auto-syncs to Steps 2–7
+              </span>
+            </div>
           </div>
-
-          <div className="flex flex-wrap items-center gap-1.5 border-t border-border/60 bg-muted/15 p-2.5">
-            <Button
-              size="sm"
-              variant="outline"
-              className="h-7 text-[11px]"
-              onClick={() => openStudioAt("tools")}
-            >
-              <Plug className="size-3 text-info" /> Tools, MCP & Skills ({adk.tools.length})
-            </Button>
-            <Button
-              size="sm"
-              variant="outline"
-              className="h-7 text-[11px]"
-              onClick={() => openStudioAt("connections")}
-            >
-              <PlugZap className="size-3 text-warning" /> Connections & Env ({adk.envVars.length})
-            </Button>
-            <Button
-              size="sm"
-              variant="ghost"
-              className="ml-auto h-7 text-[11px]"
-              onClick={() => downloadAdk(adk)}
-            >
-              <Download className="size-3" /> Zip
-            </Button>
-          </div>
-        </div>
+        )
       ) : (
         <ol className="relative">
           {list.map((s, i) => {

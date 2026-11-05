@@ -9,7 +9,7 @@ import { mkdirSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { AdkProjectSchema } from "../contracts/adk";
 import { normalizeAdkProject } from "../lib/adk/normalize";
-import { synthesizeAdkFromBrief } from "../lib/adk/catalog";
+import { mergeAdkPreservingUserEdits, synthesizeAdkFromBrief } from "../lib/adk/catalog";
 import { agentTree, generateAdkProject, safeInstruction } from "../lib/adk/generate";
 import { EMPTY_BRIEF } from "../lib/intake/brief";
 import { enrichDiscoveryBriefHeuristics } from "../lib/intake/guided";
@@ -65,9 +65,10 @@ assert.ok(agentPy.includes("{invoice_summary?}") && agentPy.includes("{missing_k
 assert.ok(agentPy.indexOf("checker = LlmAgent(") < agentPy.indexOf("validator = LoopAgent("), "children defined before parents");
 assert.ok(agentPy.includes("before_model_callback=before_model_guardrail") && agentPy.includes("before_tool_callback=before_tool_guardrail"), "safety callbacks attached");
 assert.ok(agentPy.trimEnd().endsWith("root_agent = coordinator"));
-assert.match(
-  files.find((f) => f.path === "invoice_automation/requirements.txt")!.contents,
-  /^google-adk==2\.13\.0\ngoogle-cloud-aiplatform==1\.85\.0\npypdf>=4\n$/,
+const reqTxt = files.find((f) => f.path === "invoice_automation/requirements.txt")!.contents;
+assert.ok(
+  reqTxt.startsWith("google-adk==2.13.0\ngoogle-cloud-aiplatform==1.85.0\n") && reqTxt.includes("pypdf>=4"),
+  "requirements.txt pins google-adk==2.13.0 and includes tool dependencies",
 );
 assert.ok(files.some((f) => f.path === ".gitlab-ci.yml"), ".gitlab-ci.yml emitted");
 assert.ok(files.some((f) => f.path === "scripts/check_mandatory_files.py"), "check_mandatory_files.py emitted");
@@ -90,10 +91,50 @@ AdkProjectSchema.parse(liveSynthesized);
 assert.ok(liveSynthesized.tools.some((t) => t.connectorSystem === "SAP"), "SAP connector tool synthesized");
 assert.ok(liveSynthesized.tools.some((t) => t.connectorSystem === "ServiceNow"), "ServiceNow connector tool synthesized");
 assert.ok(liveSynthesized.envVars.some((e) => e.isSecret && e.name.includes("SAP")), "SAP Secret Manager binding synthesized");
+assert.ok(
+  !liveSynthesized.agents.some((a) => ["flow_coordinator", "execution_flow", "intake_classifier", "knowledge_analyst", "governance_reviewer"].includes(a.name)),
+  "no hardcoded boilerplate agent names in synthesized workflow",
+);
+assert.ok(
+  liveSynthesized.agents.some((a) => a.name.includes("validate_sap_pos") || a.name.includes("sap")),
+  "specialist agents dynamically named from user brief steps",
+);
 const synthFiles = generateAdkProject(liveSynthesized);
 const synthAgentPy = synthFiles.find((f) => f.path === `${liveSynthesized.packageName}/agent.py`)!.contents;
 assert.ok(synthAgentPy.includes("# Role:"), "CrewAI-style Persona Role emitted in agent.py");
 assert.ok(synthAgentPy.includes("kind=connector"), "Enterprise connector metadata emitted in agent.py");
+assert.ok(
+  liveSynthesized.packageName !== "workflow_workflow" &&
+    liveSynthesized.rootAgent !== "workflow_orchestrator" &&
+    !liveSynthesized.title.includes("Custom Workflow"),
+  "zero workflow_workflow or Custom Workflow boilerplate",
+);
+
+// Verify mergeAdkPreservingUserEdits preserves manual BlueprintStudio edits across turns
+const userEditedAdk = {
+  ...liveSynthesized,
+  agents: [
+    ...liveSynthesized.agents,
+    {
+      name: "custom_auditor_agent",
+      type: "llm" as const,
+      model: liveSynthesized.agents[0].model,
+      description: "User-added custom auditor in BlueprintStudio",
+      instruction: "Verify every variance against custom treasury rules.",
+      tools: [],
+      subAgents: [],
+    },
+  ],
+};
+const nextTurnSynthesized = synthesizeAdkFromBrief({
+  ...enrichedBrief,
+  constraints: ["Approvals over 5k require manager confirmation"],
+});
+const mergedAdk = mergeAdkPreservingUserEdits(userEditedAdk, nextTurnSynthesized, enrichedBrief);
+assert.ok(
+  mergedAdk.agents.some((a) => a.name === "custom_auditor_agent"),
+  "user-added custom agent in BlueprintStudio is preserved across follow-up turns",
+);
 console.log(agentTree(messy));
 
 const out = process.argv[2];
