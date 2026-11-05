@@ -20,6 +20,7 @@ import type {
   Turn,
 } from "@/contracts/intake";
 import type { AdkProject } from "@/contracts/adk";
+import { synthesizeAdkFromBrief } from "@/lib/adk/catalog";
 import { EMPTY_BRIEF, completeness } from "@/lib/intake/brief";
 import { clipMaterial, getIntakeStatus, requestAnalyze, requestFollowUp, requestPlan } from "@/lib/intake/client";
 import { extractText } from "@/lib/intake/extract-text";
@@ -58,6 +59,8 @@ export type IntakeSnapshot = {
   done: boolean;
   plan: Plan | null;
   planMode: Mode | null;
+  /** Interactive ADK flow draft edited before or independently of a full plan. */
+  draftAdk?: AdkProject | null;
   /** Draft keys / catalog ids the user kept ticked in the plan. */
   accepted: string[];
   applied: boolean;
@@ -74,6 +77,7 @@ const EMPTY: IntakeSnapshot = {
   done: false,
   plan: null,
   planMode: null,
+  draftAdk: null,
   accepted: [],
   applied: false,
 };
@@ -290,9 +294,13 @@ export function useIntake() {
         asked: [],
         transcript: transcriptOf(x.messages),
       });
-      const drafts = res.plan.customAgents.length + res.plan.customSkills.length;
+      const planWithAdk: Plan = {
+        ...res.plan,
+        adk: res.plan.adk ?? x.draftAdk ?? synthesizeAdkFromBrief(x.brief),
+      };
+      const drafts = planWithAdk.customAgents.length + planWithAdk.customSkills.length;
       return push(
-        { ...x, plan: res.plan, planMode: res.mode, accepted: defaultAccepted(res.plan), applied: false },
+        { ...x, plan: planWithAdk, planMode: res.mode, accepted: defaultAccepted(planWithAdk), applied: false },
         {
           id: newId(),
           role: "agent",
@@ -300,8 +308,8 @@ export function useIntake() {
           mode: res.mode,
           text:
             res.mode === "ai"
-              ? `Your solution blueprint is ready: ${res.plan.milestones.length} milestones, ${drafts} custom agent${drafts === 1 ? "" : "s"} and skills, and ${res.plan.skills.length} reusable skill matches.`
-              : "Here's a starter blueprint from the brief. Connect Gemini for milestones and custom agents and skills.",
+              ? `Your solution blueprint is ready: ${planWithAdk.milestones.length} milestones, ${drafts} custom agent${drafts === 1 ? "" : "s"} and skills, and ${planWithAdk.skills.length} reusable skill matches.`
+              : `Your Google ADK blueprint is ready with ${planWithAdk.adk?.agents.length ?? 0} agents and ${planWithAdk.adk?.tools.length ?? 0} tools synthesized from your brief.`,
         },
       );
     });
@@ -320,9 +328,36 @@ export function useIntake() {
     setState((s) => ({ ...s, accepted: s.accepted.includes(key) ? s.accepted.filter((k) => k !== key) : [...s.accepted, key] }));
   }
 
-  /** Edit the ADK agent system in place (from the Blueprint studio inspector). */
+  /** Edit the ADK agent system in place (works both during live Discovery and after Blueprint generation). */
   function updateAdk(change: (p: AdkProject) => AdkProject) {
-    setState((s) => (s.plan?.adk ? { ...s, plan: { ...s.plan, adk: change(s.plan.adk) } } : s));
+    setState((s) => {
+      if (s.plan?.adk) {
+        return { ...s, plan: { ...s.plan, adk: change(s.plan.adk) } };
+      }
+      const base = s.draftAdk ?? synthesizeAdkFromBrief(s.brief);
+      const updated = change(base);
+      return {
+        ...s,
+        draftAdk: updated,
+        plan: s.plan ? { ...s.plan, adk: updated } : null,
+      };
+    });
+  }
+
+  /** Re-synthesize the ADK flow from the current Discovery brief (merging detected systems & tools). */
+  function resyncAdkFromBrief() {
+    setState((s) => {
+      const fresh = synthesizeAdkFromBrief(s.brief);
+      if (s.plan) {
+        return { ...s, draftAdk: fresh, plan: { ...s.plan, adk: fresh } };
+      }
+      return { ...s, draftAdk: fresh };
+    });
+  }
+
+  /** Direct brief updater for interactive panels (e.g., Systems & Connections checklist). */
+  function updateBrief(change: (b: Brief) => Brief) {
+    setState((s) => ({ ...s, brief: change(s.brief) }));
   }
 
   function editDraft(kind: "agent" | "skill", name: string, body: string) {
@@ -336,6 +371,10 @@ export function useIntake() {
   }
 
   const score = completeness(state.brief);
+  const liveAdk = useMemo(
+    () => state.plan?.adk ?? state.draftAdk ?? synthesizeAdkFromBrief(state.brief),
+    [state.plan?.adk, state.draftAdk, state.brief],
+  );
   const openCard = useMemo(
     () => state.messages.findLast((m): m is QuestionsMessage => m.role === "agent" && m.kind === "questions" && !m.submitted) ?? null,
     [state.messages],
@@ -343,6 +382,7 @@ export function useIntake() {
 
   return {
     ...state,
+    liveAdk,
     busy,
     error,
     setError,
@@ -359,9 +399,11 @@ export function useIntake() {
     removeMaterial,
     buildPlan,
     editBriefField,
+    updateBrief,
     toggleAccepted,
     editDraft,
     updateAdk,
+    resyncAdkFromBrief,
     markApplied: () => setState((s) => ({ ...s, applied: true })),
     reset: () => {
       setState(EMPTY);

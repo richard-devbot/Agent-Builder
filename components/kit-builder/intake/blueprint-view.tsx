@@ -1,13 +1,33 @@
 "use client";
 
-/** Blueprint tab: the solution plan, the agent-team graph, drafts to review, and apply-to-kit. */
+/** Blueprint tab: the solution plan, the Google ADK flow & studio, drafts to review, and apply-to-kit. */
 
 import { useMemo, useState } from "react";
-import { ArrowRight, Bot, CheckCircle2, Download, Eye, Flag, Layers, Maximize2, Sparkles, Wand2 } from "lucide-react";
+import {
+  ArrowRight,
+  Bot,
+  CheckCircle2,
+  Download,
+  Eye,
+  Flag,
+  Layers,
+  Maximize2,
+  Plug,
+  PlugZap,
+  Sparkles,
+  Wand2,
+} from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Textarea } from "@/components/ui/textarea";
-import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
 import { cn } from "@/lib/utils";
 import { PROJECT_TYPES } from "@/lib/kit/project-types";
 import { techLabel } from "@/lib/kit/technologies";
@@ -15,7 +35,11 @@ import { SOURCE_LABEL, type CatalogSkill } from "@/lib/skill-catalog/domains";
 import { useCatalog } from "@/lib/skill-catalog/client";
 import { BlueprintGraph } from "./blueprint-graph";
 import { AdkFlow } from "./adk-flow";
-import { BlueprintStudio, downloadAdk } from "./blueprint-studio";
+import {
+  BlueprintStudio,
+  downloadAdk,
+  type BlueprintStudioPane,
+} from "./blueprint-studio";
 import type { KitBuilderState } from "../use-kit-builder-state";
 
 type Draft = { kind: "agent" | "skill"; name: string; title: string; body: string };
@@ -23,14 +47,22 @@ type Draft = { kind: "agent" | "skill"; name: string; title: string; body: strin
 export function BlueprintView({ s }: { s: KitBuilderState }) {
   const { intake } = s;
   const plan = intake.plan;
+  const adk = plan?.adk ?? intake.liveAdk;
   const { index } = useCatalog();
   const [draft, setDraft] = useState<Draft | null>(null);
   const [studio, setStudio] = useState(false);
+  const [studioPane, setStudioPane] = useState<BlueprintStudioPane>("graph");
+
+  const openStudioAt = (pane: BlueprintStudioPane) => {
+    setStudioPane(pane);
+    setStudio(true);
+  };
 
   // Resolve recommended ids to names: curated skills come from the kit, the rest from the catalog.
   const byId = useMemo(() => {
     const m = new Map<string, Pick<CatalogSkill, "title" | "source" | "copyable">>();
-    for (const k of s.skills) m.set(`curated:${k.slug}`, { title: k.name, source: "curated", copyable: true });
+    for (const k of s.skills)
+      m.set(`curated:${k.slug}`, { title: k.name, source: "curated", copyable: true });
     for (const k of index?.skills ?? []) m.set(k.id, k);
     return m;
   }, [s.skills, index]);
@@ -38,18 +70,71 @@ export function BlueprintView({ s }: { s: KitBuilderState }) {
 
   if (!plan) {
     return (
-      <div className="flex flex-col items-center gap-3 px-6 py-14 text-center">
-        <span className="flex size-12 items-center justify-center rounded-2xl bg-muted text-muted-foreground">
-          <Wand2 className="size-5" />
-        </span>
-        <p className="text-sm font-semibold">No blueprint yet</p>
-        <p className="max-w-xs text-xs text-muted-foreground">
-          Chat with the agent until the brief looks right, then build the blueprint. The architect designs the stack, milestones and a team of
-          custom agents and skills.
-        </p>
-        <Button size="sm" onClick={intake.buildPlan} disabled={!intake.hasContent || Boolean(intake.busy)}>
-          <Wand2 className="size-3.5" /> Build blueprint
-        </Button>
+      <div className="space-y-4 p-4">
+        <div className="rounded-xl border border-primary/25 bg-primary/[0.05] p-4">
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <div>
+              <p className="text-sm font-semibold">Live Google ADK Flow (Draft)</p>
+              <p className="text-xs text-muted-foreground">
+                You can open the visual ADK Studio now to customize agents, tools, MCP servers, and Secret Manager connections, or build the full solution blueprint.
+              </p>
+            </div>
+            <Button
+              size="sm"
+              onClick={intake.buildPlan}
+              disabled={!intake.hasContent || Boolean(intake.busy)}
+            >
+              <Wand2 className="size-3.5" /> Build full blueprint
+            </Button>
+          </div>
+        </div>
+
+        <section className="overflow-hidden rounded-xl border border-primary/30 bg-card/80">
+          <div className="flex items-center justify-between border-b border-border/60 bg-gradient-to-r from-primary/10 to-transparent p-3">
+            <div>
+              <p className="text-[13px] font-semibold">{adk.title}</p>
+              <p className="truncate font-mono text-[11px] text-muted-foreground">
+                {adk.packageName} · {adk.agents.length} agents · {adk.tools.length} tools ·{" "}
+                {adk.envVars.length} connections/env
+              </p>
+            </div>
+            <Button size="sm" onClick={() => openStudioAt("graph")}>
+              <Maximize2 className="size-3.5" /> Open ADK Studio
+            </Button>
+          </div>
+          <div
+            onClick={() => openStudioAt("graph")}
+            className="h-64 cursor-zoom-in bg-muted/10 transition-colors hover:bg-muted/30"
+          >
+            <AdkFlow project={adk} interactive={false} showTools={true} view="simple" />
+          </div>
+          <div className="flex flex-wrap gap-2 border-t border-border/60 p-3">
+            <Button size="sm" variant="outline" onClick={() => openStudioAt("tools")}>
+              <Plug className="size-3.5 text-info" /> Tools & Skills
+            </Button>
+            <Button size="sm" variant="outline" onClick={() => openStudioAt("connections")}>
+              <PlugZap className="size-3.5 text-warning" /> Connections & Env
+            </Button>
+            <Button
+              size="sm"
+              variant="outline"
+              className="ml-auto"
+              onClick={() => downloadAdk(adk)}
+            >
+              <Download className="size-3.5" /> Download ADK Zip
+            </Button>
+          </div>
+        </section>
+
+        <BlueprintStudio
+          key={studioPane}
+          project={adk}
+          brief={intake.brief}
+          open={studio}
+          onOpenChange={setStudio}
+          onChange={intake.updateAdk}
+          initialPane={studioPane}
+        />
       </div>
     );
   }
@@ -63,7 +148,14 @@ export function BlueprintView({ s }: { s: KitBuilderState }) {
   return (
     <div className="space-y-5 p-4">
       {/* Apply bar */}
-      <div className={cn("rounded-xl border p-3", intake.applied ? "border-success/30 bg-success/5" : "border-primary/30 bg-primary/[0.06]")}>
+      <div
+        className={cn(
+          "rounded-xl border p-3",
+          intake.applied
+            ? "border-success/30 bg-success/5"
+            : "border-primary/30 bg-primary/[0.06]",
+        )}
+      >
         {intake.applied ? (
           <div className="flex flex-wrap items-center justify-between gap-2">
             <p className="inline-flex items-center gap-1.5 text-xs text-success">
@@ -76,7 +168,8 @@ export function BlueprintView({ s }: { s: KitBuilderState }) {
         ) : (
           <div className="flex flex-wrap items-center justify-between gap-2">
             <p className="text-xs text-muted-foreground">
-              Sets project type and technologies, adds {intake.accepted.length} ticked item{intake.accepted.length === 1 ? "" : "s"} and the brief.
+              Sets project type and technologies, adds {intake.accepted.length} ticked item
+              {intake.accepted.length === 1 ? "" : "s"} and the brief.
             </p>
             <Button size="sm" onClick={s.applyIntakePlan}>
               <CheckCircle2 className="size-3.5" /> Apply to kit
@@ -88,41 +181,73 @@ export function BlueprintView({ s }: { s: KitBuilderState }) {
       <div>
         <p className="text-sm leading-relaxed">{plan.summary}</p>
         <div className="mt-2.5 flex flex-wrap gap-1.5">
-          {type && <span className="rounded-md bg-primary px-2 py-0.5 text-[11px] font-semibold text-primary-foreground">{type.label}</span>}
+          {type && (
+            <span className="rounded-md bg-primary px-2 py-0.5 text-[11px] font-semibold text-primary-foreground">
+              {type.label}
+            </span>
+          )}
           {plan.technologies.map((t) => (
-            <span key={t} className="rounded-md border bg-background/70 px-2 py-0.5 text-[11px] font-medium">
+            <span
+              key={t}
+              className="rounded-md border bg-background/70 px-2 py-0.5 text-[11px] font-medium"
+            >
               {techLabel(t)}
             </span>
           ))}
-          <span className="rounded-md bg-muted px-2 py-0.5 text-[11px] text-muted-foreground">{intake.planMode === "ai" ? "AI blueprint" : "Guided blueprint"}</span>
+          <span className="rounded-md bg-muted px-2 py-0.5 text-[11px] text-muted-foreground">
+            {intake.planMode === "ai" ? "AI blueprint" : "Guided blueprint"}
+          </span>
         </div>
       </div>
 
-      {plan.adk ? (
+      {adk ? (
         <section className="overflow-hidden rounded-xl border border-primary/30 bg-card/80">
           <div className="flex items-start gap-2.5 border-b border-border/60 bg-gradient-to-r from-primary/10 to-transparent p-3">
-            <Checkbox checked={intake.accepted.includes("adk")} onCheckedChange={() => intake.toggleAccepted("adk")} aria-label="Include the ADK agent system in the kit" className="mt-0.5" />
+            <Checkbox
+              checked={intake.accepted.includes("adk")}
+              onCheckedChange={() => intake.toggleAccepted("adk")}
+              aria-label="Include the ADK agent system in the kit"
+              className="mt-0.5"
+            />
             <div className="min-w-0 flex-1">
               <p className="text-[13px] font-semibold">Google ADK agent system</p>
               <p className="truncate font-mono text-[11px] text-muted-foreground">
-                {plan.adk.packageName} · {plan.adk.agents.length} agents · {plan.adk.tools.length} tools
-                {plan.adk.warnings.length ? ` · ${plan.adk.warnings.length} notes` : ""}
+                {adk.packageName} · {adk.agents.length} agents · {adk.tools.length} tools ·{" "}
+                {adk.envVars.length} connections/env
+                {adk.warnings.length ? ` · ${adk.warnings.length} notes` : ""}
               </p>
             </div>
           </div>
           {/* Mouse shortcut into the studio; keyboard users have the "Open studio" button. */}
-          <div onClick={() => setStudio(true)} className="h-64 cursor-zoom-in bg-muted/10 transition-colors hover:bg-muted/30">
-            <AdkFlow project={plan.adk} interactive={false} showTools={false} view="simple" />
+          <div
+            onClick={() => openStudioAt("graph")}
+            className="h-64 cursor-zoom-in bg-muted/10 transition-colors hover:bg-muted/30"
+          >
+            <AdkFlow project={adk} interactive={false} showTools={true} view="simple" />
           </div>
           <div className="flex flex-wrap gap-2 border-t border-border/60 p-3">
-            <Button size="sm" onClick={() => setStudio(true)}>
+            <Button size="sm" onClick={() => openStudioAt("graph")}>
               <Maximize2 className="size-3.5" /> Open studio
             </Button>
-            <Button size="sm" variant="outline" onClick={() => downloadAdk(plan.adk!)}>
+            <Button size="sm" variant="outline" onClick={() => openStudioAt("tools")}>
+              <Plug className="size-3.5 text-info" /> Tools & Skills
+            </Button>
+            <Button size="sm" variant="outline" onClick={() => openStudioAt("connections")}>
+              <PlugZap className="size-3.5 text-warning" /> Connections & Env
+            </Button>
+            <Button size="sm" variant="outline" onClick={() => downloadAdk(adk)}>
               <Download className="size-3.5" /> Download
             </Button>
           </div>
-          <BlueprintStudio project={plan.adk} open={studio} onOpenChange={setStudio} onChange={intake.updateAdk} />
+          <BlueprintStudio
+            key={studioPane}
+            project={adk}
+            brief={intake.brief}
+            open={studio}
+            onOpenChange={setStudio}
+            onChange={intake.updateAdk}
+            initialPane={studioPane}
+          />
         </section>
       ) : (
         <section>
@@ -136,7 +261,11 @@ export function BlueprintView({ s }: { s: KitBuilderState }) {
           <Title icon={Flag} title="Milestones" />
           <ol className="relative space-y-2 border-l border-primary/25 pl-4">
             {plan.milestones.map((m, i) => (
-              <li key={m.title} style={{ "--i": i } as React.CSSProperties} className="stagger relative animate-fade-up">
+              <li
+                key={m.title}
+                style={{ "--i": i } as React.CSSProperties}
+                className="stagger relative animate-fade-up"
+              >
                 <span className="absolute top-1 -left-[1.4rem] flex size-4 items-center justify-center rounded-full bg-primary font-mono text-[9px] font-bold text-primary-foreground">
                   {i + 1}
                 </span>
@@ -150,23 +279,60 @@ export function BlueprintView({ s }: { s: KitBuilderState }) {
 
       {drafts.length > 0 && (
         <section>
-          <Title icon={Sparkles} title="Coding-assistant drafts" hint="Agents and skills for the kit. Open one to edit." />
+          <Title
+            icon={Sparkles}
+            title="Coding-assistant drafts"
+            hint="Agents and skills for the kit. Open one to edit."
+          />
           <div className="space-y-2">
             {drafts.map((d) => {
               const key = `${d.kind}:${d.name}`;
               const checked = intake.accepted.includes(key);
               const Icon = d.kind === "agent" ? Bot : Sparkles;
               return (
-                <div key={key} className={cn("flex items-start gap-2.5 rounded-lg border p-2.5 transition-colors", checked ? "border-primary/40 bg-primary/[0.05]" : "bg-background/50")}>
-                  <Checkbox checked={checked} onCheckedChange={() => intake.toggleAccepted(key)} aria-label={`Include ${d.title}`} className="mt-0.5" />
-                  <Icon className={cn("mt-0.5 size-4 shrink-0", d.kind === "agent" ? "text-brand-2" : "text-primary")} />
+                <div
+                  key={key}
+                  className={cn(
+                    "flex items-start gap-2.5 rounded-lg border p-2.5 transition-colors",
+                    checked ? "border-primary/40 bg-primary/[0.05]" : "bg-background/50",
+                  )}
+                >
+                  <Checkbox
+                    checked={checked}
+                    onCheckedChange={() => intake.toggleAccepted(key)}
+                    aria-label={`Include ${d.title}`}
+                    className="mt-0.5"
+                  />
+                  <Icon
+                    className={cn(
+                      "mt-0.5 size-4 shrink-0",
+                      d.kind === "agent" ? "text-brand-2" : "text-primary",
+                    )}
+                  />
                   <div className="min-w-0 flex-1">
                     <p className="text-[13px] font-semibold leading-snug">
-                      {d.title} <span className="ml-1 text-[9.5px] font-medium uppercase tracking-wider text-muted-foreground">{d.kind}</span>
+                      {d.title}{" "}
+                      <span className="ml-1 text-[9.5px] font-medium uppercase tracking-wider text-muted-foreground">
+                        {d.kind}
+                      </span>
                     </p>
-                    <p className="line-clamp-2 text-xs text-muted-foreground">{d.description}</p>
+                    <p className="line-clamp-2 text-xs text-muted-foreground">
+                      {d.description}
+                    </p>
                   </div>
-                  <Button variant="ghost" size="sm" onClick={() => setDraft({ kind: d.kind, name: d.name, title: d.title, body: d.body })} aria-label={`Open ${d.title}`}>
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    onClick={() =>
+                      setDraft({
+                        kind: d.kind,
+                        name: d.name,
+                        title: d.title,
+                        body: d.body,
+                      })
+                    }
+                    aria-label={`Open ${d.title}`}
+                  >
                     <Eye className="size-3.5" />
                   </Button>
                 </div>
@@ -178,11 +344,17 @@ export function BlueprintView({ s }: { s: KitBuilderState }) {
 
       {plan.skills.length > 0 && (
         <section>
-          <Title icon={Layers} title="Reusable catalog skills" hint="First match per need is ticked." />
+          <Title
+            icon={Layers}
+            title="Reusable catalog skills"
+            hint="First match per need is ticked."
+          />
           <div className="space-y-3">
             {plan.skills.map((rec) => (
               <div key={rec.need}>
-                <p className="mb-1 text-[11px] font-medium text-muted-foreground">{rec.need}</p>
+                <p className="mb-1 text-[11px] font-medium text-muted-foreground">
+                  {rec.need}
+                </p>
                 <div className="space-y-1.5">
                   {rec.skillIds.map((id) => {
                     const k = byId.get(id);
@@ -190,10 +362,20 @@ export function BlueprintView({ s }: { s: KitBuilderState }) {
                     return (
                       <label
                         key={id}
-                        className={cn("flex cursor-pointer items-center gap-2.5 rounded-lg border px-2.5 py-2 transition-colors", checked ? "border-primary/40 bg-primary/[0.05]" : "bg-background/50 hover:border-primary/30")}
+                        className={cn(
+                          "flex cursor-pointer items-center gap-2.5 rounded-lg border px-2.5 py-2 transition-colors",
+                          checked
+                            ? "border-primary/40 bg-primary/[0.05]"
+                            : "bg-background/50 hover:border-primary/30",
+                        )}
                       >
-                        <Checkbox checked={checked} onCheckedChange={() => intake.toggleAccepted(id)} />
-                        <span className="min-w-0 flex-1 truncate text-[13px]">{k?.title ?? id.split(":").pop()}</span>
+                        <Checkbox
+                          checked={checked}
+                          onCheckedChange={() => intake.toggleAccepted(id)}
+                        />
+                        <span className="min-w-0 flex-1 truncate text-[13px]">
+                          {k?.title ?? id.split(":").pop()}
+                        </span>
                         <span className="shrink-0 text-[10.5px] text-muted-foreground">
                           {k ? SOURCE_LABEL[k.source] : "Catalog"}
                           {k && !k.copyable ? " · install" : ""}
@@ -242,7 +424,15 @@ export function BlueprintView({ s }: { s: KitBuilderState }) {
   );
 }
 
-function Title({ icon: Icon, title, hint }: { icon: typeof Flag; title: string; hint?: string }) {
+function Title({
+  icon: Icon,
+  title,
+  hint,
+}: {
+  icon: typeof Flag;
+  title: string;
+  hint?: string;
+}) {
   return (
     <div className="mb-2 flex flex-wrap items-baseline gap-x-2">
       <span className="inline-flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">

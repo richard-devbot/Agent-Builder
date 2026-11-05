@@ -626,8 +626,13 @@ export function useKitBuilderState({
     }
     out.push(...catalogFiles([...catalogSel.values()], catalogFetch, provider));
     // The runnable ADK agent system designed in Discovery, under its own folder.
-    if (intake.applied && intake.plan?.adk && intake.accepted.includes("adk")) {
-      for (const f of generateAdkProject(intake.plan.adk)) out.push({ path: `adk-agent/${f.path}`, contents: f.contents });
+    const adkToEmit =
+      intake.applied && intake.plan?.adk && intake.accepted.includes("adk")
+        ? intake.plan.adk
+        : intake.draftAdk ?? null;
+    if (adkToEmit) {
+      for (const f of generateAdkProject(adkToEmit, { deployTarget: deploymentSetup.deployTarget }))
+        out.push({ path: `adk-agent/${f.path}`, contents: f.contents });
     }
     if (intake.hasContent) {
       out.push({
@@ -639,7 +644,7 @@ export function useKitBuilderState({
       const custom = fileEdits.get(f.path);
       return custom !== undefined ? { ...f, contents: custom } : f;
     });
-  }, [selection, provider, discovery, fileEdits, catalogSel, catalogFetch, intake.hasContent, intake.brief, intake.role, intake.materials, intake.answers, intake.plan, intake.applied, intake.accepted]);
+  }, [selection, provider, discovery, fileEdits, catalogSel, catalogFetch, intake.hasContent, intake.brief, intake.role, intake.materials, intake.answers, intake.plan, intake.draftAdk, intake.applied, intake.accepted, deploymentSetup.deployTarget]);
 
   function download() {
     const blob = createZip(files);

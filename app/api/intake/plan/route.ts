@@ -12,7 +12,10 @@ export async function POST(req: Request) {
   const body = await readBody(req, PlanRequestSchema);
   if (body instanceof Response) return body;
   if (!intakeStatus().configured) {
-    const res: PlanResponse = { plan: guidedPlan(techFromBrief(body.brief), await matchSkills(guidedNeeds(body.brief))), mode: "guided" };
+    const res: PlanResponse = {
+      plan: guidedPlan(techFromBrief(body.brief), await matchSkills(guidedNeeds(body.brief)), body.brief),
+      mode: "guided",
+    };
     return json(res);
   }
   try {

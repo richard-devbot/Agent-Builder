@@ -54,7 +54,7 @@ export function StepDiscovery({ s }: { s: KitBuilderState }) {
         </div>
       )}
 
-      <div className="grid grid-cols-1 gap-4 @5xl:grid-cols-[minmax(0,1fr)_24rem] @[90rem]:grid-cols-[minmax(0,1fr)_30rem]">
+      <div className="grid grid-cols-1 gap-4 @5xl:grid-cols-[minmax(0,1fr)_28rem] @[90rem]:grid-cols-[minmax(0,1fr)_36rem]">
         <ChatPanel intake={intake} onOpenBlueprint={() => setTab("blueprint")} />
         <WorkspacePanel s={s} tab={tab} onTab={setTab} />
       </div>

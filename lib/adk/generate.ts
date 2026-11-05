@@ -111,14 +111,34 @@ function agentPy(p: AdkProject): string {
     "    return None",
   );
 
-  const functions = p.tools.filter((t) => t.kind === "function");
-  if (functions.length) {
+  const customTools = p.tools.filter((t) => t.kind !== "builtin");
+  if (customTools.length) {
     lines.push(
       "",
       "",
-      "# ── Tools ─────────────────────────────────────────────────────────────────",
+      "# ── Tools & Enterprise Connectors ─────────────────────────────────────────",
     );
-    for (const t of functions) lines.push("", "", (t.code ?? "").trim());
+    for (const t of customTools) {
+      const meta: string[] = [];
+      if (t.kind && t.kind !== "function") meta.push(`kind=${t.kind}`);
+      if (t.connectorSystem) meta.push(`system=${t.connectorSystem}`);
+      if (t.authType && t.authType !== "none") meta.push(`auth=${t.authType}`);
+      if (t.requireConfirmation) meta.push("human_confirmation=required");
+      if (t.envVars?.length) meta.push(`env=[${t.envVars.join(", ")}]`);
+      lines.push("");
+      if (meta.length) lines.push(`# Tool(${t.name}): ${meta.join(" | ")}`);
+      lines.push((t.code ?? "").trim());
+    }
+  }
+
+  if (p.trigger && p.trigger.kind !== "chat_a2a") {
+    lines.push(
+      "",
+      "",
+      `# ── Event Trigger (${p.trigger.kind}) ───────────────────────────────────────`,
+      `# Source: ${p.trigger.eventTopic || p.trigger.scheduleCron || "configured in deployment pipeline"}`,
+      ...(p.trigger.inputSchemaSummary ? [`# ${p.trigger.inputSchemaSummary}`] : []),
+    );
   }
 
   lines.push(
@@ -127,6 +147,17 @@ function agentPy(p: AdkProject): string {
     "# ── Agents ────────────────────────────────────────────────────────────────",
   );
   for (const a of definitionOrder(p)) {
+    const agentMeta: string[] = [];
+    if (a.role) agentMeta.push(`# Role: ${a.role}`);
+    if (a.goal) agentMeta.push(`# Goal: ${a.goal}`);
+    if (a.backstory) agentMeta.push(`# Backstory: ${a.backstory}`);
+    if (a.expectedOutput) agentMeta.push(`# Expected Output: ${a.expectedOutput}`);
+    if (a.routeCondition) agentMeta.push(`# Route Condition: ${a.routeCondition}`);
+    if (a.requireConfirmation)
+      agentMeta.push("# Governance Gate: Human-in-the-loop confirmation required before external write");
+    if (a.skills?.length)
+      agentMeta.push(`# Attached Skills (SKILL.md): ${a.skills.join(", ")}`);
+
     const args: string[] = [`name=${JSON.stringify(a.name)}`];
     if (a.type === "llm") args.push(`model=${JSON.stringify(a.model)}`);
     args.push(`description=${JSON.stringify(a.description)}`);
@@ -143,6 +174,7 @@ function agentPy(p: AdkProject): string {
     }
     lines.push(
       "",
+      ...agentMeta,
       `${a.name} = ${CLASS[a.type]}(`,
       ...args.map((x) => `    ${x},`),
       ")",
@@ -237,6 +269,87 @@ Deployments run automatically inside GitLab CI on protected release tags using W
 `;
 }
 
+function evalConfigYaml(p: AdkProject): string {
+  return `# agents-cli evaluation configuration for ${p.title}
+# Run locally or in CI: agents-cli eval run --config tests/eval/eval_config.yaml
+agent:
+  package: ${p.packageName}
+  root_agent: ${p.rootAgent}
+dataset: tests/eval/datasets/eval_dataset.json
+metrics:
+  - name: TOOL_USE_QUALITY
+    threshold: 0.85
+  - name: FINAL_RESPONSE_QUALITY
+    threshold: 0.80
+  - name: HALLUCINATION
+    threshold: 0.90
+  - name: SAFETY
+    threshold: 0.95
+`;
+}
+
+function evalDatasetJson(p: AdkProject): string {
+  const cases =
+    p.evalCases && p.evalCases.length > 0
+      ? p.evalCases
+      : [
+          {
+            id: "eval-smoke-1",
+            prompt: `Run the primary workflow for ${p.title} and summarize the result.`,
+            expectedTools: p.tools.slice(0, 2).map((t) => t.name),
+            expectedOutcome: `Completes the ${p.title} workflow safely and returns a structured summary.`,
+          },
+        ];
+  const payload = {
+    name: `${p.packageName}_eval_suite`,
+    description: `Evaluation dataset for ${p.title}`,
+    cases: cases.map((c) => ({
+      id: c.id,
+      conversation: [
+        {
+          user_content: c.prompt,
+          expected_tool_use: c.expectedTools.map((tool_name) => ({ tool_name })),
+          reference_response: c.expectedOutcome,
+        },
+      ],
+    })),
+  };
+  return `${JSON.stringify(payload, null, 2)}\n`;
+}
+
+function agentsCliManifestYaml(
+  p: AdkProject,
+  deployTarget: "agent_engine" | "cloud_run" | "gemini_enterprise" = "agent_engine",
+): string {
+  const secrets = p.envVars.filter((e) => e.isSecret || /SECRET|TOKEN|PASSWORD|KEY/i.test(e.name));
+  const envOnly = p.envVars.filter((e) => !secrets.includes(e));
+  const secretFlags = secrets
+    .map((s) => `  - "${s.name}=${s.secretRef || s.name}:latest"`)
+    .join("\n");
+  const envFlags = envOnly
+    .map((e) => `  - "${e.name}=${e.example || `<set-${e.name.toLowerCase()}>`}"`)
+    .join("\n");
+
+  return `# Google Cloud & agents-cli deployment manifest (governed Vertex AI)
+name: ${p.packageName}
+display_name: ${JSON.stringify(p.title)}
+description: ${JSON.stringify(p.description || p.title)}
+framework: google-adk
+entrypoint: ${p.packageName}.agent:root_agent
+target: ${deployTarget === "cloud_run" ? "cloud-run" : "agent-runtime"}
+trigger:
+  kind: ${p.trigger?.kind ?? "chat_a2a"}
+  event_topic: ${JSON.stringify(p.trigger?.eventTopic ?? "")}
+  schedule_cron: ${JSON.stringify(p.trigger?.scheduleCron ?? "")}
+auth_and_security:
+  workload_identity_federation: true
+  agent_identity: true
+  guardrail_callbacks:
+    - before_model_guardrail
+    - before_tool_guardrail
+${secrets.length ? `secrets:\n${secretFlags}\n` : "secrets: []\n"}${envOnly.length ? `env_vars:\n${envFlags}\n` : "env_vars: []\n"}`;
+}
+
 export function generateAdkProject(
   p: AdkProject,
   options?: {
@@ -246,18 +359,22 @@ export function generateAdkProject(
   const pkg = p.packageName;
   const reqs = requirementsTxt(p);
   const envEx = envExample(p);
+  const target = options?.deployTarget ?? "agent_engine";
   const repoTemplates = buildGovernedRepoTemplateFiles({
     agentFolder: pkg,
-    deployTarget: options?.deployTarget ?? "agent_engine",
+    deployTarget: target,
     provider: "google-adk",
   });
   return [
     { path: "README.md", contents: readme(p) },
     { path: "requirements.txt", contents: reqs },
+    { path: "agents-cli-manifest.yaml", contents: agentsCliManifestYaml(p, target) },
     ...repoTemplates,
     { path: `${pkg}/__init__.py`, contents: "from . import agent\nfrom .agent import root_agent\n\n__all__ = ['agent', 'root_agent']\n" },
     { path: `${pkg}/agent.py`, contents: agentPy(p) },
     { path: `${pkg}/requirements.txt`, contents: reqs },
     { path: `${pkg}/.env.example`, contents: envEx },
+    { path: "tests/eval/eval_config.yaml", contents: evalConfigYaml(p) },
+    { path: "tests/eval/datasets/eval_dataset.json", contents: evalDatasetJson(p) },
   ];
 }

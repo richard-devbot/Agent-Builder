@@ -24,6 +24,7 @@ import type {
   RiskTier,
 } from "@/contracts/intake";
 import { TECHNOLOGIES } from "@/lib/kit/technologies";
+import { synthesizeAdkFromBrief } from "@/lib/adk/catalog";
 import { completeness, mergeAnswers, missingFields } from "./brief";
 
 type Variant = {
@@ -682,20 +683,36 @@ export function guidedAnalyze(req: AnalyzeRequest): AnalyzeResponse {
   };
 }
 
-/** Guided plan: no drafting without a model, only what can be derived deterministically. */
+/** Guided plan: deterministic blueprint + synthesized Google ADK multi-agent system from the brief. */
 export function guidedPlan(
   technologies: string[],
   skills: Plan["skills"],
+  brief?: Brief,
 ): Plan {
   return {
     summary:
-      "Generated without AI: technologies were matched from the brief and skills recommended by keyword. Connect Gemini to get a milestone plan, a runnable Google ADK agent system and draft custom agents and skills.",
-    projectType: "none",
+      "Generated deterministically from your Discovery brief: matched technologies, recommended skills, and a runnable Google ADK multi-agent flow wired to your detected enterprise systems. Connect Gemini to further tailor milestones and custom instructions.",
+    projectType: "greenfield",
     technologies,
-    milestones: [],
+    milestones: brief
+      ? [
+          {
+            title: "Phase 1 — Discovery & Governed Sandbox",
+            detail: `Validate the ${brief.title || "ADK workflow"} flow locally with adk web and synthetic data.`,
+          },
+          {
+            title: "Phase 2 — Enterprise Connections & Eval Gate",
+            detail: "Bind Secret Manager credentials, run agents-cli eval, and verify before_tool_guardrail callbacks.",
+          },
+          {
+            title: "Phase 3 — Governed Vertex AI Deployment",
+            detail: "Promote via GitLab CI + Workload Identity Federation to Vertex AI Agent Engine or Cloud Run.",
+          },
+        ]
+      : [],
     skills,
     customAgents: [],
     customSkills: [],
-    adk: null,
+    adk: brief ? synthesizeAdkFromBrief(brief) : null,
   };
 }
