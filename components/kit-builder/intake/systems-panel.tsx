@@ -1,13 +1,13 @@
 "use client";
 
 /**
- * Phase F — "Systems & Connections" panel.
- * Displays each detected or specified system as a card with a plain-language
- * checklist of values to obtain, who provides them, how to request access, and
- * where credentials will be stored (Google Secret Manager or GitLab Protected
- * CI variables). Secret values are NEVER entered in the platform.
+ * Phase F — "Systems & Connections" panel, enhanced with interactive
+ * enterprise system quick-add, Read vs. Read/Write toggles, and 1-click
+ * launch into the ADK Connections & Secret Manager Hub.
+ * Secret values are NEVER entered in the platform.
  */
 
+import { useState } from "react";
 import {
   AlertTriangle,
   CheckCircle2,
@@ -15,38 +15,139 @@ import {
   HelpCircle,
   KeyRound,
   Lock,
+  PlugZap,
+  Plus,
   Server,
   ShieldAlert,
   Users,
 } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
 import { CopyButton } from "@/components/copy-button";
 import { cn } from "@/lib/utils";
+import { enrichDiscoveryBriefHeuristics } from "@/lib/intake/guided";
+import { BlueprintStudio } from "./blueprint-studio";
 import type { IntakeState } from "./use-intake";
+
+const QUICK_SYSTEMS = [
+  "SAP",
+  "ServiceNow",
+  "Salesforce",
+  "SharePoint",
+  "Jira",
+  "BigQuery",
+  "Workday",
+] as const;
 
 export function SystemsConnectionsPanel({ intake }: { intake: IntakeState }) {
   const { brief } = intake;
   const systems = brief.systems ?? [];
   const accessRequests = brief.accessRequests ?? [];
   const nextSteps = brief.nextSteps ?? [];
+  const [studioOpen, setStudioOpen] = useState(false);
+
+  const quickAddSystem = (sysName: string) => {
+    intake.updateBrief((b) => {
+      const nextIntegrations = b.integrations.includes(sysName)
+        ? b.integrations
+        : [...b.integrations, sysName];
+      return enrichDiscoveryBriefHeuristics({
+        ...b,
+        integrations: nextIntegrations,
+      });
+    });
+  };
+
+  const toggleAccessMode = (sysName: string) => {
+    intake.updateBrief((b) => {
+      const nextSystems = (b.systems ?? []).map((s) =>
+        s.name === sysName
+          ? { ...s, access: (s.access === "write" ? "read" : "write") as "read" | "write" }
+          : s,
+      );
+      const anyWrite = nextSystems.some((s) => s.access === "write");
+      return {
+        ...b,
+        systems: nextSystems,
+        riskTier: anyWrite ? "medium" : b.riskTier,
+      };
+    });
+  };
+
+  const toggleStatus = (sysName: string) => {
+    intake.updateBrief((b) => ({
+      ...b,
+      systems: (b.systems ?? []).map((s) =>
+        s.name === sysName
+          ? {
+              ...s,
+              status: s.status === "known" ? "needs_request" : "known",
+            }
+          : s,
+      ),
+    }));
+  };
 
   return (
     <div aria-label="Systems and Connections" className="min-w-0 space-y-4 p-4">
       <div className="rounded-xl border border-primary/25 bg-primary/5 p-3.5">
-        <div className="flex items-start gap-2.5">
-          <Lock className="mt-0.5 size-4 shrink-0 text-primary" />
-          <div className="space-y-1 text-xs">
-            <p className="font-semibold text-foreground">
-              Systems &amp; Connections Checklist (No Secrets in Platform)
-            </p>
-            <p className="leading-relaxed text-muted-foreground">
-              Secret values (API keys, client secrets, passwords, service account keys) are{" "}
-              <strong className="text-foreground">never entered in Agent Builder, chat, or code</strong>.
-              Request them from the system owning team so they are stored directly in{" "}
-              <strong className="text-foreground">Google Secret Manager</strong> or as a{" "}
-              <strong className="text-foreground">GitLab Protected CI variable</strong>.
-            </p>
+        <div className="flex flex-wrap items-start justify-between gap-2.5">
+          <div className="flex items-start gap-2.5">
+            <Lock className="mt-0.5 size-4 shrink-0 text-primary" />
+            <div className="space-y-1 text-xs">
+              <p className="font-semibold text-foreground">
+                Systems &amp; Connections Checklist (No Secrets in Platform)
+              </p>
+              <p className="leading-relaxed text-muted-foreground">
+                Secret values (API keys, client secrets, passwords, service account keys) are{" "}
+                <strong className="text-foreground">
+                  never entered in Agent Builder, chat, or code
+                </strong>
+                . Request them from the system owning team so they are stored directly in{" "}
+                <strong className="text-foreground">Google Secret Manager</strong> or as a{" "}
+                <strong className="text-foreground">GitLab Protected CI variable</strong>.
+              </p>
+            </div>
           </div>
+          <Button
+            size="sm"
+            variant="outline"
+            className="h-7 text-xs"
+            onClick={() => setStudioOpen(true)}
+          >
+            <PlugZap className="size-3.5 text-warning" /> Open ADK Connections &amp; Env Hub (
+            {intake.liveAdk.envVars.length})
+          </Button>
+        </div>
+      </div>
+
+      {/* Quick-add Enterprise System Bar */}
+      <div className="rounded-xl border bg-card/70 p-3">
+        <p className="mb-2 text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
+          Quick-Add Enterprise Integration &amp; ADK Connector
+        </p>
+        <div className="flex flex-wrap gap-1.5">
+          {QUICK_SYSTEMS.map((name) => {
+            const active = systems.some(
+              (s) => s.name.toLowerCase() === name.toLowerCase(),
+            );
+            return (
+              <button
+                key={name}
+                type="button"
+                onClick={() => quickAddSystem(name)}
+                className={cn(
+                  "inline-flex items-center gap-1 rounded-full border px-2.5 py-1 text-xs font-medium transition-colors",
+                  active
+                    ? "border-primary/50 bg-primary/12 text-primary"
+                    : "border-border bg-background/60 text-muted-foreground hover:border-primary/40 hover:text-foreground",
+                )}
+              >
+                {active ? <CheckCircle2 className="size-3" /> : <Plus className="size-3" />}
+                {name}
+              </button>
+            );
+          })}
         </div>
       </div>
 
@@ -80,7 +181,10 @@ export function SystemsConnectionsPanel({ intake }: { intake: IntakeState }) {
               {brief.riskTier || "low"}
             </Badge>
             {brief.riskReason && (
-              <span className="line-clamp-1 text-[11px] text-muted-foreground" title={brief.riskReason}>
+              <span
+                className="line-clamp-1 text-[11px] text-muted-foreground"
+                title={brief.riskReason}
+              >
                 {brief.riskReason}
               </span>
             )}
@@ -93,9 +197,7 @@ export function SystemsConnectionsPanel({ intake }: { intake: IntakeState }) {
           <Server className="mx-auto size-7 text-muted-foreground/60" />
           <p className="mt-2 text-xs font-semibold">No systems identified yet</p>
           <p className="mt-1 text-xs text-muted-foreground">
-            Mention the tools or data sources your team uses in the Discovery chat (for example
-            SharePoint, ServiceNow, Salesforce, Workday, SAP, Jira, Confluence, or BigQuery) to
-            generate your connection checklist.
+            Click any enterprise system pill above or mention the tools your team uses in Discovery chat to generate your connection checklist and ADK connector tools.
           </p>
         </div>
       ) : (
@@ -109,19 +211,28 @@ export function SystemsConnectionsPanel({ intake }: { intake: IntakeState }) {
                 <div>
                   <div className="flex items-center gap-2">
                     <h4 className="text-sm font-semibold">{sys.name}</h4>
-                    <Badge
-                      variant={sys.access === "write" ? "secondary" : "outline"}
-                      className="text-[10px] uppercase"
+                    <button
+                      type="button"
+                      onClick={() => toggleAccessMode(sys.name)}
+                      title="Click to toggle Read-Only vs Read/Write mode"
                     >
-                      {sys.access === "write" ? "Read / Write" : "Read-Only"}
-                    </Badge>
+                      <Badge
+                        variant={sys.access === "write" ? "secondary" : "outline"}
+                        className="cursor-pointer text-[10px] uppercase"
+                      >
+                        {sys.access === "write" ? "Read / Write" : "Read-Only"}
+                      </Badge>
+                    </button>
                   </div>
                   <p className="mt-0.5 text-xs text-muted-foreground">{sys.purpose}</p>
                 </div>
 
-                <span
+                <button
+                  type="button"
+                  onClick={() => toggleStatus(sys.name)}
+                  title="Click to toggle connection readiness status"
                   className={cn(
-                    "inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[11px] font-medium",
+                    "inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[11px] font-medium transition-colors",
                     sys.status === "known"
                       ? "bg-emerald-500/10 text-emerald-600 dark:text-emerald-400"
                       : sys.status === "needs_request"
@@ -141,7 +252,7 @@ export function SystemsConnectionsPanel({ intake }: { intake: IntakeState }) {
                     : sys.status === "needs_request"
                       ? "Needs Access Request"
                       : "Unknown"}
-                </span>
+                </button>
               </div>
 
               <dl className="mt-3 grid grid-cols-1 gap-1.5 border-t border-border/60 pt-2.5 text-xs sm:grid-cols-2">
@@ -256,6 +367,15 @@ export function SystemsConnectionsPanel({ intake }: { intake: IntakeState }) {
           </ol>
         </div>
       )}
+
+      <BlueprintStudio
+        project={intake.liveAdk}
+        brief={intake.brief}
+        open={studioOpen}
+        onOpenChange={setStudioOpen}
+        onChange={intake.updateAdk}
+        initialPane="connections"
+      />
     </div>
   );
 }

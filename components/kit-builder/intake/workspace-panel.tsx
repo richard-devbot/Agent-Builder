@@ -29,19 +29,24 @@ export function WorkspacePanel({
     icon: typeof Network;
     badge?: string;
   }[] = [
-    { id: "pipeline", label: "Agent team", icon: Network },
+    {
+      id: "pipeline",
+      label: "ADK Flow & Team",
+      icon: Network,
+      badge: String(intake.liveAdk.agents.length),
+    },
     { id: "brief", label: "Brief", icon: ClipboardList, badge: `${intake.score}%` },
     {
       id: "systems",
       label: "Systems & Connections",
       icon: PlugZap,
-      badge: systemsCount > 0 ? String(systemsCount) : undefined,
+      badge: systemsCount > 0 ? String(systemsCount) : String(intake.liveAdk.envVars.length || ""),
     },
     {
       id: "blueprint",
       label: "Blueprint",
       icon: Wand2,
-      badge: intake.plan ? "ready" : undefined,
+      badge: intake.plan ? "ready" : "live",
     },
   ];
   return (

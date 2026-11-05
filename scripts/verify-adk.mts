@@ -9,7 +9,10 @@ import { mkdirSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { AdkProjectSchema } from "../contracts/adk";
 import { normalizeAdkProject } from "../lib/adk/normalize";
+import { synthesizeAdkFromBrief } from "../lib/adk/catalog";
 import { agentTree, generateAdkProject, safeInstruction } from "../lib/adk/generate";
+import { EMPTY_BRIEF } from "../lib/intake/brief";
+import { enrichDiscoveryBriefHeuristics } from "../lib/intake/guided";
 
 const messy = normalizeAdkProject({
   packageName: "Invoice Automation!",
@@ -69,7 +72,28 @@ assert.match(
 assert.ok(files.some((f) => f.path === ".gitlab-ci.yml"), ".gitlab-ci.yml emitted");
 assert.ok(files.some((f) => f.path === "scripts/check_mandatory_files.py"), "check_mandatory_files.py emitted");
 assert.ok(files.some((f) => f.path === "deploy/deploy_gcp.py"), "deploy_gcp.py emitted");
+assert.ok(files.some((f) => f.path === "agents-cli-manifest.yaml"), "agents-cli-manifest.yaml emitted");
+assert.ok(files.some((f) => f.path === "tests/eval/eval_config.yaml"), "eval_config.yaml emitted");
+assert.ok(files.some((f) => f.path === "tests/eval/datasets/eval_dataset.json"), "eval_dataset.json emitted");
 assert.ok(!files.some((f) => f.path.startsWith(".github/")), "no .github/ files emitted");
+
+// Verify live Discovery-to-ADK flow synthesis (SAP + ServiceNow + HITL write gate)
+const enrichedBrief = enrichDiscoveryBriefHeuristics({
+  ...EMPTY_BRIEF,
+  title: "SAP & ServiceNow Invoice Exception Flow",
+  problem: "Invoices in SAP with variances need a ServiceNow ticket created and approved.",
+  goals: ["Validate SAP POs", "Create ServiceNow exception tickets"],
+  integrations: ["SAP", "ServiceNow"],
+});
+const liveSynthesized = synthesizeAdkFromBrief(enrichedBrief);
+AdkProjectSchema.parse(liveSynthesized);
+assert.ok(liveSynthesized.tools.some((t) => t.connectorSystem === "SAP"), "SAP connector tool synthesized");
+assert.ok(liveSynthesized.tools.some((t) => t.connectorSystem === "ServiceNow"), "ServiceNow connector tool synthesized");
+assert.ok(liveSynthesized.envVars.some((e) => e.isSecret && e.name.includes("SAP")), "SAP Secret Manager binding synthesized");
+const synthFiles = generateAdkProject(liveSynthesized);
+const synthAgentPy = synthFiles.find((f) => f.path === `${liveSynthesized.packageName}/agent.py`)!.contents;
+assert.ok(synthAgentPy.includes("# Role:"), "CrewAI-style Persona Role emitted in agent.py");
+assert.ok(synthAgentPy.includes("kind=connector"), "Enterprise connector metadata emitted in agent.py");
 console.log(agentTree(messy));
 
 const out = process.argv[2];

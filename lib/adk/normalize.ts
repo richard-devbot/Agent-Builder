@@ -14,13 +14,21 @@
 
 import {
   ADK_AGENT_TYPES,
+  ADK_AUTH_TYPES,
   ADK_BUILTIN_TOOLS,
+  ADK_TOOL_KINDS,
+  ADK_TRIGGER_TYPES,
   type AdkAgent,
   type AdkAgentType,
+  type AdkAuthType,
   type AdkBuiltinTool,
   type AdkEnvVar,
+  type AdkEvalCase,
   type AdkProject,
   type AdkTool,
+  type AdkToolKind,
+  type AdkTrigger,
+  type AdkTriggerType,
 } from "@/contracts/adk";
 import { DEFAULT_GEMINI_MODEL } from "@/lib/config/public";
 
@@ -31,12 +39,25 @@ export type LooseAdkProject = {
   title?: string;
   description?: string;
   rootAgent?: string;
+  trigger?: {
+    kind?: string;
+    scheduleCron?: string;
+    eventTopic?: string;
+    inputSchemaSummary?: string;
+  };
   agents?: {
     name?: string;
     type?: string;
     description?: string;
     model?: string;
     instruction?: string;
+    role?: string;
+    goal?: string;
+    backstory?: string;
+    expectedOutput?: string;
+    routeCondition?: string;
+    requireConfirmation?: boolean;
+    skills?: string[];
     tools?: string[];
     subAgents?: string[];
     outputKey?: string;
@@ -50,8 +71,28 @@ export type LooseAdkProject = {
     code?: string;
     imports?: string[];
     dependencies?: string[];
+    mcpServer?: string;
+    ragDataStoreId?: string;
+    connectorSystem?: string;
+    authType?: string;
+    requireConfirmation?: boolean;
+    envVars?: string[];
   }[];
-  envVars?: { name?: string; example?: string; description?: string }[];
+  envVars?: {
+    name?: string;
+    example?: string;
+    description?: string;
+    isSecret?: boolean;
+    secretRef?: string;
+    boundTo?: string;
+    authMode?: string;
+  }[];
+  evalCases?: {
+    id?: string;
+    prompt?: string;
+    expectedTools?: string[];
+    expectedOutcome?: string;
+  }[];
 };
 
 const PY_KEYWORDS = new Set(
@@ -140,16 +181,29 @@ export function normalizeAdkProject(input: LooseAdkProject, fallbackTitle = "Age
       code = code.replace(new RegExp(`(def\\s+)${def[1]}(\\s*\\()`), `$1${name}$2`);
     }
     for (const [re, label] of RISKY) if (re.test(code)) warnings.push(`Tool "${name}" uses ${label}: review before running.`);
-    tools.push({
+    const validKind: AdkToolKind = (ADK_TOOL_KINDS as readonly string[]).includes(t.kind ?? "") && t.kind !== "builtin"
+      ? (t.kind as AdkToolKind)
+      : "function";
+    const validAuth: AdkAuthType | undefined = (ADK_AUTH_TYPES as readonly string[]).includes(t.authType ?? "")
+      ? (t.authType as AdkAuthType)
+      : undefined;
+    const toolObj: AdkTool = {
       name,
-      kind: "function",
+      kind: validKind,
       description,
       code: code.slice(0, 8_000),
       imports: [...new Set((t.imports ?? []).map((l) => l.trim()).filter((l) => /^(import|from)\s+[A-Za-z_]/.test(l)))].slice(0, 12),
       dependencies: [...new Set((t.dependencies ?? []).map((d) => d.trim()).filter((d) => /^[A-Za-z0-9][A-Za-z0-9._\-\[\]<>=!~, ]{0,79}$/.test(d)))]
         .filter((d) => !/^google-adk\b/.test(d))
         .slice(0, 12),
-    });
+    };
+    if (t.mcpServer) toolObj.mcpServer = clip(t.mcpServer, 200);
+    if (t.ragDataStoreId) toolObj.ragDataStoreId = clip(t.ragDataStoreId, 120);
+    if (t.connectorSystem) toolObj.connectorSystem = clip(t.connectorSystem, 120);
+    if (validAuth) toolObj.authType = validAuth;
+    if (t.requireConfirmation !== undefined) toolObj.requireConfirmation = Boolean(t.requireConfirmation);
+    if (t.envVars && t.envVars.length > 0) toolObj.envVars = t.envVars.map((v) => clip(v, 64)).filter(Boolean).slice(0, 12);
+    tools.push(toolObj);
   }
 
   // ── agents ───────────────────────────────────────────────────────────────
@@ -166,7 +220,7 @@ export function normalizeAdkProject(input: LooseAdkProject, fallbackTitle = "Age
     const type = (ADK_AGENT_TYPES as readonly string[]).includes((a.type ?? "").replace(/_agent$/, ""))
       ? ((a.type ?? "").replace(/_agent$/, "") as AdkAgentType)
       : "llm";
-    return {
+    const agentObj: AdkAgent = {
       name,
       type,
       description: clip(a.description, 400) || `${name.replace(/_/g, " ")} agent.`,
@@ -177,6 +231,14 @@ export function normalizeAdkProject(input: LooseAdkProject, fallbackTitle = "Age
       outputKey: a.outputKey ? pyName(a.outputKey, "") || undefined : undefined,
       maxIterations: a.maxIterations,
     };
+    if (a.role) agentObj.role = clip(a.role, 200);
+    if (a.goal) agentObj.goal = clip(a.goal, 400);
+    if (a.backstory) agentObj.backstory = clip(a.backstory, 1_000);
+    if (a.expectedOutput) agentObj.expectedOutput = clip(a.expectedOutput, 400);
+    if (a.routeCondition) agentObj.routeCondition = clip(a.routeCondition, 160);
+    if (a.requireConfirmation !== undefined) agentObj.requireConfirmation = Boolean(a.requireConfirmation);
+    if (a.skills && a.skills.length > 0) agentObj.skills = [...new Set(a.skills.map((s) => clip(s, 80)).filter(Boolean))].slice(0, 12);
+    return agentObj;
   });
   const byName = new Map(agents.map((a) => [a.name, a]));
   const toolNames = new Set(tools.map((t) => t.name));
@@ -264,19 +326,49 @@ export function normalizeAdkProject(input: LooseAdkProject, fallbackTitle = "Age
     const name = (e.name ?? "").toUpperCase().replace(/[^A-Z0-9_]/g, "_").replace(/^[^A-Z]+/, "");
     if (!name || envVars.some((x) => x.name === name) || /^GOOGLE_(API_KEY|GENAI_USE_VERTEXAI|CLOUD_PROJECT|CLOUD_LOCATION)$/.test(name)) continue;
     // Only placeholders: real values never belong in a generated example file.
-    envVars.push({ name: name.slice(0, 63), example: clip(e.example, 200) || "your-value", description: clip(e.description, 200) });
+    const ev: AdkEnvVar = { name: name.slice(0, 63), example: clip(e.example, 200) || "your-value", description: clip(e.description, 200) };
+    if (e.isSecret !== undefined) ev.isSecret = Boolean(e.isSecret);
+    if (e.secretRef) ev.secretRef = clip(e.secretRef, 160);
+    if (e.boundTo) ev.boundTo = clip(e.boundTo, 120);
+    if (e.authMode && (ADK_AUTH_TYPES as readonly string[]).includes(e.authMode)) {
+      ev.authMode = e.authMode as AdkAuthType;
+    }
+    envVars.push(ev);
   }
 
-  return {
+  let trigger: AdkTrigger | undefined;
+  if (input.trigger && (ADK_TRIGGER_TYPES as readonly string[]).includes(input.trigger.kind ?? "")) {
+    trigger = {
+      kind: input.trigger.kind as AdkTriggerType,
+      ...(input.trigger.scheduleCron ? { scheduleCron: clip(input.trigger.scheduleCron, 80) } : {}),
+      ...(input.trigger.eventTopic ? { eventTopic: clip(input.trigger.eventTopic, 160) } : {}),
+      ...(input.trigger.inputSchemaSummary ? { inputSchemaSummary: clip(input.trigger.inputSchemaSummary, 300) } : {}),
+    };
+  }
+
+  let evalCases: AdkEvalCase[] | undefined;
+  if (input.evalCases && input.evalCases.length > 0) {
+    evalCases = input.evalCases.slice(0, 16).map((c, idx) => ({
+      id: clip(c.id || `eval_${idx + 1}`, 64),
+      prompt: clip(c.prompt || "Test prompt", 2_000),
+      expectedTools: (c.expectedTools ?? []).map((t) => clip(t, 64)).filter(Boolean).slice(0, 12),
+      expectedOutcome: clip(c.expectedOutcome || "Completes the request accurately and safely.", 1_000),
+    }));
+  }
+
+  const outProject: AdkProject = {
     packageName: pyName(input.packageName || input.title, "agent_system"),
     title: clip(input.title, 80) || fallbackTitle,
     description: clip(input.description, 600),
     rootAgent: root,
     agents: kept,
     tools: keptTools,
-    envVars: envVars.slice(0, 12),
+    envVars: envVars.slice(0, 24),
     warnings: [...new Set(warnings)].slice(0, 30),
   };
+  if (trigger) outProject.trigger = trigger;
+  if (evalCases) outProject.evalCases = evalCases;
+  return outProject;
 }
 
 function stubFunction(name: string, description: string): string {
